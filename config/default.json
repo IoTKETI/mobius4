@@ -1,0 +1,109 @@
+{
+  "cse": {
+    "cse_type": 1,
+    "sp_id": "//mydomain.io",
+    "cse_id": "/Mobius4",
+    "csebase_rn": "Mobius",
+    "poa": [
+      "192.168.0.67"
+    ],
+    "registrar": {  
+      "cse_type": 1,
+      "cse_id": "/Mobius2",
+      "csebase_rn": "Mobius",
+      "ip": "localhost",
+      "port": 7579,
+      "versions": [
+        "4",
+        "3",
+        "2a",
+        "2",
+        "1"
+      ]
+    },
+    "versions": [
+      "4",
+      "3",
+      "2a",
+      "2",
+      "1"
+    ],
+    "supported_resource_types": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      9,
+      23
+    ],
+    "serializations": [
+      "json"
+    ],
+    "admin": "SM",
+    "aeid_length": 5,
+    "timestamp_format": "YYYYMMDDTHHmmss",
+    "allowed_ri_characters": "0123456789abcdefghijklmnopqrstuvwxyz",
+    "expired_resource_cleanup_interval_days": 1,
+    "discovery_limit": 200,
+    "allow_discovery_for_any": false,
+    "keep_alive_timeout": 60
+  },
+  "cb": {
+    "default_acp": {
+      "rn": "cb_default_acp",
+      "create": true,
+      "retrieve": true,
+      "update": false,
+      "discovery": true
+    }
+  },
+  "request": {
+    "max_body_size": "1mb"
+  },
+  "http": {
+    "port": 7599
+  },
+  "https": {
+    "port": 7580
+  },
+  "mqtt": {
+    "ip": "localhost",
+    "port": 1883
+  },
+  "db": {
+    "user": "sm",
+    "host": "localhost",
+    "name": "mobius4",
+    "pw": "keti1234",
+    "port": 5432
+  },
+  "length": {
+    "timestamp": 20,
+    "entity_id": 255,
+    "ri": 10,
+    "pi": 255,
+    "rn_random": 10,
+    "rn": 20,
+    "structured_res_id": 255,
+    "str_token": 255,
+    "url": 255,
+    "data": 65535
+  },
+  "default": {
+    "common": {
+      "et_month": 12
+    },
+    "container": {
+      "mbs": 10000000,
+      "mni": 10000,
+      "mia": 2592000
+    },
+    "datasetPolicy": {
+      "tcd": 60,
+      "nvp": 0,
+      "nrhd": 1000,
+      "nrld": 1
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+    "csebase": {
+        "cse_id": "wdc",
+        "cse_name": "wdc_dev"
+    },
+    "specialUsers": {
+        "admin": "Superman",
+        "observer": "Swing"
+    }
+}
