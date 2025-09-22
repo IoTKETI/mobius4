@@ -50,7 +50,7 @@ const dsp = require("./resources/dsp"); // <datasetPolicy>
 const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
 
-const virtual_res_names = ["la", "ol", "fopt"];
+const virtual_res_names = ["fopt", "la", "ol"]; // fopt shall come first in the list
 
 
 // this is obsolete, replaced by the sequelize model in each resource create function

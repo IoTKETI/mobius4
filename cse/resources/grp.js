@@ -233,8 +233,8 @@ async function aggregate_fanout_resp_prims(req_prim) {
             pc: req_prim.pc
         };
         // console.log('fanout req_prim: ', JSON.stringify(fanout_req_prim, null, 2));
-        const { prim_handling } = require('../hostingCSE');
-        const fanout_resp_prim = await reqPrim.prim_handling(fanout_req_prim);
+        const { prim_handling } = require('../reqPrim');
+        const fanout_resp_prim = await prim_handling(fanout_req_prim);
 
         fanout_resp_prim.fr = mid;
 
