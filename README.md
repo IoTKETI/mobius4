@@ -1,8 +1,8 @@
 # About Mobius4
 
-Mobius4 is the next version of [Mobius](https://github.com/iotketi/mobius) which basically implements the global IoT middleware standard, [oneM2M](https://www.oneM2M.org). This new version provides the new code base with modern async-await Javascript syntax for better readibility and maintenance. Also, the database has been changed from MySQL to PostgreSQL with PostGIS.
+Mobius4 is the next version of [Mobius](https://github.com/iotketi/mobius) which basically implements the global IoT middleware standard, [oneM2M](https://www.oneM2M.org). This new version provides the new code base with modern Javascript async-await syntax for better readibility and maintenance. Also, the database has been changed from MySQL to PostgreSQL with PostGIS.
 
-In oneM2M Release 5, [TR-0071](https://www.onem2m.org/technical/published-specifications/release-5) is defining candidate interfaces for AI supporting capabilities for AIoT applications. Mobius4 implements those features in advance before the public release so developers can try them.
+In oneM2M Release 5, [TR-0071](https://www.onem2m.org/technical/published-specifications/release-5) is defining candidate solutions for AIoT applications. Mobius4 implements those features in advance before the public release so developers can try them.
 
 ![Mobius4](./docs/images/mobius4.png)
 
@@ -17,20 +17,21 @@ oneM2M protocol bindings:
 oneM2M primitive serialization:
 - JSON
 
-oneM2M resource types (Until Release 4):
+oneM2M resource types (until Release 4):
 - CSEBase, AE, remoteCSE
 - accessControlPolicy
 - container, contentInstance, latest, oldest
 - subscription
 - group, fanOutPoint
 
-oneM2M resource types (Release 5):
+oneM2M resource types (oneM2M TR-0071, next release):
 - modelRepo, mlModel, modelDeployList, modelDeployment 
 - mlDatasetPolicy, dataset, datasetFragment 
 
 Other features:
+- discovery with _Filter Criteria_ parameter
 - geo-query with _location_ common attribute (Rel-4 feature)
-- _Result Content_ parameter
+- children resources retrieval with _Result Content_ parameter
 
 ## How-to documents
 
@@ -54,19 +55,19 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 
 2. Get Mobius4 source codes from this git repository
 
-```curl
+```bash
     git clone https://github.com/iotketi/mobius4
 ```
 
 3. Install node packages in the 'mobius4' folder
-```curl
+```bash
     cd mobius4
     npm install
 ```
 4. Set Mobius4 configuration file `config/default.json`
 
 5. Run Mobius4
-```curl
+```bash
     node mobius4.js
 ```
 
@@ -82,7 +83,7 @@ You can change the following settings in the `config/default.json` configuration
 | cse | csebase_rn | Resource name of the CSEBase resource |
 | cse | poa | Point of access of this CSE|
 | cse | registrar.cse_type | CSE type of the Registrar (registration target) when this CSE registers to another CSE|
-| cse | registrar.cse_)_id | CSE ID of the Registrar|
+| cse | registrar.cse_id | CSE ID of the Registrar|
 | cse | registrar.csebase_rn | CSEBase resource name of the Registrar |
 | cse | registrar.ip | IP address of the Registrar |
 | cse | registrar.port | Port number of the Registrar|
