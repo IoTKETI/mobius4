@@ -517,7 +517,7 @@ async function create_cb(client) {
 async function create_default_acp(client, cb_ri) {
     const ri = generate_ri();
     const now = moment().utc().format(timestamp_format);
-    const et = moment().utc().add(config.resource.et_dur_year, 'year').format(timestamp_format);
+    const et = moment().utc().add(config.default.common.et_month, 'month').format(timestamp_format);
 
     const acp_res = {
         ri,
