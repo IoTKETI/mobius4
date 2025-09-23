@@ -744,7 +744,7 @@ async function discovery_core(req_prim) {
 		//   ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 		//   continue;
 		// }
-		if (101 === ty) {
+		if (101 === ty && !has_geo_query) {
 			temp_list = await MRP.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -754,7 +754,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (102 === ty) {
+		if (102 === ty && !has_geo_query) {
 			temp_list = await MMD.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -764,7 +764,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (103 === ty) {
+		if (103 === ty && !has_geo_query) {
 			temp_list = await MDP.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -774,7 +774,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (104 === ty) {
+		if (104 === ty && !has_geo_query) {
 			temp_list = await DPM.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -784,7 +784,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (105 === ty) {
+		if (105 === ty && !has_geo_query) {
 			temp_list = await DSP.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -794,7 +794,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (106 === ty) {
+		if (106 === ty && !has_geo_query) {
 			temp_list = await DTS.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
@@ -804,7 +804,7 @@ async function discovery_core(req_prim) {
 			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
 			continue;
 		}
-		if (107 === ty) {
+		if (107 === ty && !has_geo_query) {
 			temp_list = await DSF.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
