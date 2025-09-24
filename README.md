@@ -33,10 +33,14 @@ Other features:
 - geo-query with _location_ common attribute (Rel-4 feature)
 - children resources retrieval with _Result Content_ parameter
 
+## Postman scripts
+
+Try oneM2M APIs over HTTP binding with Postman client. You can download [Postman script collection](./docs/Mobius4.postman_collection.json) and import it on your Postman. There are two variables set in the collection `mp_url` for Mobius4 platform URL and `cb` for CSEBase resource name, so please add in your Postman variable settings. 
+
 ## How-to documents
 
 There are some modifications from the previous version so please check 
-[Mobius4 how-to](docs/how-to) for the Mobius developers. If you're trying the new oneM2M features on AI, check [Rel-5 features how-to](docs/rel-5-how-to).
+[Mobius4 how-to](docs/how-to.md) for the Mobius developers. If you're trying the new oneM2M features on AI, check [Rel-5 features how-to](docs/rel-5-how-to.md).
 
 
 # Running Mobius4

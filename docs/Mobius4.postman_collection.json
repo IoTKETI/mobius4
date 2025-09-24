@@ -1,0 +1,1103 @@
+{
+	"info": {
+		"_postman_id": "ec982448-46e2-48f9-a921-c14b03332323",
+		"name": "Mobius4",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "1697959"
+	},
+	"item": [
+		{
+			"name": "AI supporting APIs",
+			"item": [
+				{
+					"name": "<modelRepo> mrp CREATE",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json; ty=101",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mrp\": {\n        \"rn\": \"mrp1\",\n        \"mnmo\": 100,\n        \"mbmo\": 10000\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<modelRepo> mrp UPDATE",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mrp\": {\n        \"lbl\": null,\n        \"mnmo\": 999\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/mrp1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"mrp1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<mlModel> mmd CREATE",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json; ty=102",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mmd\": {\n        \"nm\": \"myModel\",\n        \"vr\": \"0.5\",\n        \"plf\": \"TensorFlow\",\n        \"mlt\": \"Classification\",\n        \"dc\": \"counting model\",\n        \"ips\": \"sampleInput\",\n        \"lbl\": [\"sensor\"],\n        \"mmu\": \"url\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/mrp1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"mrp1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<mlModel> mmd UPDATE",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mmd\": {\n        \"lbl\": [\n            \"parkingSensor\"\n        ]\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/mrp1/mmd-teA3ULShYB",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"mrp1",
+								"mmd-teA3ULShYB"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<modelDeploymentList> mdp CREATE",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json; ty=108",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mdp\": {\n        \"rn\": \"mlModelList\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<modelDeploymentList> mdp UPDATE",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:mdp\": {\n        \"lbl\": [\"deployments\", \"test\"]\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1/mdp1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1",
+								"mdp1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<deployment> dpm CREATE",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json; ty=104",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:dpm\": {\n        \"moid\": \"Mobius/mrp_1/mmd-sCKvzb5BDV\",\n        \"inr\": \"Mobius/myAE1/sensor1/inferenceInput\",\n        \"our\": \"Mobious/myAE1/report/counting\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1/mdp1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1",
+								"mdp1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<deployment> dpm UPDATE",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"name": "Content-Type",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:dpm\": {\n        \"mcmd\": \"run\"\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1/mdp1/dpm-LlODQNZhhx",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1",
+								"mdp1",
+								"dpm-LlODQNZhhx"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<datasetPolicy> dsp CREATE",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json; ty=105",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:dsp\": {\n        \"sri\": [\"Mobius/cnt1\", \"Mobius/cnt2\", \"Mobius/cnt3\"],\n        \"dst\": \"20250829T111450\",\n        \"det\": \"20250829T121450\",\n        \"tcst\": \"20250829T111455\",\n        \"tcd\": 10,\n        \"nvp\": 1,\n        \"dsfm\": 0,\n        \"nrhd\": 100,\n        \"nrld\": 2\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "<datasetPolicy> dsp UPDATE",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "X-M2M-RI",
+								"value": "12345"
+							},
+							{
+								"key": "X-M2M-Origin",
+								"value": "SM"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"m2m:dsp\": {\n        \"lbl\": [\"updated\"]\n    }\n}"
+						},
+						"url": {
+							"raw": "{{mp_url}}/{{cb}}/ae1/dsp-2grjO9dkF2",
+							"host": [
+								"{{mp_url}}"
+							],
+							"path": [
+								"{{cb}}",
+								"ae1",
+								"dsp-2grjO9dkF2"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "ACP CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=1",
+						"type": "text"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1",
+						"type": "text"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "1234",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:acp\": {\n        \"rn\": \"acp1\",\n        \"pv\": {\n            \"acr\": [\n                {\"acor\": [\"CAE1\"], \"acop\": 2},\n                {\"acor\": [\"CAE2\"], \"acop\": 63}\n            ]\n        },\n        \"pvs\": {\n            \"acr\": [\n                {\n                    \"acor\": [\n                        \"CAE3\"\n                    ],\n                    \"acop\": 63\n                }\n            ]\n        }\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "ACP UPDATE",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:acp\": {\n        \"pv\": {\n            \"acr\": [\n                {\n                    \"acor\": [\n                        \"SM\"\n                    ],\n                    \"acop\": 1\n                }\n            ]\n        },\n        \"pvs\": {\n            \"acr\": [\n                {\n                    \"acor\": [\n                        \"SM\"\n                    ],\n                    \"acop\": 63\n                }\n            ]\n        }\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/acp1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"acp1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "AE CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=2",
+						"type": "text"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1",
+						"type": "text"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "1234",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:ae\": {\n        \"api\": \"NmyApp\",\n        \"rr\": true,\n        \"rn\": \"ae1\"\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "AE UPDATE",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:ae\": {\n        \"loc\": {\n            \"typ\": 1,\n            \"crd\": \"[126.978, 37.5665]\"\n        }\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/ae1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"ae1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "csr CREATE",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=16",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:csr\": {\n        \"rn\": \"csr1\",\n        \"csi\": \"/Mobius2\",\n        \"poa\": [\n            \"localhost:7579\"\n        ],\n        \"rr\": true,\n        \"cb\": \"/Mobius2/Mobius\",\n        \"srv\": [\n            \"4\"\n        ],\n        \"cst\": 1\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "csr UPDATE",
+			"request": {
+				"auth": {
+					"type": "noauth"
+				},
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:csr\": {\n        \"lbl\": [\"test\"]\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/csr1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"csr1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "cnt CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=3",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:cnt\": {\n        \"rn\":\"cnt1\"\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "cnt w/ coordinates CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=3",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:cnt\": {\n        \"rn\": \"cnt_loc\",\n        \"lbl\": [\"container\"],\n        \"loc\": {\n            \"typ\": 1,\n            \"crd\": \"[3.3, 3.3]\"\n        }\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "cnt UPDATE",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n\t\"m2m:cnt\": {\n\t\t\"lbl\": [\"oneM2M\"]\n\t}\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/cnt1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"cnt1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "cin CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "CAE1"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=4",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:cin\": {\n        \"con\": {\n            \"voltage\": 5.03,\n            \"batteryLevel\": 34\n        }\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/cnt1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"cnt1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "grp CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=9",
+						"type": "text"
+					},
+					{
+						"key": "Accept",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:grp\": {\n    \t\"rn\": \"grp2\",\n        \"mnm\" : 10,\n        \"mid\" : [\n            \"Mobius/cnt1\",\n            \"Mobius/cnt2\"\n        ]\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "grp UPDATE",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:grp\": {\n        \"mnm\" : 99,\n        \"mid\" : [\n\t\t        \"Mobius/cnt1/la\",\n\t\t        \"Mobius/cnt2/la\"\n        ]\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/grp1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"grp1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "sub CREATE",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json; ty=23"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:sub\": {\n    \t\"rn\": \"sub1\",\n        \"enc\": {\n        \t\"net\" : [1, 3],\n            \"chty\": [4]\n        },\n        \"nu\" : [\"http://localhost:1880/noti\"],\n        \"nct\": 1\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/cnt1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"cnt1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "sub UPDATE",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"name": "Content-Type",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"m2m:sub\": {\n        \"nu\": [\n            \"mqtt://localhost/myservice/noti?ct=json\"\n        ]\n    }\n}"
+				},
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/cnt1/sub1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"cnt1",
+						"sub1"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "RETRIEVE",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					}
+				],
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}?fu=1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					],
+					"query": [
+						{
+							"key": "fu",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "geo-query",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Accept",
+						"value": "application/json"
+					},
+					{
+						"key": "X-M2M-RI",
+						"value": "12345"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM"
+					}
+				],
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}?fu=1&gmty=3&geom=[[0.0,0.0],[0.0,100.0],[100.0,100.0],[100.0,0.0],[0.0,0.0]]&gsf=1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}"
+					],
+					"query": [
+						{
+							"key": "fu",
+							"value": "1"
+						},
+						{
+							"key": "gmty",
+							"value": "3"
+						},
+						{
+							"key": "geom",
+							"value": "[[0.0,0.0],[0.0,100.0],[100.0,100.0],[100.0,0.0],[0.0,0.0]]"
+						},
+						{
+							"key": "gsf",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "DELETE",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "X-M2M-RI",
+						"value": "1234",
+						"type": "text"
+					},
+					{
+						"key": "X-M2M-Origin",
+						"value": "SM",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{mp_url}}/{{cb}}/cnt1",
+					"host": [
+						"{{mp_url}}"
+					],
+					"path": [
+						"{{cb}}",
+						"cnt1"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
