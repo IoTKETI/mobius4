@@ -4,6 +4,7 @@ const axios = require('axios');
 const enums = require("../config/enums");
 const { req_prim_schema } = require("./validation/prim_schema");
 const Lookup = require('../models/lookup-model');
+const AE = require('../models/ae-model');
 const CSR = require('../models/csr-model');
 
 const hostingCSE = require("./hostingCSE");
@@ -40,15 +41,32 @@ async function prim_handling(req_prim) {
   }
 
   // check if the request is for me or the other CSE
-  const { shortest_to, is_for_me } = get_to_info(req_prim);
-  // request forwarding
-  if (!is_for_me) {
-    // skip the below hosting CSE procedures and return the response from the other CSE
+  const { shortest_to, req_for_me } = get_to_info(req_prim);
+  
+  // request forwarding to the other CSE or AE
 
-    // return response primitive which is received from a Registrar CSE
-    return await request_forwarding(req_prim, shortest_to);
+  if (!req_for_me) {    
+    // skip the below hosting CSE procedures and return the response from the other CSE
+    
+    // return response primitive received from the other CSE
+    return await cse_forwarding(req_prim, shortest_to);
   }
   else {
+    // check if the 'NOTIFY'target is one of my <AE> resource
+    const { get_unstructuredID } = require('./hostingCSE');
+    const ae_ri = await get_unstructuredID(shortest_to);
+    const ae_res = await AE.findOne({ where: { ri: ae_ri } });
+
+    if (req_prim.op === 5 && ae_res) {
+      // check if the target AE is reachable (rr = true)
+      if (ae_res.rr === true) {
+        // console.log('ae_forwarding to ', ae_res.sid);
+        // return response primitive received from the AE
+        return await ae_forwarding(req_prim, ae_res);
+      }
+    }
+
+    // continue to process the request as below since I'm the hosting CSE
     // to handle the request with 'to' as 'sid' or 'ri' in the Database, there shall be no SP-ID or CSE-ID
     req_prim.to = shortest_to;
   }
@@ -116,7 +134,7 @@ async function prim_handling(req_prim) {
     if (access_grant === false) {
       resp_prim.rsc = enums.rsc_str["ORIGINATOR_HAS_NO_PRIVILEGE"];
       resp_prim.pc = { "m2m:dbg": "access denied" };
-      
+
       return resp_prim;
     }
   }
@@ -185,7 +203,7 @@ async function prim_handling(req_prim) {
           await mrp.delete_ol(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 103) {
           await mdp.delete_ol(req_prim, resp_prim);
-        } 
+        }
         break;
       default:
         resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
@@ -314,7 +332,7 @@ function set_default_req_params(req_prim) {
 // if the request targets me, get the CSE-relative To param value
 function get_to_info(req_prim) {
   const to = req_prim.to;
-  let shortest_to = null, is_for_me = false;
+  let shortest_to = null, req_for_me = false;
 
   // absolute ID format
   if (to.startsWith('//')) {
@@ -322,7 +340,7 @@ function get_to_info(req_prim) {
     if (to.startsWith(config.cse.sp_id + config.cse.cse_id)) {
       // remove the SP-ID and CSE-ID from the 'to' param, so it becomes CSE-relative ID format
       shortest_to = to.split(config.cse.sp_id + config.cse.cse_id + '/')[1];
-      is_for_me = true;
+      req_for_me = true;
     }
     // request for the other CSE in the same SP domain
     else if (to.startsWith(config.cse.sp_id)) {
@@ -339,7 +357,7 @@ function get_to_info(req_prim) {
     if (to.startsWith(config.cse.cse_id)) {
       // remove the CSE-ID from the 'to' param, so it becomes CSE-relative ID format
       shortest_to = to.split(config.cse.cse_id + '/')[1];
-      is_for_me = true;
+      req_for_me = true;
     }
     else {
       shortest_to = to;
@@ -349,7 +367,7 @@ function get_to_info(req_prim) {
   else {
     // consider all CSE-relative ID format 'to' param as request for me
     shortest_to = to;
-    is_for_me = true;
+    req_for_me = true;
   }
 
   // by the spec, '-' is the wildcard for the 'rn' of the <CSEBase> resource
@@ -357,7 +375,7 @@ function get_to_info(req_prim) {
     shortest_to = shortest_to.replace('-', config.cse.csebase_rn);
   }
 
-  return { shortest_to, is_for_me };
+  return { shortest_to, req_for_me };
 }
 
 // check if the 'to' indicates virtual resource or not
@@ -425,8 +443,12 @@ async function set_virtual_res_info(req_prim) {
   return;
 }
 
-async function request_forwarding(req_prim, shortest_to) {
+async function cse_forwarding(req_prim, shortest_to) {
   const resp_prim = {};
+
+  // step0: check if the target CSE is not reachable (rr = false) and has polling channel resource under its <remoteCSE> resource
+  // this is the long polling handling, when the target is CSE
+
 
   // step1: change the originator ID into SP-relative or Absolute format, if needed
   // check 'to' param scope, if it is SP-relative or Absolute format
@@ -533,6 +555,38 @@ async function request_forwarding(req_prim, shortest_to) {
   return resp_prim;
 }
 
+async function ae_forwarding(req_prim, ae_res) {
+  const urls = ae_res.poa;
+
+  const { http_noti, mqtt_noti } = require('./noti');
+
+  for (const url of urls) {
+    let resp = null;
+    if (url.indexOf("http") == 0) resp = await http_noti(url, req_prim.pc, req_prim);
+    else if (url.indexOf("mqtt") == 0) resp = await mqtt_noti(url, req_prim.pc, req_prim);
+
+    // if the notification is sent successfully, stop the loop
+    if (resp) {
+      const { httpToPrim } = require('../bindings/http');
+      const http_resp_summary = {
+        rsc: resp.headers['x-m2m-rsc'],
+        url: (resp.config && resp.config.baseURL)
+        ? new URL(resp.config.url, resp.config.baseURL).toString()
+        : resp.config?.url,
+        method: resp.config?.method,
+        headers: resp.headers,
+        data: resp.data,
+      };
+      const resp_prim = httpToPrim(http_resp_summary);
+      console.log('\nin ae_forwarding, http_resp: ', http_resp_summary);
+      console.log('\nin ae_forwarding, resp_prim: ', resp_prim);
+
+      return resp_prim;
+    }
+  }
+
+  return null;
+}
 
 function get_http_method(op) {
   switch (op) {

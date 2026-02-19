@@ -25,6 +25,7 @@ const ty_str = {
   4: "cin",
   5: "cb",
   9: "grp",
+  15: "pch",
   16: "csr",
   23: "sub",
   24: "smd",

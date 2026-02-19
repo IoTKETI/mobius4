@@ -227,6 +227,24 @@ async function create_tables(client) {
             );
         `);
 
+        // create pch table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS pch (
+              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ty INTEGER NOT NULL DEFAULT 15,
+              sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
+              int_cr VARCHAR(${len.str_token}),
+              rn VARCHAR(${len.str_token}) NOT NULL,
+              pi VARCHAR(${len.ri}),
+              et VARCHAR(${len.timestamp}),
+              ct VARCHAR(${len.timestamp}),
+              lt VARCHAR(${len.timestamp}),
+              lbl VARCHAR(${len.str_token})[],
+              rqag BOOLEAN DEFAULT FALSE,
+              reqs JSONB DEFAULT '[]'::jsonb
+            );
+        `);
+
         // create mrp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS mrp (

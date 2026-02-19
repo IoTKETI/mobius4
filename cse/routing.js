@@ -1,7 +1,7 @@
 const config = require('config');
 
 function check_to_is_mine(to) {
-    var str, cse_id_token, sp_id_token;
+    var cse_id_token, sp_id_token;
     console.log('in check_to_is_mine, to: ' + to);
 
     // in CSE-relative format, then I think it's mine

@@ -279,6 +279,24 @@ const sub_update_schema = Joi.object().keys({
     su: Joi.string().optional(),
 });
 
+const pch_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    lbl: create_common_attr.lbl,
+
+    rqag: Joi.boolean()
+});
+
+const pch_update_schema = Joi.object().keys({
+    ...update_universal_attr,
+
+    et: update_common_attr.et,
+    lbl: update_common_attr.lbl,
+
+    rqag: Joi.boolean()
+});
+
 const dsp_create_schema = Joi.object().keys({
     ...create_universal_attr,
 
@@ -328,6 +346,7 @@ module.exports = {
     cnt_create_schema, cnt_update_schema,
     cin_create_schema,
     grp_create_schema, grp_update_schema,
+    pch_create_schema, pch_update_schema,
     sub_create_schema, sub_update_schema,
     dsp_create_schema, dsp_update_schema
 }

@@ -16,6 +16,7 @@ const CNT = require('../models/cnt-model');
 const CSR = require('../models/csr-model');
 // const FLX = require('../models/flx-model');
 const GRP = require('../models/grp-model');
+const PCH = require('../models/pch-model');
 const SUB = require('../models/sub-model');
 
 // non-standard resources yet
@@ -36,6 +37,7 @@ const csr = require("./resources/csr");
 const cnt = require("./resources/cnt");
 const cin = require("./resources/cin");
 const grp = require("./resources/grp");
+const pch = require("./resources/pch");
 const sub = require("./resources/sub");
 // const smd = require("./resources/smd");
 // const flx = require("./resources/flx");
@@ -126,6 +128,9 @@ async function create_a_res(req_prim, resp_prim) {
 			break;
 		case 9:
 			await grp.create_a_grp(req_prim, resp_prim);
+			break;
+		case 15:
+			await pch.create_a_pch(req_prim, resp_prim);
 			break;
 		case 16:
 			await csr.create_a_csr(req_prim, resp_prim);
@@ -220,6 +225,9 @@ async function retrieve_a_res(req_prim, resp_prim) {
 			break;
 		case 9:
 			await grp.retrieve_a_grp(req_prim, resp_prim);
+			break;
+		case 15:
+			await pch.retrieve_a_pch(req_prim, resp_prim);
 			break;
 		case 16:
 			await csr.retrieve_a_csr(req_prim, resp_prim);
@@ -466,6 +474,9 @@ async function update_a_res(req_prim, resp_prim) {
 		case 9:
 			await grp.update_a_grp(req_prim, resp_prim);
 			break;
+		case 15:
+			await pch.update_a_pch(req_prim, resp_prim);
+			break;
 		case 16:
 			await csr.update_a_csr(req_prim, resp_prim);
 			break;
@@ -597,6 +608,9 @@ async function delete_resources(res_list) {
 				case 9:
 					await GRP.destroy({ where: { ri: res.ri } });
 					break;
+				case 15:
+					await PCH.destroy({ where: { ri: res.ri } });
+					break;
 				case 16:
 					await CSR.destroy({ where: { ri: res.ri } });
 					break;
@@ -696,6 +710,16 @@ async function discovery_core(req_prim) {
 		}
 		if (9 === ty && !has_geo_query) {
 			temp_list = await GRP.findAll({
+				where: where,
+				attributes: ['sid', 'ri', 'ty'],
+				limit: lim,
+			});
+			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
+			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
+			continue;
+		}
+		if (15 === ty) {
+			temp_list = await PCH.findAll({
 				where: where,
 				attributes: ['sid', 'ri', 'ty'],
 				limit: lim,
@@ -1154,10 +1178,46 @@ async function access_decision(req_prim, resp_prim) {
 	let access_grant = false;
 	const temp_resp = {};
 
-	// for AE and CSE registration, it is always granted since Mobius does not support Service Subscription Profile
+	//
+	// resource type specific access decision
+	//
+
 	if (req_prim.op === 1) {
+		// for AE and CSE registration, it is always granted since Mobius does not support Service Subscription Profile
 		if (req_prim.ty === 2 || req_prim.ty === 16) {
 			return true;
+		}
+		// for pollingChannel(pch) creation, check if the Originator (fr) is equal to the 'aei' or 'csi' of the target resource (to)
+		else if (req_prim.ty === 15) {
+			if (req_prim.to_ty === 2) {
+				const ae_res = await AE.findOne({ where: { ri: req_prim.ri } });
+				if (ae_res && ae_res.aei === req_prim.fr) {
+					return true;
+				} else {
+					return false;
+				}
+			}
+			else if (req_prim.to_ty === 16) {
+				const csr_res = await CSR.findOne({ where: { ri: req_prim.ri } });
+				if (csr_res && csr_res.csi === req_prim.fr) {
+					return true;
+				} else {
+					return false;
+				}
+			}
+		}
+	}
+
+	// for <pch> resource retrieval, update, and deletion, check if the Originator (fr) is equal to the 'aei' or 'csi' of the parent resource
+	if (req_prim.op === 2 || req_prim.op === 3 || req_prim.op === 4) {
+		if (req_prim.to_ty === 15) {
+			const pch_res = await PCH.findOne({ where: { ri: req_prim.ri } });
+			// 'aei' or 'csi' of the parent resource is included as 'int_cr' in the <pch> resource during the creation
+			if (pch_res && pch_res.int_cr === req_prim.fr) {
+				return true;
+			} else {
+				return false;
+			}
 		}
 	}
 

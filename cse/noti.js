@@ -82,57 +82,73 @@ async function send_a_noti(sub_res, event_obj, notificationEventType) {
 
             // when res_id is null, ignore it and skip it
             if (res_id) {
-                const urls = await get_urls_from_poa(res_id);
-                for (const url of urls) {
-                    let result = null;
-                    if (url.indexOf("http") == 0) result = await http_noti(url, sgn);
-                    else if (url.indexOf("mqtt") == 0) result = await mqtt_noti(url, sgn);
+                await ae_noti_forwarding(res_id, sgn);
+                // const urls = await get_urls_from_poa(res_id);
+                // for (const url of urls) {
+                //     let result = null;
+                //     if (url.indexOf("http") == 0) result = await http_noti(url, sgn);
+                //     else if (url.indexOf("mqtt") == 0) result = await mqtt_noti(url, sgn);
 
-                    // if the notification is sent successfully, stop the loop
-                    if (result === true) break;
-                }
+                //     // if the notification is sent successfully, stop the loop
+                //     if (result === true) break;
+                // }
             }
         }
     }
 }
-async function http_noti(noti_target, sgn) {
+
+// primitive to forward to an AE is only notification (sgn: single notification)
+// a notification targeting an <AE> resource is forwarded by the Hosting CSE, to the PoA of the <AE> resource
+async function ae_noti_forwarding(res_id, sgn) {
+    // to-do
+    const urls = await get_urls_from_poa(res_id);
+    
+    for (const url of urls) {
+        let result = null;
+        if (url.indexOf("http") == 0) result = await http_noti(url, sgn);
+        else if (url.indexOf("mqtt") == 0) result = await mqtt_noti(url, sgn);
+
+        // if the notification is sent successfully, stop the loop
+        if (result === true) break;
+    }
+}
+
+async function http_noti(noti_target, sgn, params = {}) {
     const { generate_ri } = require('./utils');
 
-    // axios handles HTTP and HTTPs automatically
-    axios
-        .request({
+    try {
+        // axios handles HTTP and HTTPs automatically
+        const resp = await axios.request({
             url: noti_target,
             method: "post",
             headers: {
-                "X-M2M-Origin": config.cse.cse_id,
-                "X-M2M-RI": 'http-noti-' + generate_ri(),
+                "X-M2M-Origin": (params.fr) ? params.fr : config.cse.cse_id,
+                "X-M2M-RI": (params.rqi) ? params.rqi : 'http-noti-' + generate_ri(),
                 "Content-Type": "application/json",
             },
             data: JSON.stringify(sgn),
-        })
-        .then((resp) => {
-            console.log("\nreceived message from notification target:");
-            console.log(JSON.stringify(resp.data, null, 2));
-        })
-        .catch((err) => {
-            if (err.response) {
-                // server responded but 4xx/5xx error
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (status: ${err.response.status})`);
-            } else if (err.request) {
-                // request is sent but no response
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (no response)`);
-            } else {
-                // other error
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (error: ${err.message})`);
-            }
-
-            return false;
         });
 
-    return true;
+        console.log("\nreceived message from notification target:");
+        console.log(JSON.stringify(resp.data, null, 2));
+        return resp;
+    } catch (err) {
+        if (err.response) {
+            // server responded but 4xx/5xx error
+            console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (status: ${err.response.status})`);
+        } else if (err.request) {
+            // request is sent but no response
+            console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (no response)`);
+        } else {
+            // other error
+            console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (error: ${err.message})`);
+        }
+
+        return false;
+    }
 }
 
-async function mqtt_noti(noti_target, sgn) {
+async function mqtt_noti(noti_target, sgn, params = {}) {
     // oneM2M defined MQTT URL convention: mqtt://<IP>:<PORT>/<topic>
     const url_without_protocol = noti_target.split("//")[1];
     const topic_index = url_without_protocol.indexOf("/");
@@ -149,8 +165,8 @@ async function mqtt_noti(noti_target, sgn) {
 
     const { generate_ri } = require('./utils');
     const req_prim = {
-        fr: config.cse.cse_id,
-        ri: 'mqtt-noti-' + generate_ri(),
+        fr: (params.fr) ? params.fr : config.cse.cse_id,
+        ri: (params.rqi) ? params.rqi : 'mqtt-noti-' + generate_ri(),
         op: 5, // 5: notify
         pc: sgn,
     };
@@ -239,4 +255,4 @@ function batch_noti_data(dsp_ri,data) {
     console.log('\nbatch_data: ', JSON.stringify(batch_data, null, 2));
 }
 
-module.exports = { check_and_send_noti, self_noti_handler };
+module.exports = { check_and_send_noti, self_noti_handler, ae_noti: ae_noti_forwarding, http_noti, mqtt_noti };

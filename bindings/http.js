@@ -25,16 +25,16 @@ app.use((error, req, res, next) => {
   if (error instanceof SyntaxError && error.status === 400 && 'body' in error) {
     // JSON parsing error
     console.log('JSON parsing error:', error.message);
-    
+
     const resp_prim = {
       rsc: enums.rsc_str["BAD_REQUEST"],
       pc: { "m2m:dbg": `JSON parsing error: ${error.message}` }
     };
-    
+
     res.status(400).json(resp_prim.pc);
     return;
   }
-  
+
   // other error, pass to the next error handler
   next(error);
 });
@@ -69,7 +69,7 @@ if (https_server) {
 // CRUD mapping for HTTP / HTTPs server
 app.post('/*', async (req, resp) => {
   const req_prim = httpToPrim(req);
-  
+
   // depending on the Result Content value, response primitive looks different
   let resp_prim = {}; // life-time of this response primitive is equal to this post function
   if ("parsingError" in req_prim) {
@@ -78,7 +78,7 @@ app.post('/*', async (req, resp) => {
   } else {
     resp_prim = await reqPrim.prim_handling(req_prim);
   }
-  
+
   console.log("\nresponse primitive: \n", JSON.stringify(resp_prim, null, 2));
 
 
@@ -368,17 +368,19 @@ function httpToPrim(http_req) {
   let query = "";
 
   // parsing 'To' param
-
-  prim.to = http_req.url.split("?")[0];
-  if (prim.to.includes("/_")) {
-    // console.log('absolute');
-    prim.to = prim.to.replace("/_/", "//"); // '/_' => '//', Absolute format
-  } else if (prim.to.includes("/~")) {
-    // console.log('sp-relative');
-    prim.to = prim.to.replace("/~/", "/"); // '/~' => '/', SP-relative format
-  } else {
-    // console.log('cse-relative');
-    prim.to = prim.to.replace(/^\/+/g, ""); // remove leading slash, CSE-relative format, this handling should be the last one
+  // this function could also be used for response primitive, in that case 'url' can be missing
+  if (http_req.url) {
+    prim.to = http_req.url.split("?")[0];
+    if (prim.to.includes("/_")) {
+      // console.log('absolute');
+      prim.to = prim.to.replace("/_/", "//"); // '/_' => '//', Absolute format
+    } else if (prim.to.includes("/~")) {
+      // console.log('sp-relative');
+      prim.to = prim.to.replace("/~/", "/"); // '/~' => '/', SP-relative format
+    } else {
+      // console.log('cse-relative');
+      prim.to = prim.to.replace(/^\/+/g, ""); // remove leading slash, CSE-relative format, this handling should be the last one
+    }
   }
 
   // parsing 'From' paramter
@@ -406,17 +408,18 @@ function httpToPrim(http_req) {
   }
 
   // parsing HTTP Content-Type
-
+  
   // 'operation' mapping
-  if (http_req.headers["content-type"] != null) {
+  const contentTypes = ['application/json', 'application/vnd.onem2m-res+json'];
+  if (http_req.headers["content-type"]) {
     // CREATE, UPDATE or NOTIFY
     // Content-Type for CREATE request: e.g. "application/json; ty=3"
     if (http_req.headers["content-type"].split(";")[1] == null) {
-      if (http_req.method === "GET") {
+      if (http_req.method.toUpperCase() === "GET") {
         prim.op = 2; // DELETE
-      } else if (http_req.method === "PUT") {
+      } else if (http_req.method.toUpperCase() === "PUT") {
         prim.op = 3; // UPDATE
-      } else if (http_req.method === "DELETE") {
+      } else if (http_req.method.toUpperCase() === "DELETE") {
         prim.op = 4; // DELETE
       } else {
         prim.op = 5; // NOTIFY
@@ -424,10 +427,13 @@ function httpToPrim(http_req) {
     } else {
       prim.op = 1; // CREATE
     }
-
+    
     // 'resource type' (ty) mapping
-    if (http_req.headers["content-type"].includes(";") == true) {
+    if (http_req.headers["content-type"].includes("ty=") == true) {
       try {
+        if (http_req.method.toUpperCase() === "POST") {
+          prim.op = 1; // CREATE
+        }
         prim.ty = parseInt(
           http_req.headers["content-type"].split(";")[1].split("=")[1]
         );
@@ -437,9 +443,12 @@ function httpToPrim(http_req) {
     }
   } else {
     // map other operations from REQ METHOD
-    if (http_req.method == "GET") {
+    if (http_req.method.toUpperCase() == "POST") {
+      prim.op = 5; // NOTIFY: POST w/o Content-Type header
+    }
+    else if (http_req.method.toUpperCase() == "GET") {
       prim.op = 2;
-    } else if (http_req.method == "DELETE") {
+    } else if (http_req.method.toUpperCase() == "DELETE") {
       prim.op = 4;
     } else {
       console.log("This shall not happen: OP param is not resolved!\n");
@@ -450,79 +459,86 @@ function httpToPrim(http_req) {
   // parsing HTTP query string
   //
 
-  query = http_req.query;
+  // this function could also be used for response primitive, in that case 'url' can be missing
+  if (http_req.query) {
 
-  if (query.fu) prim.fc.fu = parseInt(query.fu); // filter usage
-  if (query.crb) prim.fc.crb = query.crb; // created before
-  if (query.cra) prim.fc.cra = query.cra; // created after
-  if (query.ms) prim.fc.ms = query.ms; // modified since
-  if (query.us) prim.fc.us = query.us; // unmodified since
-  if (query.sts) prim.fc.sts = parseInt(query.sts); // stateTag smaller
-  if (query.stb) prim.fc.stb = parseInt(query.stb); // stateTag bigger
-  if (query.exb) prim.fc.exb = query.exb; // expire before
-  if (query.exa) prim.fc.exa = query.exa; // expire after
-  if (query.lbl) prim.fc.lbl = query.lbl.split(" "); // label => 0..n (delimeter for multi tags are '+')
-  if (query.ty) {
-    if (Array.isArray(query.ty))
-      prim.fc.ty = query.ty.map((ty) => {
-        return parseInt(ty);
-      });
-    else {
-      str_tys = query.ty.split(" "); // resource type => 0..n
-      prim.fc.ty = str_tys.map((ty) => {
-        return parseInt(ty);
-      });
+    query = http_req.query;
+
+    if (query.fu) prim.fc.fu = parseInt(query.fu); // filter usage
+    if (query.crb) prim.fc.crb = query.crb; // created before
+    if (query.cra) prim.fc.cra = query.cra; // created after
+    if (query.ms) prim.fc.ms = query.ms; // modified since
+    if (query.us) prim.fc.us = query.us; // unmodified since
+    if (query.sts) prim.fc.sts = parseInt(query.sts); // stateTag smaller
+    if (query.stb) prim.fc.stb = parseInt(query.stb); // stateTag bigger
+    if (query.exb) prim.fc.exb = query.exb; // expire before
+    if (query.exa) prim.fc.exa = query.exa; // expire after
+    if (query.lbl) prim.fc.lbl = query.lbl.split(" "); // label => 0..n (delimeter for multi tags are '+')
+    if (query.ty) {
+      if (Array.isArray(query.ty))
+        prim.fc.ty = query.ty.map((ty) => {
+          return parseInt(ty);
+        });
+      else {
+        str_tys = query.ty.split(" "); // resource type => 0..n
+        prim.fc.ty = str_tys.map((ty) => {
+          return parseInt(ty);
+        });
+      }
+    }
+    if (query.sza) prim.fc.sza = parseInt(query.sza); // size above
+    if (query.szb) prim.fc.szb = parseInt(query.szb); // size below
+    if (query.lim) prim.fc.lim = parseInt(query.lim); // limit
+    if (query.cty) prim.fc.cty = query.cty.split(" "); // content type => 0..n
+    if (query.fo) prim.fc.fo = query.fo; // filter operation
+    if (query.lvl) prim.fc.lvl = parseInt(query.lvl); // level
+    if (query.ofst) prim.fc.ofst = parseInt(query.ofst); // offset
+    if (query.rt) prim.rt = { rtv: parseInt(query.rt) }; // result type
+    if (query.rcn) prim.rcn = parseInt(query.rcn); // result content type
+    if (query.drt) prim.drt = parseInt(query.drt); // desired identifier result type	
+    if (query.atrl) {
+      let atrl = query.atrl.split(" ");
+      prim.pc = { atrl };
+    } // attribue list, this shall be mapped to 'content' param
+    if (query.tids) prim.fc.tids = query.tids.split(" ");
+
+    // 'attribute' criteria
+    // note that 'attribute' does not appeal in the HTTP query-string, but below elements are shown
+    // to-do: check if this is correct per spec ('rn=aa&rn=bb') 
+    if (query.rn) prim.fc.rn = query.rn;
+    if (query.cr) prim.fc.cr = query.cr;
+    if (query.aei) prim.fc.aei = query.aei;
+    if (query.name) prim.fc.name = query.name.split(" ");
+    if (query.cnd) prim.fc.cnd = query.cnd.split(" ");
+    if (query.smf) prim.fc.smf = query.smf; // semantic filer which is URL encoded SPARQL query
+    if (query.or) prim.fc.or = query.or.split(" "); // semantic filer which is URL encoded SPARQL query
+    if (query.sqi) {
+      try {
+        prim.sqi = JSON.parse(query.sqi);
+      } catch (err) {
+        console.log(err.message);
+        prim.parsingError =
+          'semantic query indicator (sqi) shall be either "true" or "false"';
+        return prim;
+      }
+    }
+
+    // geo-query filter criteria
+    if (query.gmty) prim.fc.gmty = parseInt(query.gmty);
+    if (query.gsf) prim.fc.gsf = parseInt(query.gsf);
+    if (query.geom) {
+      try {
+        prim.fc.geom = JSON.parse(query.geom);
+      } catch (err) {
+        console.log('Geometry JSON parsing error:', err.message);
+        prim.parsingError = `Geometry query parameter JSON parsing error: ${err.message}`;
+        return prim;
+      }
     }
   }
-  if (query.sza) prim.fc.sza = parseInt(query.sza); // size above
-  if (query.szb) prim.fc.szb = parseInt(query.szb); // size below
-  if (query.lim) prim.fc.lim = parseInt(query.lim); // limit
-  if (query.cty) prim.fc.cty = query.cty.split(" "); // content type => 0..n
-  if (query.fo) prim.fc.fo = query.fo; // filter operation
-  if (query.lvl) prim.fc.lvl = parseInt(query.lvl); // level
-  if (query.ofst) prim.fc.ofst = parseInt(query.ofst); // offset
-  if (query.rt) prim.rt = { rtv: parseInt(query.rt) }; // result type
-  if (query.rcn) prim.rcn = parseInt(query.rcn); // result content type
-  if (query.drt) prim.drt = parseInt(query.drt); // desired identifier result type	
-  if (query.atrl) {
-    let atrl = query.atrl.split(" ");
-    prim.pc = { atrl };
-  } // attribue list, this shall be mapped to 'content' param
-  if (query.tids) prim.fc.tids = query.tids.split(" ");
 
-  // 'attribute' criteria
-  // note that 'attribute' does not appeal in the HTTP query-string, but below elements are shown
-  // to-do: check if this is correct per spec ('rn=aa&rn=bb') 
-  if (query.rn) prim.fc.rn = query.rn;
-  if (query.cr) prim.fc.cr = query.cr;
-  if (query.aei) prim.fc.aei = query.aei;
-  if (query.name) prim.fc.name = query.name.split(" ");
-  if (query.cnd) prim.fc.cnd = query.cnd.split(" ");
-  if (query.smf) prim.fc.smf = query.smf; // semantic filer which is URL encoded SPARQL query
-  if (query.or) prim.fc.or = query.or.split(" "); // semantic filer which is URL encoded SPARQL query
-  if (query.sqi) {
-    try {
-      prim.sqi = JSON.parse(query.sqi);
-    } catch (err) {
-      console.log(err.message);
-      prim.parsingError =
-        'semantic query indicator (sqi) shall be either "true" or "false"';
-      return prim;
-    }
-  }
-
-  // geo-query filter criteria
-  if (query.gmty) prim.fc.gmty = parseInt(query.gmty);
-  if (query.gsf) prim.fc.gsf = parseInt(query.gsf);
-  if (query.geom) {
-    try {
-      prim.fc.geom = JSON.parse(query.geom);
-    } catch (err) {
-      console.log('Geometry JSON parsing error:', err.message);
-      prim.parsingError = `Geometry query parameter JSON parsing error: ${err.message}`;
-      return prim;
-    }
-  }
+  // this function could also be used for response primitive, in that case 'rsc' is included
+  if (http_req.rsc) prim.rsc = http_req.headers["x-m2m-rsc"];
 
 
   // to-do: after # never gets delivered
@@ -542,22 +558,22 @@ function primToHttp(prim, resp) {
   resp.set("X-M2M-RI", prim.rqi);
   resp.set("X-M2M-RSC", prim.rsc);
   resp.set("X-M2M-RVI", prim.rvi);
-  
+
   // Set primitive content (pc) as HTTP response payload if it exists
   if (prim.pc) {
     resp.set("Content-Type", "application/json");
-  } 
+  }
 }
 
 // global error handler
 app.use((error, req, res, next) => {
   console.error('Unhandled error:', error);
-  
+
   const resp_prim = {
     rsc: enums.rsc_str["INTERNAL_SERVER_ERROR"],
     pc: { "m2m:dbg": "Internal server error" }
   };
-  
+
   res.status(500).json(resp_prim.pc);
 });
 
@@ -572,3 +588,5 @@ process.on('uncaughtException', (error) => {
   console.error('Uncaught Exception:', error);
   // do not terminate the app, just log the error
 });
+
+module.exports = { httpToPrim, primToHttp };
