@@ -52,7 +52,7 @@ const dsp = require("./resources/dsp"); // <datasetPolicy>
 const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
 
-const virtual_res_names = ["fopt", "la", "ol"]; // fopt shall come first in the list
+const virtual_res_names = ["fopt", "la", "ol", "pcu"]; // fopt shall come first in the list
 
 
 // this is obsolete, replaced by the sequelize model in each resource create function
@@ -1205,12 +1205,12 @@ async function access_decision(req_prim, resp_prim) {
 					return false;
 				}
 			}
-		}
+		} 
 	}
 
 	// for <pch> resource retrieval, update, and deletion, check if the Originator (fr) is equal to the 'aei' or 'csi' of the parent resource
-	if (req_prim.op === 2 || req_prim.op === 3 || req_prim.op === 4) {
-		if (req_prim.to_ty === 15) {
+	if (req_prim.to_ty === 15) {
+		if (req_prim.op === 2 || req_prim.op === 3 || req_prim.op === 4) {
 			const pch_res = await PCH.findOne({ where: { ri: req_prim.ri } });
 			// 'aei' or 'csi' of the parent resource is included as 'int_cr' in the <pch> resource during the creation
 			if (pch_res && pch_res.int_cr === req_prim.fr) {
@@ -1219,7 +1219,8 @@ async function access_decision(req_prim, resp_prim) {
 				return false;
 			}
 		}
-	}
+	} 
+	
 
 	// set int_cr request indicator as true for Case D.
 	req_prim.int_cr_req = true;
@@ -1228,7 +1229,7 @@ async function access_decision(req_prim, resp_prim) {
 
 	// for virtual resources, access decision is different per resource type
 	if (temp_req.vr) {
-		if (temp_req.vr === 'la' || temp_req.vr === 'ol' || temp_req.vr === 'fopt') {
+		if (virtual_res_names.includes(temp_req.vr)) {
 			temp_req.to = temp_req.to_parent;
 			temp_req.to_ty = temp_req.parent_ty;
 			temp_req.ri = temp_req.parent_ri;
@@ -1305,6 +1306,18 @@ async function access_decision(req_prim, resp_prim) {
 
 	// Case C. target is virtual resource type => use parent's access privileges
 	//         in this case, 'ri' input param is already set as parent's ri when this function is called
+
+	if (req_prim.vr === "pcu") {
+		if (req_prim.op === 2 || req_prim.op === 5) {
+			const pch_res = await PCH.findOne({ where: { ri: temp_req.ri } });
+			// 'aei' or 'csi' of the parent resource is included as 'int_cr' in the <pch> resource during the creation
+			if (pch_res && pch_res.int_cr === req_prim.fr) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+	} 
 
 	if (req_prim.vr == "rpt") {
 		access_grant = await dst.retrievalPoint_access_control(req_prim);

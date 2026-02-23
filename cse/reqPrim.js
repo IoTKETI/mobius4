@@ -10,6 +10,7 @@ const CSR = require('../models/csr-model');
 const hostingCSE = require("./hostingCSE");
 const cnt = require("./resources/cnt");
 const grp = require("./resources/grp");
+const pch = require("./resources/pch");
 // const smd = require("./resources/smd");
 
 // non-standard APIs yet
@@ -146,7 +147,7 @@ async function prim_handling(req_prim) {
   // Resource API handlers, virtual resouces first and then normal resources
   //
 
-  // 'fopt' supports CRUD operations, so call it here before switch into C/R/U/D below
+  // fanOutPoint virtual resource
   if ('fopt' === req_prim.vr) {
     await grp.fanout(req_prim, resp_prim);
     resp_prim.rsc = enums.rsc_str["OK"];
@@ -156,6 +157,7 @@ async function prim_handling(req_prim) {
     await dst.retrieval(req_prim, resp_prim);
     resp_prim.rsc = enums.rsc_str["OK"];
   }
+  // latest virtual resource
   else if ('la' === req_prim.vr) {
     switch (req_prim.op) {
       case 2:
@@ -183,6 +185,7 @@ async function prim_handling(req_prim) {
         resp_prim.pc = { "m2m:dbg": "only Retrieve or Delete operation is allowed for <la> resource" };
     }
   }
+  // oldest virtual resource
   else if ('ol' === req_prim.vr) {
     switch (req_prim.op) {
       case 2:
@@ -210,6 +213,20 @@ async function prim_handling(req_prim) {
         resp_prim.pc = { "m2m:dbg": "only Retrieve or Delete operation is allowed for <ol> resource" };
     }
   }
+  // pollingChannelURI virtual resource supports RETRIEVE and NOTIFY operations
+  else if ('pcu' === req_prim.vr) { 
+    switch (req_prim.op) {
+      case 2:
+        await pch.retrieve_pcu(req_prim, resp_prim);
+        break;
+      case 5:
+        await pch.notify_pcu(req_prim, resp_prim);
+        break;
+      default:
+        resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
+        resp_prim.pc = { "m2m:dbg": "only Retrieve or Notify operation is allowed for <pcu> resource" };
+    }
+  }  
   // normal resource handling
   // 'to' parameter format is CSE-relative
   else {
@@ -383,10 +400,8 @@ function get_to_info(req_prim) {
 // e.g. 'base/grp/fopt/path' and 'base/cnt/la/3'
 async function set_virtual_res_info(req_prim) {
   for (const vir_res_name of hostingCSE.virtual_res_names) {
-    // const vir_res_name = item; // this assginement is needed indeed, to prevent async handling error
     if (req_prim.to.includes("/" + vir_res_name) === true) {
       const to_parent = req_prim.to.split("/" + vir_res_name)[0];
-      // req_prim.sid = to_parent;
 
       // 'cnt/la' is virtual resource, but 'cnt/later' is not
       const remainder = req_prim.to.split("/" + vir_res_name)[1];
@@ -427,6 +442,11 @@ async function set_virtual_res_info(req_prim) {
       } else if (vir_res_name == "fopt") {
         // confirm that the parent is 'grp' type
         if (enums.ty_str[parent_res.ty] !== "grp") {
+          return;
+        }
+      } else if (vir_res_name == "pcu") {
+        // confirm that the parent is 'pch' type
+        if (enums.ty_str[parent_res.ty] !== "pch") {
           return;
         }
       }

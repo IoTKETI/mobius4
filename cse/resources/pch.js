@@ -162,8 +162,22 @@ async function update_a_pch(req_prim, resp_prim) {
     return;
 }
 
+async function retrieve_pcu(req_prim, resp_prim) {
+    console.log("retrieve_pcu: ", JSON.stringify(req_prim, null, 2));
+    resp_prim.rsc = enums.rsc_str["OK"];
+    return;
+}
+
+async function notify_pcu(req_prim, resp_prim) {
+    console.log("notify_pcu: ", JSON.stringify(req_prim, null, 2));
+    resp_prim.rsc = enums.rsc_str["OK"];
+    return;
+}
+
 module.exports = {
     create_a_pch,
     retrieve_a_pch,
-    update_a_pch
+    update_a_pch,
+    retrieve_pcu,
+    notify_pcu
 };
