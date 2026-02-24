@@ -36,6 +36,7 @@ async function request_forwarding(req, binding) {
     return
 }
 
-
-module.exports.check_to_is_mine = check_to_is_mine;
-module.exports.request_forwarding = request_forwarding;
+module.exports = {
+    check_to_is_mine,
+    request_forwarding
+};

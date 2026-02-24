@@ -6,6 +6,7 @@ const { req_prim_schema } = require("./validation/prim_schema");
 const Lookup = require('../models/lookup-model');
 const AE = require('../models/ae-model');
 const CSR = require('../models/csr-model');
+const PCH = require('../models/pch-model');
 
 const hostingCSE = require("./hostingCSE");
 const cnt = require("./resources/cnt");
@@ -466,11 +467,9 @@ async function set_virtual_res_info(req_prim) {
 async function cse_forwarding(req_prim, shortest_to) {
   const resp_prim = {};
 
-  // step0: check if the target CSE is not reachable (rr = false) and has polling channel resource under its <remoteCSE> resource
-  // this is the long polling handling, when the target is CSE
-
-
-  // step1: change the originator ID into SP-relative or Absolute format, if needed
+  //
+  // step 1: change the originator ID into SP-relative or Absolute format, if needed
+  //
   // check 'to' param scope, if it is SP-relative or Absolute format
   if (shortest_to.startsWith('//')) {
     // Absolute format
@@ -498,21 +497,48 @@ async function cse_forwarding(req_prim, shortest_to) {
     target_cse_id = '/' + shortest_to.split('/')[1];
   }
 
-  console.log('request forwarding to ', target_cse_id);
+  // console.log('request forwarding to ', target_cse_id);
 
   // resolve CSE-relative 'to' param for the target CSE
 
   const cse_rel_to = shortest_to.split(target_cse_id + '/')[1];
-  console.log('cse_rel_to: ', cse_rel_to);
+  // console.log('cse_rel_to: ', cse_rel_to);
 
-
-  // step2: find the nextCSE among <csr> resources
-
+  //
+  // step 2: find the nextCSE among <csr> resources
+  //
   const csr_res = await CSR.findOne({ where: { csi: target_cse_id } });
   if (!csr_res) {
     resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-    resp_prim.pc = { 'm2m:dbg': 'CSR resource not found' };
-    return;
+    resp_prim.pc = { 'm2m:dbg': '<csr> resource not found for CSE forwarding to ' + target_cse_id };
+    return resp_prim;
+  }
+
+  //
+  // step 3: check if the target CSE is not reachable (rr = false) and has polling channel resource under its <remoteCSE> resource
+  //
+  // this is the long polling handling, when the target is CSE
+  if (csr_res.rr === false) {
+    // check if , pi of <pch> === ri of <csr>
+    const pch_res = await PCH.findOne({ where: { pi: csr_res.ri } });
+    
+    if (pch_res) {
+      const store_result = await pch.store_request_for_long_polling(pch_res.ri, req_prim);
+      console.log('request stored for long polling: ', store_result);
+
+      if (!store_result) {
+        resp_prim.rsc = enums.rsc_str['INTERNAL_SERVER_ERROR'];
+        resp_prim.pc = { 'm2m:dbg': 'Failed to store request for long polling' };
+        return resp_prim;
+      }
+
+      // prepare the response to the originator
+      resp_prim.rsc = enums.rsc_str['OK'];
+      resp_prim.pc = { 'm2m:dbg': 'Request stored for long polling' };
+      return resp_prim;
+    }
+
+    return resp_prim;
   }
 
   // get 'poa' of the <remoteCSE> resource
@@ -523,7 +549,9 @@ async function cse_forwarding(req_prim, shortest_to) {
   const poa = csr_res.poa[0];
   console.log('poa: ', poa);
 
-  // step3: forward the request to that CSE
+  //
+  // step 4: forward the request to that CSE
+  //
 
   if (poa.startsWith('http')) {
     // HTTP - determine method based on operation type
@@ -576,6 +604,31 @@ async function cse_forwarding(req_prim, shortest_to) {
 }
 
 async function ae_forwarding(req_prim, ae_res) {
+  // check if the AE is not reachable (rr = false) and has a polling channel
+  if (ae_res.rr === false) {
+    const pch_res = await PCH.findOne({ where: { pi: ae_res.ri } });
+
+    if (pch_res) {
+      const store_result = await pch.store_request_for_long_polling(pch_res.ri, req_prim);
+      console.log('request stored for long polling (AE): ', store_result);
+
+      if (!store_result) {
+        return {
+          rsc: enums.rsc_str['INTERNAL_SERVER_ERROR'],
+          pc: { 'm2m:dbg': 'Failed to store request for long polling' },
+        };
+      }
+
+      return {
+        rsc: enums.rsc_str['OK'],
+        pc: { 'm2m:dbg': 'Request stored for long polling' },
+      };
+    }
+
+    return null;
+  }
+
+  // direct forwarding via poa
   const urls = ae_res.poa;
 
   const { http_noti, mqtt_noti } = require('./noti');

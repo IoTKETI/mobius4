@@ -162,6 +162,53 @@ async function update_a_pch(req_prim, resp_prim) {
     return;
 }
 
+// memory-based pending map for long polling
+const pendingMap = new Map();
+
+function wait_for_response(rqi, timeout_ms = 30000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingMap.delete(rqi);
+      reject(new Error(`long polling timeout: ${rqi}`));
+    }, timeout_ms);
+
+    pendingMap.set(rqi, (resp_data) => {
+      clearTimeout(timer);
+      pendingMap.delete(rqi);
+      resolve(resp_data);
+    });
+  });
+}
+
+// notify_pcu: the point where the response from the other CSE is received
+async function notify_pcu(req_prim, resp_prim) {
+  // the response from the other CSE is included in req_prim.pc
+  // find the handler of the original request from the rqi of the original request
+  const original_rqi = req_prim.pc.rqi;  // the rqi of the original request
+
+  const resolve = pendingMap.get(original_rqi);
+  if (resolve) {
+    resolve(req_prim.pc);  // release the waiting and pass the response data
+    resp_prim.rsc = enums.rsc_str["OK"];
+  } else {
+    // already timed out or no pending request
+    resp_prim.rsc = enums.rsc_str["OK"];
+    console.warn(`no pending request for rqi: ${original_rqi}`);
+  }
+
+  return;
+}
+
+async function store_request_for_long_polling(pch_ri, req_prim) {
+    const pch_res = await PCH.findByPk(pch_ri);
+    if (!pch_res) {
+        return false;
+    }
+    pch_res.reqs = [...pch_res.reqs, req_prim];
+    await pch_res.save();
+    return true;
+}
+
 async function retrieve_pcu(req_prim, resp_prim) {
     console.log("retrieve_pcu: ", JSON.stringify(req_prim, null, 2));
     resp_prim.rsc = enums.rsc_str["OK"];
@@ -178,6 +225,8 @@ module.exports = {
     create_a_pch,
     retrieve_a_pch,
     update_a_pch,
+    store_request_for_long_polling,
+    wait_for_response,
     retrieve_pcu,
     notify_pcu
 };
