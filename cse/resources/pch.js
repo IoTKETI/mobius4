@@ -210,8 +210,30 @@ async function store_request_for_long_polling(pch_ri, req_prim) {
 }
 
 async function retrieve_pcu(req_prim, resp_prim) {
-    console.log("retrieve_pcu: ", JSON.stringify(req_prim, null, 2));
-    resp_prim.rsc = enums.rsc_str["OK"];
+    const pch_ri = req_prim.parent_ri;
+    const pch_res = await PCH.findByPk(pch_ri);
+
+    if (!pch_res) {
+        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+        resp_prim.pc = { 'm2m:dbg': '<pch> resource not found' };
+        return;
+    }
+
+    const reqs = pch_res.reqs;
+
+    if (reqs.length === 0) {
+        resp_prim.rsc = enums.rsc_str['OK'];
+        resp_prim.pc = { 'm2m:dbg': 'no pending requests' };
+        return;
+    }
+
+    resp_prim.rsc = enums.rsc_str['OK'];
+    resp_prim.pc = reqs[reqs.length - 1];
+
+    // clear delivered requests from DB
+    pch_res.reqs = [];
+    await pch_res.save();
+
     return;
 }
 

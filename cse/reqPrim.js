@@ -532,9 +532,15 @@ async function cse_forwarding(req_prim, shortest_to) {
         return resp_prim;
       }
 
-      // prepare the response to the originator
-      resp_prim.rsc = enums.rsc_str['OK'];
-      resp_prim.pc = { 'm2m:dbg': 'Request stored for long polling' };
+      try {
+        const resp_from_b = await pch.wait_for_response(req_prim.rqi);
+        resp_prim.rsc = resp_from_b.rsc;
+        resp_prim.pc = resp_from_b.pc;
+      } catch (err) {
+        resp_prim.rsc = enums.rsc_str['TARGET_NOT_REACHABLE'];
+        resp_prim.pc = { 'm2m:dbg': err.message };
+      }
+
       return resp_prim;
     }
 
@@ -619,10 +625,18 @@ async function ae_forwarding(req_prim, ae_res) {
         };
       }
 
-      return {
-        rsc: enums.rsc_str['OK'],
-        pc: { 'm2m:dbg': 'Request stored for long polling' },
-      };
+      try {
+        const resp_from_b = await pch.wait_for_response(req_prim.rqi);
+        return {
+          rsc: resp_from_b.rsc,
+          pc: resp_from_b.pc,
+        };
+      } catch (err) {
+        return {
+          rsc: enums.rsc_str['TARGET_NOT_REACHABLE'],
+          pc: { 'm2m:dbg': err.message },
+        };
+      }
     }
 
     return null;
