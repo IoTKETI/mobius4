@@ -30,6 +30,15 @@ async function create_a_grp(req_prim, resp_prim) {
         return;
     }
 
+    // validations for group creation
+    prim_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+    if (false === await memberIDs_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
+        return;
+    }
+    // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
+    //     return;
+    // }
+
     const ri = generate_ri();
     const now = get_cur_time();
     const et = get_default_et();
@@ -58,7 +67,7 @@ async function create_a_grp(req_prim, resp_prim) {
             gn: prim_res.gn || null,
         });
 
-        // Lookup 테이블에도 추가
+        // add to Lookup table
         await Lookup.create({
             ri,
             ty: 9,
@@ -72,7 +81,7 @@ async function create_a_grp(req_prim, resp_prim) {
             loc: null
         });
 
-        // 생성된 리소스 조회하여 응답
+        // retrieve the created resource and respond
         const tmp_req = { ri }, tmp_resp = {};
         await retrieve_a_grp(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
@@ -151,6 +160,15 @@ async function update_a_grp(req_prim, resp_prim) {
             return;
         }
 
+        // validations for group update
+        prim_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+        if (false === await memberIDs_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
+            return;
+        }
+        // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
+        //     return;
+        // }
+
         db_res.lt = get_cur_time();
 
         if (prim_res.et) db_res.et = prim_res.et;
@@ -161,6 +179,12 @@ async function update_a_grp(req_prim, resp_prim) {
         if (prim_res.mnm === null) {
             resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
             resp_prim.pc = { 'm2m:dbg': 'mnm cannot be deleted' };
+            return;
+        }
+        // new mnm cannot be less than the number of current members
+        if (prim_res.mnm < db_res.cnm) {
+            resp_prim.rsc = enums.rsc_str['MAX_NUMBER_OF_MEMBER_EXCEEDED'];
+            resp_prim.pc = { 'm2m:dbg': 'new mnm cannot be less than the number of current members' };
             return;
         }
 
@@ -195,6 +219,33 @@ async function update_a_grp(req_prim, resp_prim) {
     }
 
     return;
+}
+
+async function memberIDs_validation(maxNumber, memberIDs, resp_prim) {
+    // check if the number of memberIDs exceeds the maximum number of members (mnm)
+    if (memberIDs.length > maxNumber) {
+        resp_prim.rsc = enums.rsc_str['MAX_NUMBER_OF_MEMBER_EXCEEDED'];
+        resp_prim.pc = { 'm2m:dbg': 'number of memberIDs exceeds the maximum number of members (mnm)' };
+        return false;
+    }
+    return true;
+}
+
+function remove_duplicate_memberIDs(memberIDs) {
+    return memberIDs.filter((value, index, self) =>
+        self.indexOf(value) === index
+    );
+}
+
+async function memberType_validation(consistencyStrategy, memberType, memberIDs) {
+    // firstly check if resourceType of all members conform to the memberType
+    if (consistencyStrategy === 'ABANDON_MEMBER') {
+        return true;
+    }
+    if (consistencyStrategy === 'ABANDON_GROUP') {
+        return true;
+    }
+    return false;
 }
 
 exports.fanout = async function (req_prim, resp_prim) {

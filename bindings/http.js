@@ -102,7 +102,10 @@ app.post('/*', async (req, resp) => {
     }
   }
   // 400 Bad Request
-  else if (resp_prim.rsc == enums.rsc_str["BAD_REQUEST"]) {
+  else if (
+    resp_prim.rsc == enums.rsc_str["BAD_REQUEST"] || 
+    resp_prim.rsc == enums.rsc_str["MAX_NUMBER_OF_MEMBER_EXCEEDED"] || 
+    resp_prim.rsc == enums.rsc_str["GROUP_MEMBER_TYPE_INCONSISTENT"]) {
     if (resp_prim.pc && resp_prim.pc["m2m:dbg"]) {
       resp.status(400).json(resp_prim.pc);
     } else {
@@ -283,7 +286,10 @@ app.put('/*', async (req, resp) => {
     }
   }
   // 400 Bad Request
-  else if (resp_prim.rsc == enums.rsc_str["BAD_REQUEST"]) {
+  else if (
+    resp_prim.rsc == enums.rsc_str["BAD_REQUEST"] || 
+    resp_prim.rsc == enums.rsc_str["MAX_NUMBER_OF_MEMBER_EXCEEDED"] || 
+    resp_prim.rsc == enums.rsc_str["GROUP_MEMBER_TYPE_INCONSISTENT"]) {
     if (resp_prim.pc && resp_prim.pc.hasOwnProperty("m2m:dbg")) {
       resp.status(400).json(resp_prim.pc);
     } else {
