@@ -26,7 +26,7 @@ const create_common_attr = {
     et: Joi.string().optional().regex(/^[0-9]{8}T[0-9]{6}$/),
     acpi: Joi.array().optional().items(Joi.string()),
     lbl: Joi.array().optional().items(Joi.string()),
-    cr: Joi.boolean().optional(),
+    cr: Joi.string().allow(null),
     loc: Joi.object().optional().keys({
         typ: Joi.number().required(),
         crd: Joi.string().required()
