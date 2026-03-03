@@ -5,7 +5,7 @@
     "cse_id": "/Mobius4",
     "csebase_rn": "Mobius",
     "poa": [
-      "192.168.0.67"
+      "192.168.0.67:7599"
     ],
     "registrar": {  
       "cse_type": 1,

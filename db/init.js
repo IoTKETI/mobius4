@@ -472,12 +472,12 @@ async function create_cb(client) {
         pi: '',
         ct: now,
         lt: now,
-        acpi: [],
+        acpi: [`${config.cse.csebase_rn}/${config.cb.default_acp.rn}`],
         lbl: ['Mobius4'],
         cst: config.cse.cse_type,
         csi: config.cse.cse_id,
         srt: [1, 2, 3, 4, 5, 9, 23, 28],
-        poa: config.cse.supported_resource_types,
+        poa: config.cse.poa,
         csz: config.cse.serializations
     };
 
