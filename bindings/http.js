@@ -200,6 +200,7 @@ app.get('/*', async (req, resp) => {
   let resp_prim = {};
   try {
     resp_prim = await reqPrim.prim_handling(req_prim);
+    console.log("response primitive: \n", JSON.stringify(resp_prim, null, 2));
   } catch (err) {
     console.error(err);
   }
@@ -264,6 +265,7 @@ app.put('/*', async (req, resp) => {
     resp_prim.pc = { "m2m:dbg": "JSON parsing error" };
   } else {
     resp_prim = await reqPrim.prim_handling(req_prim);
+    console.log("response primitive: \n", JSON.stringify(resp_prim, null, 2));
   }
 
   // convert the response primitive into HTTP response to send back
@@ -323,7 +325,8 @@ app.delete('/*', async (req, resp) => {
   let resp_prim = {}; // life-time of this response primitive is equal to this delete function
 
   resp_prim = await reqPrim.prim_handling(req_prim);
-
+  console.log("response primitive: \n", JSON.stringify(resp_prim, null, 2));
+  
   primToHttp(resp_prim, resp);
 
   // send a response

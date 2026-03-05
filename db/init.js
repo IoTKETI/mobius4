@@ -106,6 +106,8 @@ async function create_tables(client) {
                 cst INTEGER NOT NULL,
                 csi VARCHAR(${len.str_token}) NOT NULL,
                 srt INTEGER[],
+                srv VARCHAR(${len.url})[],
+                nl VARCHAR(${len.structured_res_id}),
                 poa VARCHAR(${len.url})[],
                 csz VARCHAR(10)[],
                 loc GEOMETRY(GEOMETRY, 4326)
@@ -476,7 +478,9 @@ async function create_cb(client) {
         lbl: ['Mobius4'],
         cst: config.cse.cse_type,
         csi: config.cse.cse_id,
-        srt: [1, 2, 3, 4, 5, 9, 23, 28],
+        srt: config.cse.supported_resource_types,
+        srv: config.cse.versions,
+        nl: 'Mobius/nl', // this resource does not exist
         poa: config.cse.poa,
         csz: config.cse.serializations
     };
@@ -486,12 +490,12 @@ async function create_cb(client) {
 
         // insert data into cb table
         await client.query(`
-            INSERT INTO cb (ri, ty, sid, rn, pi, ct, lt, acpi, lbl, cst, csi, srt, poa, csz)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            INSERT INTO cb (ri, ty, sid, rn, pi, ct, lt, acpi, lbl, cst, csi, srt, srv, nl, poa, csz)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         `, [
             cb_res.ri, cb_res.ty, cb_res.sid, cb_res.rn, cb_res.pi,
             cb_res.ct, cb_res.lt, cb_res.acpi, cb_res.lbl, cb_res.cst,
-            cb_res.csi, cb_res.srt, cb_res.poa, cb_res.csz
+            cb_res.csi, cb_res.srt, cb_res.srv, cb_res.nl, cb_res.poa, cb_res.csz
         ]);
 
         // insert data into lookup table

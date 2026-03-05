@@ -18,7 +18,7 @@ const dts = require("./resources/dts"); // <dataset>
 
 
 async function prim_handling(req_prim) {
-  console.log("\nrequest primitive: \n", JSON.stringify(req_prim, null, 2));
+  console.log("\n\n\nrequest primitive: \n", JSON.stringify(req_prim, null, 2));
 
   // set default parameters for the request primitive
   set_default_req_params(req_prim);
