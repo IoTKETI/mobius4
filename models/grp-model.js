@@ -39,6 +39,10 @@ const GRP = sequelize.define('grp', {
         type: DataTypes.ARRAY(DataTypes.STRING),
         defaultValue: [],
     },
+    macp: {
+        type: DataTypes.ARRAY(DataTypes.STRING),
+        defaultValue: null,
+    },
     gn: DataTypes.STRING,
 }, {
     tableName: 'grp',

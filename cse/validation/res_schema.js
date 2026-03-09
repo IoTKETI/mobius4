@@ -224,6 +224,7 @@ const grp_create_schema = Joi.object().keys({
     mnm: Joi.number().required().integer().min(0),
     csy: Joi.number().integer().min(1),
     mid: Joi.array().required().items(Joi.string()),
+    macp: Joi.array().optional().items(Joi.string()),
     gn: Joi.string().optional(),
 });
 
@@ -240,6 +241,7 @@ const grp_update_schema = Joi.object().keys({
     mnm: Joi.number().integer().optional().min(0),
     csy: Joi.forbidden(),
     mid: Joi.array().optional().items(Joi.string()),
+    macp: Joi.array().optional().items(Joi.string()),
     gn: Joi.string().optional(),
 });
 

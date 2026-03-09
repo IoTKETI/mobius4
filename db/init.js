@@ -46,19 +46,22 @@ exports.init_db = async function () {
             
             // check if <cb> resource exists
             const cbResult = await client.query('SELECT ri FROM cb WHERE ty = 5');
-            
+
+            let cb_ri = null;
             if (cbResult.rows.length === 0) {
                 // create <cb> resource
-                const cb_ri = await create_cb(client);
-                
-                // create default <acp> resource
-                if (await create_default_acp(client, cb_ri)) {
-                    console.log(`default <acp> resource is created as ${config.cse.csebase_rn}/${config.cb.default_acp.rn} and acpi of <cb> resource updated`);
-                } else {
-                    console.log('default <acp> resource creation failed');
-                }
+                cb_ri = await create_cb(client);
+
             } else {
-                console.log('\n<cb> resource already exists with ri:', cbResult.rows[0].ri);
+                cb_ri = cbResult.rows[0].ri;
+                console.log('\n<cb> resource already exists with ri:', cb_ri);
+            }
+
+            // create default <acp> resource// create default <acp> resource
+            if (await create_default_acp(client, cb_ri)) {
+                console.log(`default <acp> resource is created as ${config.cse.csebase_rn}/${config.cb.default_acp.rn} and acpi of <cb> resource updated`);
+            } else {
+                console.log('default <acp> resource creation failed since it already exists');
             }
         } finally {
             client.release();
@@ -582,7 +585,9 @@ async function create_default_acp(client, cb_ri) {
         return true;
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('Error creating default ACP:', err);
+        if (err.code !== '23505') {
+            console.error('Error creating default ACP:', err);
+        }
         return false;
     }
 }

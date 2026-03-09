@@ -1246,6 +1246,18 @@ async function access_decision(req_prim, resp_prim) {
 	// Case C. target is virtual resource type => use parent's access privileges
 	//         in this case, 'ri' input param is already set as parent's ri when this function is called
 
+	if (req_prim.vr === "fopt") {
+		await grp.retrieve_a_grp(temp_req, temp_resp);
+		
+		const grp_res = temp_resp.pc["m2m:grp"];
+		if (grp_res.macp) {
+			access_grant = await access_decision_acp_pv(req_prim.fr, req_prim.op, grp_res.macp);
+			console.log("access_grant for fopt: ", access_grant);
+			return access_grant;
+		}
+		// if 'macp is empty, then move on to apply the 'acpi' of the parent group
+	}
+
 	if (req_prim.vr == "rpt") {
 		access_grant = await dst.retrievalPoint_access_control(req_prim);
 		if (false == access_grant) {

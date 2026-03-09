@@ -64,6 +64,7 @@ async function create_a_grp(req_prim, resp_prim) {
             mnm: prim_res.mnm,
             csy: prim_res.csy || 1, // '1' means 'ABANDON_MEMBER'
             mid: prim_res.mid || [], // empty list is allowed by the spec
+            macp: prim_res.macp || null, // empty list is allowed by the spec
             gn: prim_res.gn || null,
         });
 
@@ -128,6 +129,7 @@ async function retrieve_a_grp(req_prim, resp_prim) {
         if (db_res.mnm) grp_obj['m2m:grp'].mnm = db_res.mnm;
         if (db_res.csy) grp_obj['m2m:grp'].csy = db_res.csy;
         if (db_res.mid) grp_obj['m2m:grp'].mid = db_res.mid;
+        if (db_res.macp) grp_obj['m2m:grp'].macp = db_res.macp;
         if (db_res.gn) grp_obj['m2m:grp'].gn = db_res.gn;
 
         resp_prim.pc = grp_obj;
@@ -194,6 +196,7 @@ async function update_a_grp(req_prim, resp_prim) {
         if (prim_res.mnm) db_res.mnm = prim_res.mnm; 
         if (prim_res.csy) db_res.csy = prim_res.csy; 
         if (prim_res.mid) db_res.mid = prim_res.mid; 
+        if (prim_res.macp) db_res.macp = prim_res.macp;
         if (prim_res.gn) db_res.gn = prim_res.gn;
 
         // delete optional attributes if they are null in the request
@@ -237,8 +240,12 @@ function remove_duplicate_memberIDs(memberIDs) {
     );
 }
 
+// member type validation is called during creation and update of 'mid' attribute of <grp> resource
 async function memberType_validation(consistencyStrategy, memberType, memberIDs) {
     // firstly check if resourceType of all members conform to the memberType
+    if (consistencyStrategy === 'SET_MIXED') {
+        return true;
+    }
     if (consistencyStrategy === 'ABANDON_MEMBER') {
         return true;
     }

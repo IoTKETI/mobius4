@@ -7,7 +7,7 @@ const Joi = require('joi');
 const req_prim_schema = Joi.object().keys({
     op: Joi.number().integer().allow(1, 2, 3, 4, 5).required(),
     to: Joi.string().required(),
-    fr: Joi.string().optional(),
+    fr: Joi.string().allow('').optional(),
     user: Joi.string().optional(),
     rqi: Joi.string().required(),
     ty: Joi.number().integer().when('op', {
