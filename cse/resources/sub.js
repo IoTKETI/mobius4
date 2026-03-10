@@ -39,6 +39,18 @@ async function create_a_sub(req_prim, resp_prim) {
     return resp_prim;
   }
 
+  // check if the Originator has RETRIEVE privilege for the parent resource
+  const temp_req = {ri: req_prim.ri, op: 2, fr: req_prim.fr, to_ty: parent_ty};
+  const temp_resp = {};
+  
+  const {access_decision} = require('../hostingCSE');
+  const access_grant = await access_decision(temp_req, temp_resp);
+  if (false === access_grant) {
+    resp_prim.rsc = enums.rsc_str['ORIGINATOR_HAS_NO_PRIVILEGE'];
+    resp_prim.pc = { 'm2m:dbg': 'Originator has no retrieve privilege for the parent resource' };
+    return resp_prim;
+  }
+
   const ri = generate_ri();
   const now = get_cur_time();
   const et = get_default_et();

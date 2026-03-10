@@ -1418,6 +1418,9 @@ async function access_decision_acp_pv(originator, operation, acp_id_list) {
 					acr["acor"].includes("*")
 				) {
 					const acop_binary = parseInt(acr["acop"]).toString(2).padStart(6, "0");
+					// console.log("\n\nthis is important! acop_binary: ", acop_binary);
+					// console.log("origiantor: ", originator);
+					// console.log("operation: ", operation);
 
 					// acop_binary example: '000111' that has CREATE, RETRIEVE, UPDATE rights
 					switch (operation) {
