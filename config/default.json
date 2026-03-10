@@ -83,6 +83,7 @@
     "timestamp": 20,
     "entity_id": 255,
     "ri": 10,
+    "ri_max": 30,
     "pi": 255,
     "rn_random": 10,
     "rn": 20,

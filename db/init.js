@@ -5,6 +5,22 @@ const { generate_ri } = require('../cse/utils');
 const timestamp_format = config.get('cse.timestamp_format');
 const len = config.get('length');
 
+/**
+ * 객체의 키를 컬럼, 값을 파라미터로 사용하는 INSERT 쿼리를 생성합니다.
+ * @param {string} table - 테이블 이름
+ * @param {Object} data  - { 컬럼명: 값 } 형태의 객체
+ * @returns {{ text: string, values: any[] }}
+ */
+function build_insert(table, data) {
+    const keys = Object.keys(data);
+    const cols = keys.join(', ');
+    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+    return {
+        text: `INSERT INTO ${table} (${cols}) VALUES (${placeholders})`,
+        values: Object.values(data),
+    };
+}
+
 // PostgreSQL 연결 풀 생성
 const pool = new Pool({
     user: config.get('db.user'),
@@ -80,12 +96,12 @@ async function create_tables(client) {
         // <cb> resource does not have 'et'
         await client.query(`
             CREATE TABLE IF NOT EXISTS lookup (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL,
                 rn VARCHAR(${len.str_token}) NOT NULL,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 lvl INTEGER NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 cr VARCHAR(${len.str_token}),
                 int_cr VARCHAR(${len.str_token}),
                 et VARCHAR(${len.timestamp}) NULL, 
@@ -97,11 +113,11 @@ async function create_tables(client) {
         // create cb table
         await client.query(`
             CREATE TABLE IF NOT EXISTS cb (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 5,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 rn VARCHAR(${len.str_token}) NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 ct VARCHAR(${len.timestamp}) NOT NULL,
                 lt VARCHAR(${len.timestamp}) NOT NULL,
                 acpi VARCHAR(${len.structured_res_id})[],
@@ -120,13 +136,13 @@ async function create_tables(client) {
         // create acp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS acp (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 1,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 cr VARCHAR(${len.str_token}),
                 int_cr VARCHAR(${len.str_token}),
                 rn VARCHAR(${len.str_token}) NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 et VARCHAR(${len.timestamp}) NOT NULL,
                 ct VARCHAR(${len.timestamp}) NOT NULL,
                 lt VARCHAR(${len.timestamp}) NOT NULL,
@@ -140,13 +156,13 @@ async function create_tables(client) {
         // create sub table
         await client.query(`
             CREATE TABLE IF NOT EXISTS sub (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 23,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 cr VARCHAR(${len.str_token}),
                 int_cr VARCHAR(${len.str_token}),
                 rn VARCHAR(${len.str_token}) NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 et VARCHAR(${len.timestamp}) NOT NULL,
                 ct VARCHAR(${len.timestamp}) NOT NULL,
                 lt VARCHAR(${len.timestamp}) NOT NULL,
@@ -163,13 +179,13 @@ async function create_tables(client) {
         // create cnt table
         await client.query(`
             CREATE TABLE IF NOT EXISTS cnt (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 3,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}) NOT NULL,
               ct VARCHAR(${len.timestamp}) NOT NULL,
               lt VARCHAR(${len.timestamp}) NOT NULL,
@@ -189,10 +205,10 @@ async function create_tables(client) {
         // create cin table
         await client.query(`
             CREATE TABLE IF NOT EXISTS cin (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 4,
                 rn VARCHAR(${len.str_token}) NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 et VARCHAR(${len.timestamp}),
                 ct VARCHAR(${len.timestamp}),
@@ -211,23 +227,25 @@ async function create_tables(client) {
         // create grp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS grp (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 9,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
               acpi VARCHAR(${len.structured_res_id})[],
               lbl VARCHAR(${len.str_token})[],
               mt INTEGER DEFAULT 0,
+              mtv BOOLEAN DEFAULT NULL,
               cnm INTEGER DEFAULT 0,
               mnm INTEGER,
               csy INTEGER DEFAULT 1,
               mid VARCHAR(${len.structured_res_id})[],
+              macp VARCHAR(${len.structured_res_id})[],
               gn VARCHAR(${len.str_token})
             );
         `);
@@ -235,13 +253,13 @@ async function create_tables(client) {
         // create mrp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS mrp (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 101,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -258,13 +276,13 @@ async function create_tables(client) {
         // create mmd table
         await client.query(`
             CREATE TABLE IF NOT EXISTS mmd (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 107,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -286,12 +304,12 @@ async function create_tables(client) {
         // create mdp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS mdp (
-              ri VARCHAR(24) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 103,
               sid VARCHAR(255) NOT NULL UNIQUE,
               int_cr VARCHAR(255),
               rn VARCHAR(255) NOT NULL,
-              pi VARCHAR(255),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(20),
               ct VARCHAR(20),
               lt VARCHAR(20),
@@ -308,13 +326,13 @@ async function create_tables(client) {
         // create dpm table
         await client.query(`
             CREATE TABLE IF NOT EXISTS dpm (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 104,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -331,13 +349,13 @@ async function create_tables(client) {
         // create dsp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS dsp (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 105,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -360,13 +378,13 @@ async function create_tables(client) {
         // create dts table
         await client.query(`
             CREATE TABLE IF NOT EXISTS dts (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 106,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -381,12 +399,12 @@ async function create_tables(client) {
         // create dsf table
         await client.query(`
             CREATE TABLE IF NOT EXISTS dsf (
-              ri VARCHAR(${len.ri}) PRIMARY KEY,
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
               ty INTEGER NOT NULL DEFAULT 107,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               int_cr VARCHAR(${len.str_token}),
               rn VARCHAR(${len.str_token}) NOT NULL,
-              pi VARCHAR(${len.ri}),
+              pi VARCHAR(${len.ri_max}),
               et VARCHAR(${len.timestamp}),
               ct VARCHAR(${len.timestamp}),
               lt VARCHAR(${len.timestamp}),
@@ -404,7 +422,7 @@ async function create_tables(client) {
         // create ae table
         await client.query(`
             CREATE TABLE IF NOT EXISTS ae (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 2,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 cr VARCHAR(${len.str_token}),
@@ -430,13 +448,13 @@ async function create_tables(client) {
         // create csr table
         await client.query(`
             CREATE TABLE IF NOT EXISTS csr (
-                ri VARCHAR(${len.ri}) PRIMARY KEY,
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
                 ty INTEGER NOT NULL DEFAULT 16,
                 sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
                 cr VARCHAR(${len.str_token}),
                 int_cr VARCHAR(${len.str_token}),
                 rn VARCHAR(${len.str_token}) NOT NULL,
-                pi VARCHAR(${len.ri}),
+                pi VARCHAR(${len.ri_max}),
                 et VARCHAR(${len.timestamp}),
                 ct VARCHAR(${len.timestamp}),
                 lt VARCHAR(${len.timestamp}),
@@ -492,23 +510,37 @@ async function create_cb(client) {
         await client.query('BEGIN');
 
         // insert data into cb table
-        await client.query(`
-            INSERT INTO cb (ri, ty, sid, rn, pi, ct, lt, acpi, lbl, cst, csi, srt, srv, nl, poa, csz)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        `, [
-            cb_res.ri, cb_res.ty, cb_res.sid, cb_res.rn, cb_res.pi,
-            cb_res.ct, cb_res.lt, cb_res.acpi, cb_res.lbl, cb_res.cst,
-            cb_res.csi, cb_res.srt, cb_res.srv, cb_res.nl, cb_res.poa, cb_res.csz
-        ]);
+        await client.query(build_insert('cb', {
+            ri:   cb_res.ri,
+            ty:   cb_res.ty,
+            sid:  cb_res.sid,
+            rn:   cb_res.rn,
+            pi:   cb_res.pi,
+            ct:   cb_res.ct,
+            lt:   cb_res.lt,
+            acpi: cb_res.acpi,
+            lbl:  cb_res.lbl,
+            cst:  cb_res.cst,
+            csi:  cb_res.csi,
+            srt:  cb_res.srt,
+            srv:  cb_res.srv,
+            nl:   cb_res.nl,
+            poa:  cb_res.poa,
+            csz:  cb_res.csz,
+        }));
 
         // insert data into lookup table
-        await client.query(`
-            INSERT INTO lookup (ri, ty, rn, sid, lvl, pi, cr, int_cr, et)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        `, [
-            cb_res.ri, cb_res.ty, cb_res.rn, cb_res.sid, cb_res.lvl, cb_res.pi,
-            config.cse.admin, config.cse.admin, null
-        ]);
+        await client.query(build_insert('lookup', {
+            ri:     cb_res.ri,
+            ty:     cb_res.ty,
+            rn:     cb_res.rn,
+            sid:    cb_res.sid,
+            lvl:    cb_res.lvl,
+            pi:     cb_res.pi,
+            cr:     config.cse.admin,
+            int_cr: config.cse.admin,
+            et:     null,
+        }));
 
         await client.query('COMMIT');
         console.log(`\n<cb> resource is created with ri: ${cb_res.ri}`);
@@ -556,23 +588,32 @@ async function create_default_acp(client, cb_ri) {
         await client.query('BEGIN');
 
         // insert data into acp table
-        await client.query(`
-            INSERT INTO acp (ri, ty, sid, rn, pi, et, ct, lt, cr, pv, pvs)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        `, [
-            acp_res.ri, acp_res.ty, acp_res.sid, acp_res.rn, acp_res.pi,
-            acp_res.et, acp_res.ct, acp_res.lt, acp_res.cr,
-            JSON.stringify(acp_res.pv), JSON.stringify(acp_res.pvs)
-        ]);
+        await client.query(build_insert('acp', {
+            ri:  acp_res.ri,
+            ty:  acp_res.ty,
+            sid: acp_res.sid,
+            rn:  acp_res.rn,
+            pi:  acp_res.pi,
+            et:  acp_res.et,
+            ct:  acp_res.ct,
+            lt:  acp_res.lt,
+            cr:  acp_res.cr,
+            pv:  JSON.stringify(acp_res.pv),
+            pvs: JSON.stringify(acp_res.pvs),
+        }));
 
         // insert data into lookup table
-        await client.query(`
-            INSERT INTO lookup (ri, ty, rn, sid, lvl, pi, cr, int_cr, et)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        `, [
-            acp_res.ri, acp_res.ty, acp_res.rn, acp_res.sid, acp_res.lvl, acp_res.pi,
-            config.cse.admin, config.cse.admin, et
-        ]);
+        await client.query(build_insert('lookup', {
+            ri:     acp_res.ri,
+            ty:     acp_res.ty,
+            rn:     acp_res.rn,
+            sid:    acp_res.sid,
+            lvl:    acp_res.lvl,
+            pi:     acp_res.pi,
+            cr:     config.cse.admin,
+            int_cr: config.cse.admin,
+            et:     et,
+        }));
 
         // update acpi of <cb> resource
         await client.query(`

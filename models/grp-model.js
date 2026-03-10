@@ -26,6 +26,7 @@ const GRP = sequelize.define('grp', {
         type: DataTypes.INTEGER,
         defaultValue: 0,
     },
+    mtv: DataTypes.BOOLEAN,
     cnm: {
         type: DataTypes.INTEGER,
         defaultValue: 0,

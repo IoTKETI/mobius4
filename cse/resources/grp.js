@@ -35,6 +35,12 @@ async function create_a_grp(req_prim, resp_prim) {
     if (false === await memberIDs_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
         return;
     }
+
+    if (prim_res.mt !== 0) {
+        const validity = await memberType_validation(req_prim, resp_prim);
+        prim_res.mtv = validity;
+    }
+
     // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
     //     return;
     // }
@@ -60,6 +66,7 @@ async function create_a_grp(req_prim, resp_prim) {
             lbl: prim_res.lbl || null,
             cr: prim_res.cr === null ? req_prim.fr : null,
             mt: prim_res.mt || 0, // '0' means 'mixed'
+            mtv: prim_res.mtv ? prim_res.mtv : null,
             cnm: prim_res.mid ? prim_res.mid.length : 0,
             mnm: prim_res.mnm,
             csy: prim_res.csy || 1, // '1' means 'ABANDON_MEMBER'
@@ -121,11 +128,14 @@ async function retrieve_a_grp(req_prim, resp_prim) {
         grp_obj['m2m:grp'].mt = db_res.mt;
         grp_obj['m2m:grp'].cnm = db_res.cnm;
 
-        // optional attributes
+        // common attributes
         if (db_res.acpi) grp_obj['m2m:grp'].acpi = db_res.acpi;
         if (db_res.lbl) grp_obj['m2m:grp'].lbl = db_res.lbl;
         if (db_res.cr) grp_obj['m2m:grp'].cr = db_res.cr;
 
+        // resource specific attributes
+        if (db_res.mt) grp_obj['m2m:grp'].mt = db_res.mt;
+        if (db_res.mtv) grp_obj['m2m:grp'].mtv = db_res.mtv;
         if (db_res.mnm) grp_obj['m2m:grp'].mnm = db_res.mnm;
         if (db_res.csy) grp_obj['m2m:grp'].csy = db_res.csy;
         if (db_res.mid) grp_obj['m2m:grp'].mid = db_res.mid;
@@ -209,6 +219,11 @@ async function update_a_grp(req_prim, resp_prim) {
         if (prim_res.macp === null) db_res.macp = null;
         if (prim_res.gn === null) db_res.gn = null;
 
+        if (prim_res.mid && prim_res.mt !== 0) {
+            const validity = await memberType_validation(req_prim, resp_prim);
+            db_res.mtv = validity;
+        }
+
         await db_res.save();
 
         const tmp_req = { ri }, tmp_resp = {};
@@ -241,18 +256,47 @@ function remove_duplicate_memberIDs(memberIDs) {
 }
 
 // member type validation is called during creation and update of 'mid' attribute of <grp> resource
-async function memberType_validation(consistencyStrategy, memberType, memberIDs) {
-    // firstly check if resourceType of all members conform to the memberType
-    if (consistencyStrategy === 'SET_MIXED') {
-        return true;
+async function memberType_validation(req_prim, resp_prim) {
+    // arguments: consistencyStrategy, memberType, memberIDs
+    const prim_res = req_prim.pc['m2m:grp'];
+    const consistencyStrategy = prim_res.csy;
+    let memberType = prim_res.mt;
+    const memberIDs = prim_res.mid;
+
+    // get all resource types of the members
+    // note that this works for local members only
+    const member_types = await Promise.all(memberIDs.map(async (mid) => {
+        const { get_unstructuredID, get_ty_from_unstructuredID, retrieve_a_res } = require('../hostingCSE');
+        const ri = await get_unstructuredID(mid);
+        const ty = await get_ty_from_unstructuredID(ri);
+        return ty;
+    }));
+
+    // check the member types from 'member_types' against 'memberType'
+    // if all members are of the same type, return that type, otherwise, return 'MIXED'
+    if (memberType && memberType !== 0) {
+        const checked_ty = member_types.every((type) => type === memberType) ? memberType : 'MIXED';
+    
+        console.log('checked_ty: ', checked_ty);
+        if (memberType === checked_ty)
+            return true;
+        else
+        // apply the consistency strategy
+        {
+            // firstly check if resourceType of all members conform to the memberType
+            if (consistencyStrategy === 'SET_MIXED') {
+                return true;
+            }
+            if (consistencyStrategy === 'ABANDON_MEMBER') {
+                return true;
+            }
+            if (consistencyStrategy === 'ABANDON_GROUP') {
+                return true;
+            }
+            return false;
+            
+        }
     }
-    if (consistencyStrategy === 'ABANDON_MEMBER') {
-        return true;
-    }
-    if (consistencyStrategy === 'ABANDON_GROUP') {
-        return true;
-    }
-    return false;
 }
 
 exports.fanout = async function (req_prim, resp_prim) {
