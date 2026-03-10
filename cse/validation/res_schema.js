@@ -271,7 +271,7 @@ const sub_update_schema = Joi.object().keys({
     lbl: update_common_attr.lbl,
     cr: update_common_attr.cr,
 
-    nu: Joi.array().optional().items(Joi.string()),
+    nu: Joi.array().forbidden(),
     enc: Joi.object().optional().keys({
         net: Joi.array().items(Joi.number().integer()),
         chty: Joi.array().items(Joi.number().integer())
