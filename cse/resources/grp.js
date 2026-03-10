@@ -32,13 +32,17 @@ async function create_a_grp(req_prim, resp_prim) {
 
     // validations for group creation
     prim_res.mid = remove_duplicate_memberIDs(prim_res.mid);
-    if (false === await memberIDs_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
+    if (false === await member_count_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
         return;
     }
 
     if (prim_res.mt !== 0) {
         const validity = await memberType_validation(req_prim, resp_prim);
-        prim_res.mtv = validity;
+        if (false === validity) {
+            return;
+        } else {
+            prim_res.mtv = true;
+        }
     }
 
     // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
@@ -173,13 +177,12 @@ async function update_a_grp(req_prim, resp_prim) {
         }
 
         // validations for group update
-        prim_res.mid = remove_duplicate_memberIDs(prim_res.mid);
-        if (false === await memberIDs_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
-            return;
+        if (prim_res.mid) { 
+            prim_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+            if (false === await member_count_validation(prim_res.mnm, prim_res.mid, resp_prim)) {
+                return;
+            }
         }
-        // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
-        //     return;
-        // }
 
         db_res.lt = get_cur_time();
 
@@ -194,6 +197,7 @@ async function update_a_grp(req_prim, resp_prim) {
             return;
         }
         // new mnm cannot be less than the number of current members
+        console.log('\n\nmnm: ', prim_res.mnm, 'cnm: ', db_res.cnm);
         if (prim_res.mnm < db_res.cnm) {
             resp_prim.rsc = enums.rsc_str['MAX_NUMBER_OF_MEMBER_EXCEEDED'];
             resp_prim.pc = { 'm2m:dbg': 'new mnm cannot be less than the number of current members' };
@@ -219,9 +223,31 @@ async function update_a_grp(req_prim, resp_prim) {
         if (prim_res.macp === null) db_res.macp = null;
         if (prim_res.gn === null) db_res.gn = null;
 
+        // members number validation
+        // validations for group creation
+        db_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+        if (false === await member_count_validation(db_res.mnm, db_res.mid, resp_prim)) {
+            return;
+        } else {
+            db_res.cnm = db_res.mid.length;
+        }
+
+        // member type validation
         if (prim_res.mid && prim_res.mt !== 0) {
+            // provide validation info from the existing resource attributes
+            req_prim.pc['m2m:grp'].mt = db_res.mt;
+            req_prim.pc['m2m:grp'].csy = db_res.csy;
+
             const validity = await memberType_validation(req_prim, resp_prim);
-            db_res.mtv = validity;
+            if (false === validity) {
+                return;
+            } else {
+                db_res.mtv = true;
+                db_res.mt = req_prim.pc['m2m:grp'].mt;
+                if (req_prim.pc['m2m:grp'].mid) {
+                    db_res.mid = req_prim.pc['m2m:grp'].mid;
+                }
+            }
         }
 
         await db_res.save();
@@ -239,7 +265,7 @@ async function update_a_grp(req_prim, resp_prim) {
     return;
 }
 
-async function memberIDs_validation(maxNumber, memberIDs, resp_prim) {
+async function member_count_validation(maxNumber, memberIDs, resp_prim) {
     // check if the number of memberIDs exceeds the maximum number of members (mnm)
     if (memberIDs.length > maxNumber) {
         resp_prim.rsc = enums.rsc_str['MAX_NUMBER_OF_MEMBER_EXCEEDED'];
@@ -266,35 +292,42 @@ async function memberType_validation(req_prim, resp_prim) {
     // get all resource types of the members
     // note that this works for local members only
     const member_types = await Promise.all(memberIDs.map(async (mid) => {
-        const { get_unstructuredID, get_ty_from_unstructuredID, retrieve_a_res } = require('../hostingCSE');
+        const { get_unstructuredID, get_ty_from_unstructuredID } = require('../hostingCSE');
         const ri = await get_unstructuredID(mid);
         const ty = await get_ty_from_unstructuredID(ri);
-        return ty;
+        return { mid, ty };
     }));
 
     // check the member types from 'member_types' against 'memberType'
     // if all members are of the same type, return that type, otherwise, return 'MIXED'
     if (memberType && memberType !== 0) {
-        const checked_ty = member_types.every((type) => type === memberType) ? memberType : 'MIXED';
+        const checked_ty = member_types.every(({ ty }) => ty === memberType) ? memberType : 'MIXED';
     
         console.log('checked_ty: ', checked_ty);
         if (memberType === checked_ty)
             return true;
         else
-        // apply the consistency strategy
+        // apply the consistency strategy (1: ABANDON_MEMBER, 2: ABANDON_GROUP, 3: SET_MIXED)
         {
-            // firstly check if resourceType of all members conform to the memberType
-            if (consistencyStrategy === 'SET_MIXED') {
+            if (consistencyStrategy === 1) {
+                // remove the members in member_types that do not conform to the memberType, and get the 'mid' list of the remaining members
+                const remaining_members = member_types.filter(({ ty }) => ty === memberType).map(({ mid }) => mid);
+                req_prim.pc['m2m:grp'].mid = remaining_members;
+                
                 return true;
             }
-            if (consistencyStrategy === 'ABANDON_MEMBER') {
-                return true;
+            if (consistencyStrategy === 2) {
+                resp_prim.rsc = enums.rsc_str['GROUP_MEMBER_TYPE_INCONSISTENT'];
+                resp_prim.pc = { 'm2m:dbg': 'member types are inconsistent with mt value provided' };
+                
+                return false;
             }
-            if (consistencyStrategy === 'ABANDON_GROUP') {
-                return true;
+            if (consistencyStrategy === 3) {
+                req_prim.pc['m2m:grp'].mt = 0; // 0: 'MIXED'
+                
+                return true; 
             }
             return false;
-            
         }
     }
 }
