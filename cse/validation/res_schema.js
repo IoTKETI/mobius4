@@ -256,7 +256,8 @@ const sub_create_schema = Joi.object().keys({
     nu: Joi.array().required().items(Joi.string()),
     enc: Joi.object().optional().keys({
         net: Joi.array().items(Joi.number().integer()),
-        chty: Joi.array().items(Joi.number().integer())
+        chty: Joi.array().items(Joi.number().integer()),
+        om: Joi.any()
     }),
     exc: Joi.number().integer().min(1),
     nct: Joi.number().integer().min(1),

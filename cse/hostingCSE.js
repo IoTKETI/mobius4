@@ -1185,6 +1185,7 @@ async function access_decision(req_prim, resp_prim) {
 	const obj_key = Object.keys(temp_resp.pc)[0];
 	const ty = temp_resp.pc[obj_key].ty;
 	const ty_str = enums.ty_str[ty];
+	const acpi = JSONPath("$..acpi", temp_resp)[0];
 
 	// to-do: what is this?
 	// disable this so it is not applied for subsequent procedures, hence not exposed in responses
@@ -1197,11 +1198,33 @@ async function access_decision(req_prim, resp_prim) {
 	}
 
 	// Case A.
-	// special handling for <ACP> resource as a target
+	// special handling for <ACP> resource as a target 
 	if (ty_str == "acp") {
 		const pvs = temp_resp.pc["m2m:acp"].pvs;
-		access_grant = await access_decision_acp_pvs(req_prim.fr, req_prim.op, pvs);
+		access_grant = await access_decision_privileges(req_prim.fr, req_prim.op, pvs);
 		return access_grant;
+	}
+
+	// special handling for updating 'acpi' attribute of any resources
+	if (req_prim.acpi_update === true) {
+		// using req_prim, get the 'acpi' attribute from the target resource
+		const acpi = JSONPath("$..acpi", temp_resp)[0];
+		// using acpi, retrieve the ACP resource and get the 'pvs' attribute from the target resource
+		for (const acp_id of acpi) {
+			const ACP = require('../models/acp-model');
+			const acp_ri = await get_unstructuredID(acp_id);
+			const acp_model = await ACP.findByPk(acp_ri, { attributes: ['pvs'] });
+			const pvs = acp_model ? acp_model.pvs : null;
+			
+			if (!pvs) continue;
+			
+			access_grant = await access_decision_privileges(req_prim.fr, req_prim.op, pvs);
+			if (access_grant === true) {
+				// console.log("access granted for updating 'acpi' attribute of ", acpi_id);
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// Case B.
@@ -1251,7 +1274,7 @@ async function access_decision(req_prim, resp_prim) {
 		
 		const grp_res = temp_resp.pc["m2m:grp"];
 		if (grp_res.macp) {
-			access_grant = await access_decision_acp_pv(req_prim.fr, req_prim.op, grp_res.macp);
+			access_grant = await access_decision_acpi(req_prim.fr, req_prim.op, grp_res.macp);
 			console.log("access_grant for fopt: ", access_grant);
 			return access_grant;
 		}
@@ -1275,11 +1298,11 @@ async function access_decision(req_prim, resp_prim) {
 	// Therefore, case C and D share the same code
 
 	// 1. try access decision by <ACP> resouces
-	const acpi = JSONPath("$..acpi", temp_resp)[0];
+	// const acpi = JSONPath("$..acpi", temp_resp)[0];
 
 	// use <ACP> resources when 'acpi' is not empty
 	if (acpi != null && acpi.length != 0) {
-		access_grant = await access_decision_acp_pv(req_prim.fr, req_prim.op, acpi);
+		access_grant = await access_decision_acpi(req_prim.fr, req_prim.op, acpi);
 	}
 	// use internally kept 'creator' info when 'acpi' is empty
 	else {
@@ -1397,7 +1420,7 @@ function access_decision_acr_list(acr_list, originator, operation) {
 	return false;
 }
 
-async function access_decision_acp_pv(originator, operation, acp_id_list) {
+async function access_decision_acpi(originator, operation, acp_id_list) {
 	if (acp_id_list) {
 		for (const acp_id of acp_id_list) {
 			const acp_ri = await get_unstructuredID(acp_id); // make sure that this is structured ID
@@ -1418,9 +1441,6 @@ async function access_decision_acp_pv(originator, operation, acp_id_list) {
 					acr["acor"].includes("*")
 				) {
 					const acop_binary = parseInt(acr["acop"]).toString(2).padStart(6, "0");
-					// console.log("\n\nthis is important! acop_binary: ", acop_binary);
-					// console.log("origiantor: ", originator);
-					// console.log("operation: ", operation);
 
 					// acop_binary example: '000111' that has CREATE, RETRIEVE, UPDATE rights
 					switch (operation) {
@@ -1470,7 +1490,7 @@ async function access_decision_acp_pv(originator, operation, acp_id_list) {
 	return false;
 }
 
-async function access_decision_acp_pvs(originator, operation, pvs) {
+async function access_decision_privileges(originator, operation, pvs) {
 	const acr_list = pvs["acr"];
 	for (const acr of acr_list) {
 		if (

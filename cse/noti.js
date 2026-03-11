@@ -109,22 +109,27 @@ async function http_noti(noti_target, sgn) {
                 "Content-Type": "application/json",
             },
             data: JSON.stringify(sgn),
+            timeout: 3000,
         })
         .then((resp) => {
             console.log("\nreceived message from notification target:");
             console.log(JSON.stringify(resp.data, null, 2));
         })
         .catch((err) => {
+            const sur = sgn['m2m:sgn'].nev.sur;
             if (err.response) {
-                // server responded but 4xx/5xx error
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (status: ${err.response.status})`);
+                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
+                console.warn(`  → status: ${err.response.status}`);
+                console.warn(`  → data:`, err.response.data);
             } else if (err.request) {
-                // request is sent but no response
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (no response)`);
+                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
+                console.warn(`  → code: ${err.code}`);
+                console.warn(`  → message: ${err.message}`);
             } else {
-                // other error
-                console.warn(`sur: ${sgn['m2m:sgn'].nev.sur}, target unreachable: ${noti_target} (error: ${err.message})`);
+                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
+                console.warn(`  → message: ${err.message}`);
             }
+            console.warn(`  → full error:`, err);
 
             return false;
         });

@@ -1,5 +1,6 @@
 const config = require("config");
 const axios = require('axios');
+const { JSONPath } = require("jsonpath-plus");
 
 const enums = require("../config/enums");
 const { req_prim_schema } = require("./validation/prim_schema");
@@ -256,6 +257,18 @@ async function prim_handling(req_prim) {
 
       // UPDATE
       case 3:
+        // additional access control for updating 'acpi' attribute
+        // check if req_prim.pc has 'acpi' attribute using JSONPath
+        const acpi = JSONPath("$..acpi", req_prim.pc);
+        if (acpi && acpi.length > 0) {
+          req_prim.acpi_update = true;
+          const access_grant = await hostingCSE.access_decision(req_prim, resp_prim);
+          if (false === access_grant) {
+            resp_prim.rsc = enums.rsc_str["ORIGINATOR_HAS_NO_PRIVILEGE"];
+            resp_prim.pc = { "m2m:dbg": "access denied" };
+            return resp_prim;
+          }
+        }
         await hostingCSE.update_a_res(req_prim, resp_prim);
         if (!resp_prim.rsc) {
           resp_prim.rsc = enums.rsc_str["UPDATED"];
