@@ -6,7 +6,13 @@ const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');
 
 
-// eventTYpe = ['create', 'update']
+// supported notificationEventType (net) = {
+//     1: Update of Resource
+//     2: Delete of Resource
+//     3: Create of Direct Child Resource
+//     4: Delete of Direct Child Resource
+// }
+
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
     // get subscribed-to resource info, which is the parent of the sub resource
     const sub_res_pi = req_prim.ri;
@@ -24,7 +30,7 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
             if (!sub_res.enc) sub_res.enc = { net: [1] };
 
             if (sub_res.enc.net.includes(3) == true && "create" == event_type) {
-                // net 3: create
+                // net 3: Create of Direct Child Resource
                 let this_ty = req_prim.ty;
                 // console.log('\nsub_res for the creation target: ', sub_res);
                 if (sub_res.enc.chty) {
@@ -35,15 +41,20 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
                     send_a_noti(sub_res, resp_prim.pc, 3);
                 }
             } else if (sub_res.enc.net.includes(1) == true && "update" == event_type) {
-                // net 1: update
+                // net 1: Update of Resource
                 if (2 == sub_res.nct) {
                     // notificationContentType 2: modified attributes
+                    // to-do: check if this works fine
                     send_a_noti(sub_res, req_prim.pc, 1);
                 } else if (1 == sub_res.nct) {
                     // notificationContentType 1: all attributes (default)
                     // console.log('noti obj: ', resp_prim.pc);
                     send_a_noti(sub_res, resp_prim.pc, 1);
                 }
+            } else if (sub_res.enc.net.includes(2) == true && "delete" == event_type) {
+                // net 2: Delete of Resource
+                send_a_noti(sub_res, resp_prim.pc, 2); // to-do: working on it
+                // to-do: check if I need to return the deleted resource (currently return it)
             }
         });
 
@@ -66,9 +77,9 @@ async function send_a_noti(sub_res, event_obj, notificationEventType) {
         "m2m:sgn": {
             nev: {
                 rep: event_obj,
-                sur: sub_res.sid,
                 net: notificationEventType,
             },
+            sur: sub_res.sid
         },
     }; // single notificaiton
 
@@ -106,10 +117,8 @@ async function send_sub_del_noti(sub_res) {
     
     const sgn = {
         "m2m:sgn": {
-            nev: {
-                sur: await get_structuredID(sub_res.ri),
-                sud: true
-            }
+            sud: true,
+            sur: await get_structuredID(sub_res.ri),
         }
     };
 
@@ -138,6 +147,8 @@ async function send_sub_del_noti(sub_res) {
 }
 
 async function http_noti(noti_target, sgn) {
+    console.log("\n\nhttp_noti, noti_target: ", noti_target);
+    console.log("http_noti, sgn: ", JSON.stringify(sgn, null, 2));
     const { generate_ri } = require('./utils');
 
     // axios handles HTTP and HTTPs automatically
@@ -154,11 +165,12 @@ async function http_noti(noti_target, sgn) {
             timeout: 3000,
         })
         .then((resp) => {
-            console.log("\nreceived message from notification target:");
+            console.log("\n\nreceived message from notification target:");
+            console.log(JSON.stringify('status code: ', resp.status));
             console.log(JSON.stringify(resp.data, null, 2));
         })
         .catch((err) => {
-            const sur = sgn['m2m:sgn'].nev.sur;
+            const sur = sgn['m2m:sgn'].sur;
             if (err.response) {
                 console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
                 console.warn(`  → status: ${err.response.status}`);
@@ -226,7 +238,7 @@ function self_noti_handler(topic, req_prim) {
     console.log('\nself_noti_handler, topic: ', topic);
 
     const res = req_prim.pc['m2m:sgn'].nev.rep;
-    const sub_rn = req_prim.pc['m2m:sgn'].nev.sur.split('/').pop();
+    const sub_rn = req_prim.pc['m2m:sgn'].sur.split('/').pop();
     const dsp_ri = sub_rn.split('sub-live-dataset-')[1];
 
     // self notification to create live dataset

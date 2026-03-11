@@ -194,7 +194,10 @@ async function create_a_res(req_prim, resp_prim) {
 			};
 		}
 		// after creation, check and send notification(s) if needed
-		noti.check_and_send_noti(req_prim, resp_prim_copy, "create");
+		// skip this for <sub> resource creation
+		if (req_prim.ty !== 23) {
+			noti.check_and_send_noti(req_prim, resp_prim_copy, "create");
+		}
 	}
 
 	return;
@@ -505,7 +508,7 @@ async function update_a_res(req_prim, resp_prim) {
 	if (!resp_prim.rsc) {
 		resp_prim.rsc = enums.rsc_str["UPDATED"];
 
-		// after creation, check and send notification(s) if needed
+		// after update, check and send notification(s) if needed
 		noti.check_and_send_noti(req_prim, resp_prim, "update");
 	}
 
@@ -554,6 +557,9 @@ async function delete_a_res(req_prim, resp_prim) {
 	}
 	resp_prim.pc = tmp_resp.pc;
 	resp_prim.rsc = enums.rsc_str["DELETED"];
+
+	// after deletion, check and send notification(s) if needed
+	noti.check_and_send_noti(req_prim, tmp_resp, "delete");
 
 	// to-do
 	// when delete a <cin> resource, update the parent <cnt> resource's 'cbs' attribute
