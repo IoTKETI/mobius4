@@ -225,7 +225,9 @@ async function update_a_grp(req_prim, resp_prim) {
 
         // members number validation
         // validations for group creation
-        db_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+        if (prim_res.mid) {
+            db_res.mid = remove_duplicate_memberIDs(prim_res.mid);
+        }
         if (false === await member_count_validation(db_res.mnm, db_res.mid, resp_prim)) {
             return;
         } else {
