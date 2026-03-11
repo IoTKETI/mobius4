@@ -8,10 +8,10 @@ const AE = require('../models/ae-model');
 
 // eventTYpe = ['create', 'update']
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
-    // get subscribed-to resource info
+    // get subscribed-to resource info, which is the parent of the sub resource
     const sub_res_pi = req_prim.ri;
 
-    // get <sub> child resources
+    // get <sub> children resources
     const sub_res = (await SUB.findAll({ where: { pi: sub_res_pi } }))
         .map(sub => sub.toJSON());
 
@@ -95,6 +95,48 @@ async function send_a_noti(sub_res, event_obj, notificationEventType) {
         }
     }
 }
+
+async function send_sub_del_noti(sub_res) {
+    // this works only when the sub resource has a 'su' attribute
+    const subscriberURI = sub_res.su;
+    if (!subscriberURI) 
+        return;
+
+    const { get_structuredID } = require('./hostingCSE');
+    
+    const sgn = {
+        "m2m:sgn": {
+            nev: {
+                sur: await get_structuredID(sub_res.ri),
+                sud: true
+            }
+        }
+    };
+
+    
+    if (subscriberURI.indexOf("http") == 0) http_noti(subscriberURI, sgn);
+    else if (subscriberURI.indexOf("mqtt") == 0) mqtt_noti(subscriberURI, sgn);
+    else {
+        // last case: subscriberURI represents the ID of an <AE> resource, not a HTTP/MQTT URL
+        const { get_to_info } = require('./reqPrim');
+        const { shortest_to: res_id } = get_to_info({ to: subscriberURI });
+
+        if (res_id) {
+            const urls = await get_urls_from_poa(res_id);
+
+            for (const url of urls) {
+                let result = null;
+                if (url.indexOf("http") == 0) result = await http_noti(url, sgn);
+                else if (url.indexOf("mqtt") == 0) result = await mqtt_noti(url, sgn);
+
+                // if the notification is sent successfully, stop the loop
+                if (result === true) break;
+            }
+        }
+    }
+    
+}
+
 async function http_noti(noti_target, sgn) {
     const { generate_ri } = require('./utils');
 
@@ -244,4 +286,8 @@ function batch_noti_data(dsp_ri,data) {
     console.log('\nbatch_data: ', JSON.stringify(batch_data, null, 2));
 }
 
-module.exports = { check_and_send_noti, self_noti_handler };
+module.exports = { 
+    check_and_send_noti, 
+    send_sub_del_noti,
+    self_noti_handler 
+};

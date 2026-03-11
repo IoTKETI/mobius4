@@ -520,6 +520,17 @@ async function delete_a_res(req_prim, resp_prim) {
 			resp_prim.pc = { "m2m:dbg": "not allowed API call" };
 			return;
 
+		case 23:
+			const { send_sub_del_noti } = require('./noti');
+			const tmp_resp = {};
+			const { retrieve_a_sub } = require('./resources/sub');
+			await retrieve_a_sub(req_prim, tmp_resp);
+
+			if (tmp_resp.pc) {
+				await send_sub_del_noti(tmp_resp.pc['m2m:sub']);
+			}
+			break;
+
 		// when deleting a <dsp> resource, delete the <sub> resource(s) if any
 		case 105:
 			const { delete_sub_for_live_dataset } = require('./datasetManager');
