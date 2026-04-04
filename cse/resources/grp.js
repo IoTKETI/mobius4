@@ -335,12 +335,12 @@ async function memberType_validation(req_prim, resp_prim) {
 }
 
 exports.fanout = async function (req_prim, resp_prim) {
-    resp_prim.pc = { 'm2m:agr': { 'm2m:rsp': {} } };
+    resp_prim.pc = { 'm2m:agr': { 'rsp': {} } };
 
     // send fanout requests concurrently and sum-up 
     const fanout_resp_prims = await aggregate_fanout_resp_prims(req_prim);
 
-    resp_prim.pc['m2m:agr']['m2m:rsp'] = fanout_resp_prims;
+    resp_prim.pc['m2m:agr']['rsp'] = fanout_resp_prims;
 
     return;
 }
