@@ -509,5 +509,6 @@ module.exports = {
     get_dataset_info,
     get_feature_list,
     delete_sub_for_live_dataset,
-    batch_data
+    batch_data,
+    shutdown: () => interval_manager.stopAllIntervals(),
 }

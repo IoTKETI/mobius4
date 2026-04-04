@@ -72,7 +72,14 @@
     "enabled": true,
     "ip": "localhost",
     "port": 1883,
-    "initialConnectTimeoutMs": 10000
+    "initialConnectTimeoutMs": 10000,
+    "reconnect": {
+      "initialDelayMs": 1000,
+      "maxDelayMs": 60000,
+      "multiplier": 2,
+      "jitter": 0.2,
+      "maxAttempts": 0
+    }
   },
   "db": {
     "user": "",

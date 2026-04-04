@@ -9,6 +9,8 @@ const mqtt = require('./bindings/mqtt');
 
 const config = require('config');
 
+let cleanupIntervalId;
+
 async function main() {
     logger.info('mobius4 starting up');
 
@@ -35,11 +37,13 @@ async function main() {
     // start expired resource cleanup
     const { expired_resource_cleanup } = require('./cse/hostingCSE');
     const cleanupIntervalMs = config.cse.expired_resource_cleanup_interval_days * 24 * 60 * 60 * 1000;
-    setInterval(expired_resource_cleanup, cleanupIntervalMs);
+    cleanupIntervalId = setInterval(expired_resource_cleanup, cleanupIntervalMs);
     logger.info({ intervalDays: config.cse.expired_resource_cleanup_interval_days }, 'expired resource cleanup scheduled');
 }
 
-main();
+main().then(() => {
+    if (process.send) process.send('ready'); // PM2 wait_ready 연동
+});
 
 // graceful shutdown
 async function shutdown(signal) {
@@ -51,11 +55,24 @@ async function shutdown(signal) {
     }, 30000);
 
     try {
+        // 1. 인터벌 정지 (새 작업 스케줄링 차단)
+        if (cleanupIntervalId) clearInterval(cleanupIntervalId);
+        require('./cse/datasetManager').shutdown();
+
+        // 2. HTTP 서버 종료 — 새 연결 차단 + keep-alive 커넥션 즉시 해제
         const { server, https_server } = require('./bindings/http');
-        await new Promise((resolve) => server.close(resolve));
-        await new Promise((resolve) => https_server.close(resolve));
+        await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
+        await new Promise((resolve) => { https_server.close(resolve); https_server.closeAllConnections(); });
+
+        // 3. MQTT 연결 해제
+        await mqtt.disconnect();
+
+        // 4. DB 커넥션 종료
+        const sequelize = require('./db/sequelize');
+        await sequelize.close();
         const pool = require('./db/connection');
         await pool.end();
+
         clearTimeout(timeout);
         logger.info('shutdown complete');
         process.exit(0);

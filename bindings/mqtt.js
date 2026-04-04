@@ -4,7 +4,40 @@ const config = require("config");
 const logger = require("../logger").child({ module: "mqtt", binding: "mqtt" });
 const reqPrim = require('../cse/reqPrim');
 const metrics = require('../metrics');
+
 let mqtt_client = null;
+let reconnectAttempts = 0;
+let reconnectTimer = null;
+let isConnected = false;
+let shuttingDown = false;
+
+function computeBackoffDelay() {
+    const cfg = config.get('mqtt.reconnect');
+    const delay = Math.min(
+        cfg.initialDelayMs * Math.pow(cfg.multiplier, reconnectAttempts),
+        cfg.maxDelayMs
+    );
+    // ±jitter 랜덤 분산 적용
+    return delay * (1 + (Math.random() * 2 - 1) * cfg.jitter);
+}
+
+function scheduleReconnect(endpoint) {
+    if (shuttingDown) return;
+
+    const maxAttempts = config.get('mqtt.reconnect.maxAttempts');
+    if (maxAttempts > 0 && reconnectAttempts >= maxAttempts) {
+        logger.error({ attempts: reconnectAttempts }, 'mqtt max reconnect attempts reached, giving up');
+        return;
+    }
+
+    const delayMs = Math.round(computeBackoffDelay());
+    logger.warn({ attempt: reconnectAttempts + 1, delayMs, endpoint }, 'mqtt scheduling reconnect');
+
+    reconnectTimer = setTimeout(() => {
+        reconnectAttempts++;
+        mqtt_client.reconnect();
+    }, delayMs);
+}
 
 exports.init_client = async function () {
     if (!config.get('mqtt.enabled')) {
@@ -14,12 +47,15 @@ exports.init_client = async function () {
 
     const mqtt_endpoint = 'tcp://' + config.mqtt.ip + ':' + config.mqtt.port;
     mqtt_client = MQTT.connect(mqtt_endpoint, {
-        reconnectPeriod: 5000,
+        reconnectPeriod: 0,      // 자동 재연결 비활성화 — 수동 지수 백오프로 제어
         connectTimeout: 30000
     });
 
     // Re-subscribe on every connect (handles both initial connect and reconnects)
     mqtt_client.on('connect', async () => {
+        isConnected = true;
+        reconnectAttempts = 0;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         try {
             await mqtt_client.subscribe(`/oneM2M/req/+${config.cse.cse_id}/json`);
             await mqtt_client.subscribe('self/datasetManager/#');
@@ -29,9 +65,12 @@ exports.init_client = async function () {
         }
     });
 
+    mqtt_client.on('close', () => {
+        isConnected = false;
+        scheduleReconnect(mqtt_endpoint);
+    });
+
     mqtt_client.on('message', mqtt_receiver);
-    mqtt_client.on('reconnect', () => logger.warn({ endpoint: mqtt_endpoint }, 'mqtt reconnecting'));
-    mqtt_client.on('offline', () => logger.error({ endpoint: mqtt_endpoint }, 'mqtt offline'));
 
     // Prevent unhandled EventEmitter error from crashing the process
     mqtt_client.on('error', (err) => {
@@ -83,8 +122,8 @@ async function mqtt_receiver(req_topic, req_prim_str) {
 }
 
 exports.mqtt_transmitter = async function (req_topic, req_prim) {
-    if (!mqtt_client) {
-        logger.warn({ topic: req_topic }, 'mqtt transmit skipped: mqtt binding is disabled');
+    if (!mqtt_client || !isConnected) {
+        logger.warn({ topic: req_topic }, 'mqtt transmit skipped: mqtt is not connected');
         return false;
     }
 
@@ -99,3 +138,18 @@ exports.mqtt_transmitter = async function (req_topic, req_prim) {
 
     return true;
 }
+
+exports.disconnect = async function () {
+    if (!mqtt_client) return;
+    shuttingDown = true;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    try {
+        await mqtt_client.end(false); // false = graceful (flush pending messages first)
+        isConnected = false;
+        logger.info('mqtt client disconnected');
+    } catch (err) {
+        logger.error({ err }, 'mqtt disconnect error');
+    }
+};
+
+exports.isConnected = () => isConnected;
