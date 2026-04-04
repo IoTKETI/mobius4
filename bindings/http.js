@@ -12,6 +12,7 @@ const app = express();
 const logger = require("../logger");
 const enums = require("../config/enums");
 const reqPrim = require("../cse/reqPrim");
+const metrics = require("../metrics");
 
 // Security: Helmet (configurable, default off)
 if (config.get("security.helmet.enabled")) {
@@ -57,7 +58,7 @@ app.use(pinoHttp({
       };
     }
   },
-  autoLogging: { ignore: (req) => req.url === "/health" }
+  autoLogging: { ignore: (req) => req.url === "/health" || req.url === "/metrics" }
 }));
 
 // JSON parsing middleware (application/json)
@@ -68,6 +69,16 @@ app.use(express.json({
 // URL-encoded parsing middleware (if needed)
 app.use(express.urlencoded({ extended: true, limit: config.get("request.max_body_size") }));
 app.use(cors());
+
+// HTTP metrics middleware (no-op when metrics.enabled is false)
+app.use((req, res, next) => {
+  const end = metrics.httpRequestDuration.startTimer({ method: req.method });
+  res.on('finish', () => {
+    metrics.httpRequestsTotal.inc({ method: req.method, status_code: res.statusCode });
+    end();
+  });
+  next();
+});
 
 // JSON parsing error handling middleware
 app.use((error, req, res, next) => {
@@ -109,6 +120,19 @@ const https_server = https
 if (https_server) {
   logger.info({ port: config.https.port }, 'HTTPS server listening');
 }
+
+// Prometheus metrics endpoint (always registered to prevent /metrics falling through to oneM2M handler)
+app.get('/metrics', async (req, res) => {
+  if (!metrics.enabled) {
+    return res.status(404).end();
+  }
+  try {
+    res.set('Content-Type', metrics.register.contentType);
+    res.end(await metrics.register.metrics());
+  } catch (err) {
+    res.status(500).end(err.message);
+  }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {

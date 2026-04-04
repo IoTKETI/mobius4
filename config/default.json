@@ -122,6 +122,9 @@
       "max": 500
     }
   },
+  "metrics": {
+    "enabled": false
+  },
   "default": {
     "common": {
       "et_month": 12

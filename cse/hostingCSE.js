@@ -7,6 +7,7 @@ const jose = require("jose");
 const pool = require('../db/connection');
 const moment = require('moment');
 
+const metrics = require('../metrics');
 const { Op, Sequelize } = require('sequelize');
 const Lookup = require('../models/lookup-model');
 // oneM2M standard resources
@@ -172,6 +173,7 @@ async function create_a_res(req_prim, resp_prim) {
 
 	// if there was any error during the creation, 'resp_prim' will have an error code in 'rsc' property
 	if (!resp_prim.rsc) {
+		metrics.resourcesCreatedTotal.inc({ ty: String(ty) });
 		resp_prim.rsc = enums.rsc_str["CREATED"];
 
 		const resp_prim_copy = { ...resp_prim };

@@ -3,6 +3,7 @@ const config = require("config");
 
 const logger = require("../logger").child({ module: "mqtt", binding: "mqtt" });
 const reqPrim = require('../cse/reqPrim');
+const metrics = require('../metrics');
 let mqtt_client = null;
 
 exports.init_client = async function () {
@@ -67,6 +68,8 @@ async function mqtt_receiver(req_topic, req_prim_str) {
         self_noti_handler(req_topic, req_prim);
         return;
     }
+
+    metrics.mqttMessagesTotal.inc();
 
     const resp_prim = await reqPrim.prim_handling(req_prim);
 
