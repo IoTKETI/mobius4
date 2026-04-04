@@ -9,6 +9,8 @@ const CIN = require('../../models/cin-model');
 const CNT = require('../../models/cnt-model');
 const Lookup = require('../../models/lookup-model');
 
+const logger = require('../../logger').child({ module: 'cnt' });
+
 const cnt_parent_res_types = ['ae', 'cnt', 'csr', 'cb', 'flx'];
 
 async function create_a_cnt(req_prim, resp_prim) {
@@ -91,7 +93,7 @@ async function create_a_cnt(req_prim, resp_prim) {
         await retrieve_a_cnt(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'create_a_cnt failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
@@ -216,7 +218,7 @@ async function update_a_cnt(req_prim, resp_prim) {
 
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'update_a_cnt failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }

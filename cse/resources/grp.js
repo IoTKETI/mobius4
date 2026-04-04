@@ -5,6 +5,8 @@ const enums = require('../../config/enums');
 const GRP = require('../../models/grp-model');
 const Lookup = require('../../models/lookup-model');
 
+const logger = require('../../logger').child({ module: 'grp' });
+
 const grp_parent_res_types = ['ae', 'rce', 'cb'];
 
 async function create_a_grp(req_prim, resp_prim) {
@@ -98,7 +100,7 @@ async function create_a_grp(req_prim, resp_prim) {
         await retrieve_a_grp(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'create_a_grp failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
@@ -197,7 +199,7 @@ async function update_a_grp(req_prim, resp_prim) {
             return;
         }
         // new mnm cannot be less than the number of current members
-        console.log('\n\nmnm: ', prim_res.mnm, 'cnm: ', db_res.cnm);
+        logger.debug({ mnm: prim_res.mnm, cnm: db_res.cnm }, 'mnm/cnm check');
         if (prim_res.mnm < db_res.cnm) {
             resp_prim.rsc = enums.rsc_str['MAX_NUMBER_OF_MEMBER_EXCEEDED'];
             resp_prim.pc = { 'm2m:dbg': 'new mnm cannot be less than the number of current members' };
@@ -259,7 +261,7 @@ async function update_a_grp(req_prim, resp_prim) {
         
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'update_a_grp failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
@@ -305,7 +307,7 @@ async function memberType_validation(req_prim, resp_prim) {
     if (memberType && memberType !== 0) {
         const checked_ty = member_types.every(({ ty }) => ty === memberType) ? memberType : 'MIXED';
     
-        console.log('checked_ty: ', checked_ty);
+        logger.debug({ checked_ty }, 'memberType_validation result');
         if (memberType === checked_ty)
             return true;
         else
@@ -335,12 +337,12 @@ async function memberType_validation(req_prim, resp_prim) {
 }
 
 exports.fanout = async function (req_prim, resp_prim) {
-    resp_prim.pc = { 'm2m:agr': { 'm2m:rsp': {} } };
+    resp_prim.pc = { 'm2m:agr': { 'rsp': {} } };
 
     // send fanout requests concurrently and sum-up 
     const fanout_resp_prims = await aggregate_fanout_resp_prims(req_prim);
 
-    resp_prim.pc['m2m:agr']['m2m:rsp'] = fanout_resp_prims;
+    resp_prim.pc['m2m:agr']['rsp'] = fanout_resp_prims;
 
     return;
 }

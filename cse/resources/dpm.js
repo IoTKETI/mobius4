@@ -5,6 +5,8 @@ const Lookup = require('../../models/lookup-model');
 const MDP = require('../../models/mdp-model');
 const DPM = require('../../models/dpm-model');
 
+const logger = require('../../logger').child({ module: 'dpm' });
+
 const mmd_parent_res_types = ["mdp"];
 
 async function create_a_dpm(req_prim, resp_prim) {
@@ -74,7 +76,7 @@ async function create_a_dpm(req_prim, resp_prim) {
 
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.log(err);
+    logger.error({ err }, 'create_a_dpm failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }
@@ -229,7 +231,7 @@ async function update_a_dpm(req_prim, resp_prim) {
 
     resp_prim.pc = temp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'update_a_dpm failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }

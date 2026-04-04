@@ -13,8 +13,10 @@
     "debug": "^3.1.0",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.3.2",
     "fast-xml-parser": "^3.21.1",
     "fs": "^0.0.1-security",
+    "helmet": "^8.1.0",
     "https": "^1.0.0",
     "joi": "^14.3.1",
     "jose": "^1.25.0",
@@ -25,6 +27,9 @@
     "path-to-regexp": "^6.2.1",
     "pg": "^8.16.0",
     "pg-hstore": "^2.3.4",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
+    "pino-roll": "^4.0.0",
     "query-string": "^7.0.1",
     "randomstring": "^1.1.5",
     "rdfxml-streaming-parser": "^1.5.0",
@@ -42,5 +47,8 @@
     "oneM2M"
   ],
   "author": "KETI",
-  "license": "BSD-3-Clause"
+  "license": "BSD-3-Clause",
+  "devDependencies": {
+    "pino-pretty": "^13.1.3"
+  }
 }

@@ -8,6 +8,8 @@ const Lookup = require('../../models/lookup-model');
 const CNT = require('../../models/cnt-model');
 const CIN = require('../../models/cin-model');
 
+const logger = require('../../logger').child({ module: 'cin' });
+
 const cin_parent_res_types = ['cnt'];
 
 async function create_a_cin(req_prim, resp_prim) {
@@ -119,7 +121,7 @@ async function create_a_cin(req_prim, resp_prim) {
         const tmp_req = { ri };
         await retrieve_a_cin(tmp_req, resp_prim);
     } catch (err) {
-        console.log(err);
+        logger.error({ err }, 'create_a_cin failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }

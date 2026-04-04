@@ -1,4 +1,5 @@
 const pool = require('../../db/connection');
+const logger = require('../../logger').child({ module: 'cb' });
 
 async function retrieve_a_cb(resp_prim) {
     const cb_obj = { "m2m:cb": {} };
@@ -34,7 +35,7 @@ async function retrieve_a_cb(resp_prim) {
             }
         }
     } catch (err) {
-        console.error('Error retrieving <cb> resource:', err);
+        logger.error({ err }, 'retrieve_a_cb failed');
     }
 
     resp_prim.pc = cb_obj;

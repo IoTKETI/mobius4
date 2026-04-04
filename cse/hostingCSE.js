@@ -1,6 +1,7 @@
 const { JSONPath } = require("jsonpath-plus");
 const config = require("config");
 const enums = require("../config/enums");
+const logger = require("../logger").child({ module: "hostingCSE" });
 const randomstring = require("randomstring");
 const jose = require("jose");
 const pool = require('../db/connection');
@@ -70,7 +71,7 @@ async function create_a_lookup_record(ty, rn, sid, ri, pi, cr, int_cr, loc) {
 			loc: loc || null, // geometry 객체 또는 null
 		});
 	} catch (err) {
-		console.error("Error inserting lookup record:", err);
+		logger.error({ err }, 'lookup insert failed');
 	}
 }
 
@@ -267,7 +268,7 @@ async function retrieve_a_res(req_prim, resp_prim) {
 		for (attr of req_prim.pc.atrl) {
 			partial_res[attr] = resp_prim.pc[obj_key][attr];
 		}
-		console.log("\n\npartial_res: ", partial_res);
+		logger.trace({ partial_res }, 'partial_res built');
 
 		resp_prim.pc[obj_key] = partial_res;
 	}
@@ -568,7 +569,7 @@ async function delete_a_res(req_prim, resp_prim) {
 		const cs = tmp_resp.pc['m2m:cin'].cs;
 
 		const cnt_res = await CNT.findByPk(parent_cnt_ri);
-		console.log("cnt_res: ", JSON.stringify(cnt_res, null, 2));
+		logger.trace({ cnt_res }, 'cnt_res');
 		cnt_res.cni--;
 		cnt_res.cbs = cnt_res.cbs - cs;
 
@@ -650,7 +651,7 @@ async function delete_resources(res_list) {
 			}
 		}
 	} catch (error) {
-		console.error('Error during resource deletion:', error);
+		logger.error({ err: error }, 'resource deletion failed');
 		// Additional error handling can be added here if needed
 	}
 }
@@ -967,7 +968,7 @@ function set_where_clause(req_prim) {
 					postgis_geometry_type = 'Polygon';
 					break;
 				default:
-					console.warn(`Unsupported geometry type: ${geometry_type}`);
+					logger.warn({ geometry_type }, 'unsupported geometry type');
 					return where;
 			}
 
@@ -990,7 +991,7 @@ function set_where_clause(req_prim) {
 					postgis_function = 'ST_Intersects';
 					break;
 				default:
-					console.warn(`Unsupported geo function: ${geo_function}`);
+					logger.warn({ geo_function }, 'unsupported geo function');
 					return where;
 			}
 
@@ -1020,8 +1021,7 @@ function set_where_clause(req_prim) {
 
 			has_geo_query = true;
 		} catch (error) {
-			console.error('Geo-query error:', error);
-			console.error('Geometry data:', { geometry_type, geo_function, coordinates });
+			logger.error({ err: error, geometry_type, geo_function }, 'geo-query failed');
 		}
 	}
 
@@ -1069,7 +1069,7 @@ async function get_ty_from_unstructuredID(ri) {
 			return result.rows[0].ty;
 		}
 	} catch (err) {
-		console.error('Error in get_ty_from_unstructuredID:', err);
+		logger.error({ err }, 'get_ty_from_unstructuredID failed');
 		return 0;
 	}
 }
@@ -1090,7 +1090,7 @@ async function get_structuredID(to) {
 		result = await Lookup.findOne({ where: { ri: to } });
 		return result.sid;
 	} catch (err) {
-		console.error(err);
+		logger.error({ err }, 'get_structuredID failed');
 		return null;
 	}
 
@@ -1108,7 +1108,7 @@ async function get_unstructuredID(to) {
 				return result.ri;
 			}
 		} catch (err) {
-			console.error('Error in get_unstructuredID:', err);
+			logger.error({ err }, 'get_unstructuredID failed');
 			return null;
 		}
 	}
@@ -1210,7 +1210,7 @@ async function access_decision(req_prim, resp_prim) {
 
 	// Cheat-key for system admin
 	if (req_prim.fr === config.cse.admin) {
-		console.log("access granted as the system admin\n");
+		logger.debug({ fr: req_prim.fr }, 'access granted as admin');
 		return true;
 	}
 
@@ -1292,7 +1292,7 @@ async function access_decision(req_prim, resp_prim) {
 		const grp_res = temp_resp.pc["m2m:grp"];
 		if (grp_res.macp) {
 			access_grant = await access_decision_acpi(req_prim.fr, req_prim.op, grp_res.macp);
-			console.log("access_grant for fopt: ", access_grant);
+			logger.debug({ access_grant }, 'access_grant for fopt');
 			return access_grant;
 		}
 		// if 'macp is empty, then move on to apply the 'acpi' of the parent group
@@ -1325,9 +1325,7 @@ async function access_decision(req_prim, resp_prim) {
 	else {
 		const int_cr = JSONPath("$..int_cr", temp_resp)[0];
 
-		console.log(
-			`comparing internally kept creator (${int_cr}) and originator (${req_prim.fr})`
-		);
+		logger.debug({ int_cr, fr: req_prim.fr }, 'comparing creator and originator');
 
 		if (req_prim.fr == int_cr) {
 			access_grant = true;
@@ -1350,7 +1348,7 @@ async function parse_dynamic_auth_resp(dap, req_seci) {
 		body: JSON.stringify(req_seci),
 	});
 
-	console.log(JSON.stringify(JSON.parse(resp.getBody()), null, 2));
+	logger.debug({ body: JSON.parse(resp.getBody()) }, 'dynamic auth response');
 	const seci = JSON.parse(resp.getBody())["m2m:seci"];
 
 	let dai = null,
@@ -1358,10 +1356,7 @@ async function parse_dynamic_auth_resp(dap, req_seci) {
 	if (seci) {
 		if (seci.dres.dai) {
 			dai = seci.dres.dai;
-			console.log(
-				"\n\ndynamicACPInfo from DAS: ",
-				JSON.stringify(dai, null, 2)
-			);
+			logger.debug({ dai }, 'dynamicACPInfo from DAS');
 		}
 		if (seci.dres.tkns) {
 			tokens = seci.dres.tkns;
@@ -1373,10 +1368,7 @@ async function parse_dynamic_auth_resp(dap, req_seci) {
 					}).cleartext.toString()
 				);
 			});
-			console.log(
-				"\n\ndecrypted first token from DAS: ",
-				JSON.stringify(tokens, null, 2)
-			);
+			logger.debug({ tokenCount: tokens.length }, 'decrypted tokens from DAS');
 		}
 	}
 
@@ -1584,10 +1576,10 @@ async function expired_resource_cleanup() {
 		sid: resource.sid
 	}));
 
-	console.log("expired_res_list", expired_res_list);
+	logger.info({ count: expired_res_list.length }, 'expired resource cleanup started');
 	expired_res_list.forEach(async (res) => {
 		// 'res' include 'ri', 'ty', 'sid'
-		console.log("deleting expired resource: ", res.sid);
+		logger.info({ sid: res.sid }, 'deleting expired resource');
 		await delete_resources([res]);
 
 		// get decendant resources of the expired resource
@@ -1597,7 +1589,7 @@ async function expired_resource_cleanup() {
 		});
 
 		child_res_list.forEach(async (child_res) => {
-			console.log("deleting decendant resource of expired resource: ", child_res.sid);
+			logger.debug({ sid: child_res.sid }, 'deleting descendant of expired resource');
 			await delete_resources([child_res]);
 		});
 	});

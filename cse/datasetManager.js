@@ -1,7 +1,8 @@
-const dsp_default = require('../config/default').default.datasetPolicy;
-const admin_id = require('../config/default').cse.admin;
-const csebase_rn = require('../config/default').cse.csebase_rn;
 const config = require('config');
+const dsp_default = config.get('default.datasetPolicy');
+const admin_id = config.get('cse.admin');
+const csebase_rn = config.get('cse.csebase_rn');
+const logger = require('../logger').child({ module: 'datasetManager' });
 const enums = require('../config/enums');
 const moment = require('moment');
 
@@ -182,7 +183,7 @@ async function create_historical_dataset_fragments(dts_ri, sri, dst, det, tcst, 
                     });
                 }
             } catch (error) {
-                console.log(`Skipping invalid CIN: ${cinId}`, error.message);
+                logger.warn({ cinId, err: error }, 'skipping invalid CIN');
             }
         }
     }
@@ -305,13 +306,13 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
             await dsf.create_a_dsf(tmp_req, tmp_resp);
 
             if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
-                console.error('Error creating DSF fragment:', tmp_resp.pc["m2m:dbg"]);
+                logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'dsf fragment creation failed');
                 return;
             } else {
-                console.log('Created DSF fragment: ', tmp_req.sid + '/' + dsf_rn);
+                logger.info({ sid: `${tmp_req.sid}/${dsf_rn}` }, 'dsf fragment created');
             }
         } catch (error) {
-            console.error('Error creating DSF fragment:', error);
+            logger.error({ err: error }, 'dsf fragment creation error');
         }
     }
 }
@@ -347,10 +348,10 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
         await sub.create_a_sub(tmp_req, tmp_resp);
 
         if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
-            console.error('Error creating a<sub> resource:', tmp_resp.pc["m2m:dbg"]);
+            logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'sub resource creation for live dataset failed');
             return;
         } else {
-            console.log('Created a <sub> resource for live dataset: ', tmp_req.sid + '/' + sub_res.rn);
+            logger.info({ sid: `${tmp_req.sid}/${sub_res.rn}` }, 'sub resource created for live dataset');
         }
     }
 
@@ -377,10 +378,10 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
     const dts_sid = ldi
 
     if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
-        console.error('Error creating a <dts> resource for live dataset:', tmp_resp.pc["m2m:dbg"]);
+        logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'dts resource creation for live dataset failed');
         return null;
     } else {
-        console.log('Created a <dts> resource for live dataset: ', tmp_req.sid + '/' + dts_res.rn);
+        logger.info({ sid: `${tmp_req.sid}/${dts_res.rn}` }, 'dts resource created for live dataset');
     }
 
     // create a <dsf> resource periodically
@@ -402,8 +403,7 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
 }
 
 async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
-    // create <dsf> resources
-    console.log('Creating <dsf> resources for live dataset: ', dsp_ri, duration);
+    logger.debug({ dsp_ri, durationSec: duration }, 'creating live dsf resources');
 
     const end_time = moment.utc().format(config.get('cse.timestamp_format'));
     const start_time = moment.utc(end_time).subtract(duration, 'seconds').format(config.get('cse.timestamp_format'));
@@ -422,8 +422,7 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
             }
         }
     } else {
-        console.warn(`batch_data[${dsp_ri}] is not available or not an object. Initializing empty object.`);
-        // safely initialize an empty object
+        logger.warn({ dsp_ri }, 'batch_data not available, initializing empty object');
         batch_data[dsp_ri] = {};
     }
 
@@ -431,7 +430,7 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
         return;
     }
 
-    console.log('dsf_data: ', dsf_data);
+    logger.debug({ dsp_ri, rowCount: dsf_data.length }, 'dsf_data ready');
     // console.log('batch_data: ', batch_data);
 
     const { get_a_new_rn } = require('./hostingCSE');
@@ -457,10 +456,10 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
     const tmp_resp = {};
     await dsf.create_a_dsf(tmp_req, tmp_resp);
     if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
-        console.error('Error creating DSF resource for live dataset:', tmp_resp.pc["m2m:dbg"]);
+        logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'live dsf resource creation failed');
         return;
     } else {
-        console.log('Created DSF resource for live dataset: ', tmp_req.sid + '/' + dsf_res.rn);
+        logger.info({ sid: `${tmp_req.sid}/${dsf_res.rn}` }, 'live dsf resource created');
     }
 
     return;

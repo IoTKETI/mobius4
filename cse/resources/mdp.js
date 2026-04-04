@@ -5,6 +5,8 @@ const MDP = require('../../models/mdp-model');
 const enums = require("../../config/enums");
 const dpm = require("./dpm");
 
+const logger = require('../../logger').child({ module: 'mdp' });
+
 const mdp_parent_res_types = ["cb", "ae", "csr"];
 
 async function create_an_mdp(req_prim, resp_prim) {
@@ -63,7 +65,7 @@ async function create_an_mdp(req_prim, resp_prim) {
 
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.log(err);
+    logger.error({ err }, 'create_an_mdp failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }
@@ -146,7 +148,7 @@ async function update_an_mdp(req_prim, resp_prim) {
 
     resp_prim.pc = temp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'update_an_mdp failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }

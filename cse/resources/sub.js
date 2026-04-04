@@ -7,6 +7,8 @@ const enums = require("../../config/enums");
 const SUB = require('../../models/sub-model');
 const Lookup = require('../../models/lookup-model');  
 
+const logger = require('../../logger').child({ module: 'sub' });
+
 const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm"];
 
 
@@ -96,7 +98,7 @@ async function create_a_sub(req_prim, resp_prim) {
     await retrieve_a_sub(tmp_req, tmp_resp);
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'create_a_sub failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }
@@ -206,7 +208,7 @@ async function update_a_sub(req_prim, resp_prim) {
 
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'update_a_sub failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }
