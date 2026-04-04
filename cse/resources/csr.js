@@ -5,6 +5,8 @@ const enums = require('../../config/enums');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
 
+const logger = require('../../logger').child({ module: 'csr' });
+
 const csr_parent_res_types = ['cb'];
 
 async function create_a_csr(req_prim, resp_prim) {
@@ -25,10 +27,10 @@ async function create_a_csr(req_prim, resp_prim) {
     const et = get_default_et();
 
     // validation for primitive resource attribute (before loc conversion)
-    console.log('prim_res object before validation:', JSON.stringify(prim_res, null, 2));
+    logger.debug({ prim_res }, 'prim_res object before validation');
     const validated = csr_create_schema.validate(prim_res);
     if (validated.error) {
-        console.log('Joi validation error details:', JSON.stringify(validated.error.details, null, 2));
+        logger.warn({ details: validated.error.details }, 'validation failed');
         const { message, path } = validated.error.details[0];
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
@@ -88,7 +90,7 @@ async function create_a_csr(req_prim, resp_prim) {
         await retrieve_a_csr(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'create_a_csr failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
@@ -133,7 +135,7 @@ async function retrieve_a_csr(req_prim, resp_prim) {
         if (db_res.csz) csr_obj['m2m:csr'].csz = db_res.csz;
         if (db_res.loc) csr_obj['m2m:csr'].loc = get_loc_attribute(db_res.loc);
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'retrieve_a_csr failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
         return;

@@ -6,6 +6,8 @@ const Lookup = require('../../models/lookup-model');
 const DTS = require('../../models/dts-model');
 const DSF = require('../../models/dsf-model');
 
+const logger = require('../../logger').child({ module: 'dsf' });
+
 const dsf_parent_res_types = ['dts'];
 
 
@@ -83,7 +85,7 @@ async function create_a_dsf(req_prim, resp_prim) {
         await retrieve_a_dsf(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.log(err);
+        logger.error({ err }, 'create_a_dsf failed');
         resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
         resp_prim.pc = { "m2m:dbg": err.message };
     }
@@ -127,7 +129,7 @@ async function retrieve_a_dsf(req_prim, resp_prim) {
 
         resp_prim.pc = dsf_obj;
     } catch (err) {
-        console.log(err);
+        logger.error({ err }, 'retrieve_a_dsf failed');
         resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
         resp_prim.pc = { "m2m:dbg": err.message };
     }

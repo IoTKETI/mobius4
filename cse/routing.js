@@ -1,8 +1,9 @@
 const config = require('config');
+const logger = require('../logger').child({ module: 'routing' });
 
 function check_to_is_mine(to) {
     var str, cse_id_token, sp_id_token;
-    console.log('in check_to_is_mine, to: ' + to);
+    logger.trace({ to }, 'check_to_is_mine');
 
     // in CSE-relative format, then I think it's mine
     if ('/' != to[0]) {
@@ -22,7 +23,6 @@ function check_to_is_mine(to) {
         cse_id_token = to.slice(2).split('/')[1];
 
         if (config.get('cse.sp_id').slice(2) === sp_id_token && config.get('cse.cse_id').slice(1) === cse_id_token) {
-            console.log('here i am 22');
             return true;
         }
     }
@@ -32,7 +32,7 @@ function check_to_is_mine(to) {
 // simply forwarding with http
 // to-do-later: use proper bindings for the next hop
 async function request_forwarding(req, binding) {
-    console.log('forwarding a request:')
+    logger.debug({ binding }, 'forwarding a request');
     return
 }
 

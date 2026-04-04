@@ -1,6 +1,7 @@
 const axios = require('axios');
 
 const config = require('config');
+const logger = require('../logger').child({ module: 'registree' });
 const registree = config.cse;
 const registrar = config.cse.registrar;
 
@@ -31,12 +32,10 @@ exports.registree = async function () {
     const response = await axios.post(url, body, { headers });
 
     if (response.status === 201) {
-        console.log("successfullly created <remoteCSE> resource to the registrar");
-        console.log(response.data);
+        logger.info({ registrarUrl: url }, 'remoteCSE resource created on registrar');
     }
     else {
-        console.log("create <remoteCSE> resource request failed");
-        console.log(response.data);
+        logger.warn({ registrarUrl: url, status: response.status }, 'remoteCSE creation on registrar failed');
     }
 
     // step 2. create <remoteCSE> resource, which represents the registrar CSE, locally

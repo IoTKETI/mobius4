@@ -6,6 +6,8 @@ const Lookup = require('../../models/lookup-model');
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const enums = require('../../config/enums');
 
+const logger = require('../../logger').child({ module: 'acp' });
+
 const acp_parent_res_types = ['cb', 'ae'];
 
 async function create_an_acp(req_prim, resp_prim) {
@@ -189,7 +191,7 @@ async function update_an_acp(req_prim, resp_prim) {
         await retrieve_an_acp(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
-        console.error(err);
+        logger.error({ err }, 'update_an_acp failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }

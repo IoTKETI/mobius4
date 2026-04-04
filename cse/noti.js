@@ -1,6 +1,7 @@
 const axios = require("axios");
 const config = require("config");
 
+const logger = require("../logger").child({ module: "noti" });
 const mqtt = require("../bindings/mqtt");
 const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');
@@ -147,8 +148,7 @@ async function send_sub_del_noti(sub_res) {
 }
 
 async function http_noti(noti_target, sgn) {
-    console.log("\n\nhttp_noti, noti_target: ", noti_target);
-    console.log("http_noti, sgn: ", JSON.stringify(sgn, null, 2));
+    logger.debug({ target: noti_target, sur: sgn['m2m:sgn']?.sur }, 'sending http notification');
     const { generate_ri } = require('./utils');
 
     // axios handles HTTP and HTTPs automatically
@@ -165,27 +165,15 @@ async function http_noti(noti_target, sgn) {
             timeout: 3000,
         })
         .then((resp) => {
-            console.log("\n\nreceived message from notification target:");
-            console.log(JSON.stringify('status code: ', resp.status));
-            console.log(JSON.stringify(resp.data, null, 2));
+            logger.debug({ target: noti_target, status: resp.status }, 'http notification acknowledged');
         })
         .catch((err) => {
             const sur = sgn['m2m:sgn'].sur;
             if (err.response) {
-                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
-                console.warn(`  → status: ${err.response.status}`);
-                console.warn(`  → data:`, err.response.data);
-            } else if (err.request) {
-                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
-                console.warn(`  → code: ${err.code}`);
-                console.warn(`  → message: ${err.message}`);
+                logger.warn({ sur, target: noti_target, status: err.response.status, data: err.response.data }, 'http notification rejected by target');
             } else {
-                console.warn(`[noti] sur: ${sur}, target: ${noti_target}`);
-                console.warn(`  → message: ${err.message}`);
+                logger.warn({ sur, target: noti_target, code: err.code, err }, 'http notification delivery failed');
             }
-            console.warn(`  → full error:`, err);
-
-            return false;
         });
 
     return true;
@@ -218,7 +206,7 @@ async function mqtt_noti(noti_target, sgn) {
     // to-do: support connection to different MQTT brokers other than the local one
     const result = await mqtt.mqtt_transmitter(topic, req_prim);
     if (result === false) {
-        console.warn(`MQTT notification failed: ${noti_target}`);
+        logger.warn({ target: noti_target, topic }, 'mqtt notification delivery failed');
         return false;
     }
     return true;
@@ -235,7 +223,7 @@ async function get_urls_from_poa(res_id) {
 }
 
 function self_noti_handler(topic, req_prim) {
-    console.log('\nself_noti_handler, topic: ', topic);
+    logger.debug({ topic }, 'self notification received');
 
     const res = req_prim.pc['m2m:sgn'].nev.rep;
     const sub_rn = req_prim.pc['m2m:sgn'].sur.split('/').pop();
@@ -275,10 +263,10 @@ function get_flat_data(time, data) {
             } else {
                 // if the feature is not found, set null
                 flat_data[feature] = null;
-                console.warn(`Feature "${feature}" not found in data`);
+                logger.warn({ feature }, 'feature not found in data');
             }
         } catch (error) {
-            console.error(`Error parsing feature "${feature}":`, error);
+            logger.error({ err: error, feature }, 'feature parsing error');
             flat_data[feature] = null;
         }
     }
@@ -295,7 +283,7 @@ function batch_noti_data(dsp_ri,data) {
         batch_data[dsp_ri] = {};
     }
     batch_data[dsp_ri][data.time] = data;
-    console.log('\nbatch_data: ', JSON.stringify(batch_data, null, 2));
+    logger.trace({ dsp_ri, batchSize: Object.keys(batch_data[dsp_ri]).length }, 'batch data updated');
 }
 
 module.exports = { 

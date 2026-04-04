@@ -132,6 +132,79 @@ You can change the following settings in the `config/default.json` configuration
 | default | datasetPolicy.nvp | Default null value policy for a dataset creation |
 | default | datasetPolicy.nrhd | Default number of rows in historical dataset|
 | default | datasetPolicy.nrld | Default number of rows in live dataset|
+| logging | level | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` (default: `info`) |
+| logging | console.enabled | Enable console output (default: `true`) |
+| logging | console.pretty | Human-readable output for development (default: `false`; set `true` in `local.json`) |
+| logging | file.enabled | Enable file logging (default: `false`) |
+| logging | file.path | Log file path (default: `logs/mobius4.log`) |
+| logging | file.rotate | Rotation frequency: `daily` or `hourly` (default: `daily`) |
+| logging | file.maxFiles | Number of rotated files to keep (default: `14`) |
+| logging | file.maxSize | Max file size before rotation (default: `100m`) |
+| security | helmet.enabled | Enable HTTP security headers via Helmet (default: `false`) |
+| security | rateLimit.enabled | Enable per-IP rate limiting (default: `false`; disable for load/performance tests) |
+| security | rateLimit.windowMs | Rate limit window in milliseconds (default: `60000`) |
+| security | rateLimit.max | Max requests per window per IP (default: `500`) |
+
+
+## Local configuration override
+
+Mobius4 uses the [`config`](https://www.npmjs.com/package/config) npm package. `config/local.json` is automatically loaded with **higher priority** than `config/default.json`, and is gitignored — your local credentials and settings never get committed.
+
+**Setup (first time):**
+```bash
+cp config/local.json.example config/local.json
+# then edit config/local.json with your actual values
+```
+
+**Typical `config/local.json` for development:**
+```json
+{
+  "db": {
+    "user": "your_db_user",
+    "pw": "your_db_password"
+  },
+  "logging": {
+    "level": "debug",
+    "console": { "pretty": true }
+  }
+}
+```
+
+**Typical `config/local.json` for production deployment:**
+```json
+{
+  "db": {
+    "user": "mobius4",
+    "pw": "strong_password_here"
+  },
+  "logging": {
+    "level": "info",
+    "file": { "enabled": true }
+  },
+  "security": {
+    "helmet": { "enabled": true },
+    "rateLimit": { "enabled": true, "max": 500 }
+  }
+}
+```
+
+> **Note:** Rate limiting is disabled by default. Keep it disabled during performance and load testing to avoid false throttling.
+
+
+## Health check endpoint
+
+Mobius4 exposes a lightweight health check endpoint:
+
+```
+GET /health
+```
+
+Response:
+```json
+{ "status": "ok", "uptime": 123.45 }
+```
+
+This endpoint always returns HTTP 200 while the process is running. It is excluded from HTTP request logging to avoid noise. Use it for load balancer health checks, container liveness probes, or uptime monitors.
 
 
 ## Resource browser tool

@@ -5,6 +5,8 @@ const enums = require("../../config/enums");
 const mmd = require("./mmd");
 const MRP = require("../../models/mrp-model");
 
+const logger = require('../../logger').child({ module: 'mrp' });
+
 const mrp_parent_res_types = ["cb", "ae", "csr"];
 
 async function create_an_mrp(req_prim, resp_prim) {
@@ -63,7 +65,7 @@ async function create_an_mrp(req_prim, resp_prim) {
     await retrieve_an_mrp(tmp_req, tmp_resp);
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'create_an_mrp failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
     return;
@@ -157,7 +159,7 @@ async function update_an_mrp(req_prim, resp_prim) {
 
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'update_an_mrp failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }

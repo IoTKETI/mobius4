@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 const config = require('config');
 
-// PostgreSQL 연결 풀 생성
+// Create PostgreSQL connection pool
 const pool = new Pool({
     user: config.get('db.user'),
     host: config.get('db.host'),

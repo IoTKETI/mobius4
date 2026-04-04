@@ -73,10 +73,10 @@
     "port": 1883
   },
   "db": {
-    "user": "sm",
+    "user": "",
     "host": "localhost",
     "name": "mobius4",
-    "pw": "keti1234",
+    "pw": "",
     "port": 5432
   },
   "length": {
@@ -91,6 +91,34 @@
     "str_token": 255,
     "url": 255,
     "data": 65535
+  },
+  "logging": {
+    "level": "info",
+    "console": {
+      "enabled": true,
+      "pretty": false
+    },
+    "file": {
+      "enabled": true,
+      "path": "logs/mobius4.log",
+      "rotate": "daily",
+      "maxFiles": 14,
+      "maxSize": "100m"
+    },
+    "http": {
+      "logBody": false,
+      "redactPaths": ["req.headers.authorization", "req.body.pw"]
+    }
+  },
+  "security": {
+    "helmet": {
+      "enabled": false
+    },
+    "rateLimit": {
+      "enabled": false,
+      "windowMs": 60000,
+      "max": 500
+    }
   },
   "default": {
     "common": {

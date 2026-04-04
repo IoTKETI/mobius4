@@ -7,6 +7,8 @@ const Lookup = require('../../models/lookup-model');
 const MMD = require('../../models/mmd-model');
 const MRP = require('../../models/mrp-model');
 
+const logger = require('../../logger').child({ module: 'mmd' });
+
 const mmd_parent_res_types = ["mrp"];
 
 
@@ -98,7 +100,7 @@ async function create_an_mmd(req_prim, resp_prim) {
     await retrieve_an_mmd(tmp_req, tmp_resp);
     resp_prim.pc = tmp_resp.pc;
   } catch (err) {
-    console.log(err);
+    logger.error({ err }, 'create_an_mmd failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }
@@ -262,7 +264,7 @@ async function update_an_mmd(req_prim, resp_prim) {
 
     resp_prim.pc = temp_resp.pc;
   } catch (err) {
-    console.error(err);
+    logger.error({ err }, 'update_an_mmd failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
   }

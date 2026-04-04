@@ -1,6 +1,7 @@
 const config = require("config");
 const axios = require('axios');
 const { JSONPath } = require("jsonpath-plus");
+const logger = require("../logger").child({ module: "reqPrim" });
 
 const enums = require("../config/enums");
 const { req_prim_schema } = require("./validation/prim_schema");
@@ -19,7 +20,8 @@ const dts = require("./resources/dts"); // <dataset>
 
 
 async function prim_handling(req_prim) {
-  console.log("\n\n\nrequest primitive: \n", JSON.stringify(req_prim, null, 2));
+  logger.debug({ op: req_prim.op, to: req_prim.to, fr: req_prim.fr, rqi: req_prim.rqi }, 'request primitive received');
+  logger.trace({ prim: req_prim }, 'full request primitive');
 
   // set default parameters for the request primitive
   set_default_req_params(req_prim);
@@ -230,7 +232,7 @@ async function prim_handling(req_prim) {
           try {
             await hostingCSE.fu1_discovery(req_prim, resp_prim);
           } catch (err) {
-            console.error(err);
+            logger.error({ err }, 'fu1 discovery failed');
           }
         } else if (req_prim.fc.fu === 2) {
           // assumption: 'to' is in CSE-relative
@@ -247,7 +249,7 @@ async function prim_handling(req_prim) {
               await hostingCSE.retrieve_a_res(req_prim, resp_prim);
             }
           } catch (err) {
-            console.error(err);
+            logger.error({ err }, 'retrieve failed');
           }
         }
         if (!resp_prim.rsc) {
@@ -469,12 +471,12 @@ async function request_forwarding(req_prim, shortest_to) {
     target_cse_id = '/' + shortest_to.split('/')[1];
   }
 
-  console.log('request forwarding to ', target_cse_id);
+  logger.debug({ targetCseId: target_cse_id }, 'forwarding request');
 
   // resolve CSE-relative 'to' param for the target CSE
 
   const cse_rel_to = shortest_to.split(target_cse_id + '/')[1];
-  console.log('cse_rel_to: ', cse_rel_to);
+  logger.debug({ cseRelTo: cse_rel_to }, 'forwarding target resolved');
 
 
   // step2: find the nextCSE among <csr> resources
@@ -492,7 +494,7 @@ async function request_forwarding(req_prim, shortest_to) {
   // to-do
   // check whether we need to try other poa items if one of them is not working
   const poa = csr_res.poa[0];
-  console.log('poa: ', poa);
+  logger.debug({ poa }, 'forwarding via poa');
 
   // step3: forward the request to that CSE
 
@@ -530,7 +532,7 @@ async function request_forwarding(req_prim, shortest_to) {
         resp_prim.pc = http_resp.data;
       }
     } catch (error) {
-      console.error('HTTP forwarding error:', error.message);
+      logger.error({ err: error, targetCseId: target_cse_id }, 'HTTP forwarding failed');
       resp_prim.rsc = enums.rsc_str['INTERNAL_SERVER_ERROR'];
       resp_prim.pc = { 'm2m:dbg': `HTTP forwarding failed: ${error.message}` };
       return resp_prim;

@@ -2,13 +2,14 @@ const { Pool } = require('pg');
 const config = require('config');
 const moment = require('moment');
 const { generate_ri } = require('../cse/utils');
+const logger = require('../logger').child({ module: 'db' });
 const timestamp_format = config.get('cse.timestamp_format');
 const len = config.get('length');
 
 /**
- * 객체의 키를 컬럼, 값을 파라미터로 사용하는 INSERT 쿼리를 생성합니다.
- * @param {string} table - 테이블 이름
- * @param {Object} data  - { 컬럼명: 값 } 형태의 객체
+ * Builds a parameterized INSERT query using the object's keys as columns and values as parameters.
+ * @param {string} table - Table name
+ * @param {Object} data  - Object in { column: value } format
  * @returns {{ text: string, values: any[] }}
  */
 function build_insert(table, data) {
@@ -21,7 +22,7 @@ function build_insert(table, data) {
     };
 }
 
-// PostgreSQL 연결 풀 생성
+// Create PostgreSQL connection pool
 const pool = new Pool({
     user: config.get('db.user'),
     host: config.get('db.host'),
@@ -30,60 +31,55 @@ const pool = new Pool({
     port: config.get('db.port'),
 });
 
-// PostgreSQL 연결 테스트
+// Test PostgreSQL connection
 async function testConnection() {
     try {
         const client = await pool.connect();
-        console.log('Successfully connected to PostgreSQL');
+        logger.info('PostgreSQL connected');
         client.release();
         return true;
     } catch (err) {
-        console.error('Error connecting to PostgreSQL:', err);
+        logger.fatal({ err }, 'PostgreSQL connection failed');
         return false;
     }
 }
 
-// DB 초기화 함수
+// Database initialization
 exports.init_db = async function () {
+    // Test connection first — throws on failure, caller (mobius4.js) handles process.exit(1)
+    const isConnected = await testConnection();
+    if (!isConnected) {
+        throw new Error('PostgreSQL connection failed');
+    }
+
+    // Enable PostGIS extension
+    const client = await pool.connect();
     try {
-        // 먼저 연결 테스트
-        const isConnected = await testConnection();
-        if (!isConnected) {
-            throw new Error('Failed to connect to PostgreSQL');
+        await client.query('CREATE EXTENSION IF NOT EXISTS postgis;');
+
+        // create resource tables
+        await create_tables(client);
+
+        // check if <cb> resource exists
+        const cbResult = await client.query('SELECT ri FROM cb WHERE ty = 5');
+
+        let cb_ri = null;
+        if (cbResult.rows.length === 0) {
+            // create <cb> resource
+            cb_ri = await create_cb(client);
+        } else {
+            cb_ri = cbResult.rows[0].ri;
+            logger.info({ ri: cb_ri }, 'cb resource already exists');
         }
 
-        // PostGIS 확장 활성화
-        const client = await pool.connect();
-        try {
-            await client.query('CREATE EXTENSION IF NOT EXISTS postgis;');
-            
-            // create resource tables
-            await create_tables(client);
-            
-            // check if <cb> resource exists
-            const cbResult = await client.query('SELECT ri FROM cb WHERE ty = 5');
-
-            let cb_ri = null;
-            if (cbResult.rows.length === 0) {
-                // create <cb> resource
-                cb_ri = await create_cb(client);
-
-            } else {
-                cb_ri = cbResult.rows[0].ri;
-                console.log('\n<cb> resource already exists with ri:', cb_ri);
-            }
-
-            // create default <acp> resource// create default <acp> resource
-            if (await create_default_acp(client, cb_ri)) {
-                console.log(`default <acp> resource is created as ${config.cse.csebase_rn}/${config.cb.default_acp.rn} and acpi of <cb> resource updated`);
-            } else {
-                console.log('default <acp> resource creation failed since it already exists');
-            }
-        } finally {
-            client.release();
+        // create default <acp> resource
+        if (await create_default_acp(client, cb_ri)) {
+            logger.info({ sid: `${config.cse.csebase_rn}/${config.cb.default_acp.rn}` }, 'default acp created');
+        } else {
+            logger.info('default acp already exists, skipped');
         }
-    } catch (err) {
-        console.error('Error in init_db:', err);
+    } finally {
+        client.release();
     }
 };
 
@@ -473,10 +469,10 @@ async function create_tables(client) {
         `);
 
         await client.query('COMMIT');
-        console.log('resource tables created successfully');
+        logger.info('resource tables created');
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('Error creating tables:', err);
+        logger.error({ err }, 'create tables failed');
         throw err;
     }
 }
@@ -543,11 +539,11 @@ async function create_cb(client) {
         }));
 
         await client.query('COMMIT');
-        console.log(`\n<cb> resource is created with ri: ${cb_res.ri}`);
+        logger.info({ ri: cb_res.ri }, 'cb resource created');
         return cb_res.ri;
     } catch (err) {
         await client.query('ROLLBACK');
-        console.error('Error creating CB resource:', err);
+        logger.error({ err }, 'create cb resource failed');
         throw err;
     }
 }
@@ -627,7 +623,7 @@ async function create_default_acp(client, cb_ri) {
     } catch (err) {
         await client.query('ROLLBACK');
         if (err.code !== '23505') {
-            console.error('Error creating default ACP:', err);
+            logger.error({ err }, 'create default acp failed');
         }
         return false;
     }
