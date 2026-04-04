@@ -6,6 +6,11 @@ In oneM2M Release 5, [TR-0071](https://www.onem2m.org/technical/published-specif
 
 ![Mobius4](./docs/images/mobius4.png)
 
+## oneM2M Certificate
+
+Mobius4 is the first product to be certified as a oneM2M Release 2 compliant Common Services Entity (CSE, also known as an IoT platform). By the configuration, it runs as ASN/MN-CSE as well as IN-CSE.
+![Rel-2 Certificate](./docs/images/certificate.png)
+
 ## Supported features
 
 Mobius4 implements oneM2M Common Services Entity (CSE) which is the IoT middleware. By the configuration, it runs as ASN/MN-CSE as well as IN-CSE.
@@ -214,6 +219,9 @@ Mobius provides oneM2M resource browser tool for real-time monitoring the resour
 ![oneM2M resource browser](/docs/images/res_browser.png)
 When the pop up requests for ACP Originator name, put your Admin ID in your configuration (e.g. SM) to have full privileges to access all of your resources.
 
+# Contact
+
+iotketi@keti.re.kr
 
 # Version history
 
@@ -222,4 +230,5 @@ When the pop up requests for ACP Originator name, put your Admin ID in your conf
 | Version | Date | description |
 | :---: | :---: | :--- |
 | 4.0.0 | 2025-09-22 | Initial release of Mobius4 |
-
+| 4.1.0 | 2026-03-13 | oneM2M Rel-2 certification |
+| 4.2.0 | 2026-04-05 | logging module update |
