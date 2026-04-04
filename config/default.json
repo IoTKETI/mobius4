@@ -69,8 +69,10 @@
     "port": 7580
   },
   "mqtt": {
+    "enabled": true,
     "ip": "localhost",
-    "port": 1883
+    "port": 1883,
+    "initialConnectTimeoutMs": 10000
   },
   "db": {
     "user": "",

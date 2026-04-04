@@ -1,6 +1,7 @@
 const { customAlphabet } = require('nanoid');
 const moment = require('moment');
 const config = require('config');
+const logger = require('../logger').child({ module: 'utils' });
 
 const timestamp_format = config.get('cse.timestamp_format');
 const enums = require('../config/enums');
@@ -149,7 +150,7 @@ async function validate_geometry_with_postgis(geojson, resp_prim) {
     return true;
 
   } catch (error) {
-    console.error('PostGIS geometry validation error:', error);
+    logger.error({ err: error }, 'PostGIS geometry validation error');
 
     // extract useful information from PostGIS error message
     let errorMessage = 'geometry validation failed';

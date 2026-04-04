@@ -24,7 +24,7 @@ async function main() {
     require('./bindings/http');
 
     // start mqtt client
-    mqtt.init_client();
+    await mqtt.init_client();
 
     // start CSE registration if this is MN-CSE or ASN-CSE
     if (config.cse.cse_type === 2 || config.cse.cse_type === 3) {
