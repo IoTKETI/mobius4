@@ -193,7 +193,6 @@ async function create_tables(client) {
               mni INTEGER,
               mbs INTEGER,
               mia INTEGER,
-              cin_list VARCHAR(${len.structured_res_id})[],
               loc GEOMETRY(GEOMETRY, 4326)
             );
           `);

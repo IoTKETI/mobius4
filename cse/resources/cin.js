@@ -38,7 +38,7 @@ async function create_a_cin(req_prim, resp_prim) {
 
     // [C2] read only fields needed for validation — avoid SELECT *
     const cnt_res = await CNT.findByPk(cin_pi, {
-        attributes: ['ri', 'mbs', 'mni', 'st', 'cni', 'cbs', 'cin_list']
+        attributes: ['mbs', 'st']
     });
     if (!cnt_res) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
@@ -95,14 +95,13 @@ async function create_a_cin(req_prim, resp_prim) {
             // [C2] atomic CNT UPDATE — avoids separate findByPk + update and prevents race conditions
             const [, updated] = await CNT.update(
                 {
-                    cni:      sequelize.literal('cni + 1'),
-                    cbs:      sequelize.literal(`cbs + ${content_size}`),
-                    st:       sequelize.literal('st + 1'),
-                    cin_list: sequelize.literal(`array_append(cin_list, '${ri}')`),
+                    cni: sequelize.literal('cni + 1'),
+                    cbs: sequelize.literal(`cbs + ${content_size}`),
+                    st:  sequelize.literal('st + 1'),
                 },
                 {
                     where: { ri: cin_pi },
-                    returning: ['cni', 'cbs', 'st', 'mni', 'mbs', 'cin_list'],
+                    returning: ['cni', 'cbs', 'mni', 'mbs'],
                     transaction: t,
                 }
             );
@@ -166,44 +165,56 @@ function build_cin_response(cin_res) {
 async function evict_if_needed(cnt, cin_pi) {
     const { delete_a_res } = require('../hostingCSE');
 
-    let { cni, cbs, mni, mbs, cin_list } = cnt.dataValues || cnt;
-    cin_list = [...(cin_list || [])];
+    let { cni, cbs, mni, mbs } = cnt.dataValues || cnt;
+
+    const excess_mni = Math.max(0, cni - mni);
+    if (excess_mni === 0 && cbs <= mbs) return;
+
+    // fetch enough oldest CINs to cover both mni and mbs eviction
+    const fetch_limit = Math.max(excess_mni + 10, 50);
+    const candidates = await CIN.findAll({
+        where: { pi: cin_pi },
+        order: [['st', 'ASC']],
+        limit: fetch_limit,
+        attributes: ['ri', 'cs'],
+    });
 
     const to_delete = [];
 
-    // mni: collect oldest CINs to remove until within limit
-    while (cni > mni && cin_list.length > 0) {
-        to_delete.push(cin_list.shift());
+    // mni: remove oldest until within limit
+    let i = 0;
+    while (cni > mni && i < candidates.length) {
+        to_delete.push(candidates[i]);
         cni--;
+        cbs -= candidates[i].cs;
+        i++;
     }
 
-    // mbs: collect oldest CINs until within size limit
-    while (cbs > mbs && cin_list.length > 0) {
-        to_delete.push(cin_list.shift());
-        cni--;
+    // mbs: continue removing oldest until within size limit
+    while (cbs > mbs && i < candidates.length) {
+        to_delete.push(candidates[i]);
+        cbs -= candidates[i].cs;
+        i++;
     }
 
     if (to_delete.length === 0) return;
 
     // delete each evicted CIN (int_cr_req=true skips the per-CIN CNT update in delete_a_res)
     let cbs_reduction = 0;
-    for (const old_ri of to_delete) {
+    for (const old_cin of to_delete) {
         const tmp_resp = {};
         await delete_a_res(
-            { fr: config.cse.admin, to: old_ri, ri: old_ri, rqi: 'evict_cin', to_ty: 4, int_cr_req: true },
+            { fr: config.cse.admin, to: old_cin.ri, ri: old_cin.ri, rqi: 'evict_cin', to_ty: 4, int_cr_req: true },
             tmp_resp
         );
-        if (tmp_resp.pc?.['m2m:cin']?.cs) {
-            cbs_reduction += tmp_resp.pc['m2m:cin'].cs;
-        }
+        cbs_reduction += old_cin.cs;
     }
 
     // update CNT to reflect evicted CINs
     await CNT.update(
         {
-            cni:      sequelize.literal(`cni - ${to_delete.length}`),
-            cbs:      sequelize.literal(`cbs - ${cbs_reduction}`),
-            cin_list: cin_list,
+            cni: sequelize.literal(`cni - ${to_delete.length}`),
+            cbs: sequelize.literal(`cbs - ${cbs_reduction}`),
         },
         { where: { ri: cin_pi } }
     );

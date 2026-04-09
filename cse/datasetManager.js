@@ -145,12 +145,13 @@ async function create_historical_dataset_fragments(dts_ri, sri, dst, det, tcst, 
         const ri = await get_unstructuredID(id);
         const ty = await get_ty_from_unstructuredID(ri);
         if (ty === 3) {
-            const cnt_res = await CNT.findOne({
-                where: {ri: ri},
-                attributes: ['cin_list']
+            const cin_rows = await CIN.findAll({
+                where: { pi: ri },
+                order: [['ct', 'ASC']],
+                attributes: ['ri'],
             });
-            if (cnt_res && cnt_res.cin_list && cnt_res.cin_list.length > 0) {
-                dsfs[id] = cnt_res.cin_list;
+            if (cin_rows.length > 0) {
+                dsfs[id] = cin_rows.map(c => c.ri);
             }
         }
         // other resource types can be supported later

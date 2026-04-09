@@ -1053,7 +1053,7 @@ async function access_decision(req_prim, resp_prim) {
 	// set int_cr request indicator as true for Case D.
 	req_prim.int_cr_req = true;
 	// deep copy of req_prim to temp_req
-	const temp_req = JSON.parse(JSON.stringify(req_prim));
+	const temp_req = structuredClone(req_prim);
 
 	// for virtual resources, access decision is different per resource type
 	if (temp_req.vr) {
