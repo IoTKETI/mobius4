@@ -643,8 +643,11 @@ async function discovery_core(req_prim) {
 	const { where, has_geo_query } = set_where_clause(req_prim);
 
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
+	const ofst = req_prim.fc.ofst || 0;
 	const ty_list = req_prim.fc.ty || Object.keys(enums.ty_str);
 
+	// fetch enough per-type to cover offset + limit + 1 (for partial detection)
+	const fetch_lim = Math.min(ofst + lim + 1, config.cse.discovery_limit);
 
 	// model registry: type code → { model, no_geo }
 	const TYPE_MODEL = {
@@ -675,7 +678,7 @@ async function discovery_core(req_prim) {
 		})
 		.map(ty => {
 			const { model } = TYPE_MODEL[ty];
-			return model.findAll({ where, attributes: ['sid', 'ri', 'ty'], limit: lim })
+			return model.findAll({ where, attributes: ['sid', 'ri', 'ty'], limit: fetch_lim })
 				.then(rows => ({ ty, rows }));
 		});
 
@@ -704,7 +707,20 @@ async function discovery_core(req_prim) {
 		ids_list = filtered_ids_list;
 	}
 
-	return { ids_list, ids_list_per_ty };
+	// apply offset and limit to aggregated result
+	const paged = ids_list.slice(ofst);
+	const is_partial = paged.length > lim;
+	const final_list = paged.slice(0, lim);
+
+	// reconstruct ids_list_per_ty from final paginated list
+	const final_per_ty = {};
+	for (const item of final_list) {
+		const ty_name = enums.ty_str[item.ty.toString()];
+		if (!final_per_ty[ty_name]) final_per_ty[ty_name] = [];
+		final_per_ty[ty_name].push(item);
+	}
+
+	return { ids_list: final_list, ids_list_per_ty: final_per_ty, is_partial };
 }
 
 function set_where_clause(req_prim) {
@@ -888,32 +904,31 @@ function set_where_clause(req_prim) {
 }
 
 async function fu1_discovery(req_prim, resp_prim) {
-	const { ids_list } = await discovery_core(req_prim);
+	const { ids_list, is_partial } = await discovery_core(req_prim);
 	let uril = [];
 	if (!req_prim.drt) {
 		req_prim.drt = 1;
 	}
 
 	if (req_prim.drt === 1) {
-		uril = ids_list.map((item) => {
-			// console.log("item", item);
-			return item.sid;
-		});
+		uril = ids_list.map((item) => item.sid);
 	} else if (req_prim.drt === 2) {
-		uril = ids_list.map((item) => {
-			return item.ri;
-		});
+		uril = ids_list.map((item) => item.ri);
 	} else {
 		resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
 		resp_prim.pc = { "m2m:dbg": "unsupported drt" };
 		return resp_prim;
 	}
 
-	if (req_prim.lim) {
-		uril = uril.slice(0, req_prim.lim);
-	}
-
 	resp_prim.pc = { "m2m:uril": uril };
+
+	// set pagination response parameters when result is partial
+	if (is_partial) {
+		const ofst = req_prim.fc.ofst || 0;
+		const lim = req_prim.fc.lim || config.cse.discovery_limit;
+		resp_prim.cnst = 1;          // partial
+		resp_prim.cnot = ofst + lim; // offset for next request
+	}
 
 	return;
 }

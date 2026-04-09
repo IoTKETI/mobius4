@@ -526,6 +526,9 @@ function primToHttp(prim, resp) {
   resp.set("X-M2M-RSC", prim.rsc);
   resp.set("X-M2M-RVI", prim.rvi);
 
+  if (prim.cnst !== undefined) resp.set("X-M2M-CTS", prim.cnst); // Content Status
+  if (prim.cnot !== undefined) resp.set("X-M2M-CTO", prim.cnot); // Content Offset
+
   if (prim.pc) {
     resp.set("Content-Type", "application/json");
   }
