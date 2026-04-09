@@ -13,6 +13,10 @@ cp config/local.json.example config/local.json
 **Typical `config/local.json` for development:**
 ```json
 {
+  "cse": {
+    "sp_id": "//your-domain.io",
+    "poa": ["http://YOUR_SERVER_IP:7599"]
+  },
   "db": {
     "user": "your_db_user",
     "pw": "your_db_password"
@@ -27,6 +31,10 @@ cp config/local.json.example config/local.json
 **Typical `config/local.json` for production deployment:**
 ```json
 {
+  "cse": {
+    "sp_id": "//your-domain.io",
+    "poa": ["http://YOUR_SERVER_IP:7599"]
+  },
   "db": {
     "user": "mobius4",
     "pw": "strong_password_here"
