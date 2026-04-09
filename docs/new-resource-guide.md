@@ -1,59 +1,59 @@
-# 신규 리소스 타입 추가 가이드
+# Adding a New Resource Type
 
-이 문서는 Mobius4에 새로운 oneM2M 리소스 타입을 추가할 때 수정해야 하는 파일과 구체적인 코드 패턴을 정리합니다.  
-예시로는 기존에 구현된 **type 106 (`dts`, dataset)** 을 참조합니다.
-
----
-
-## 전체 체크리스트
-
-```
-[ ] 1. config/enums.js              — ty_str 맵에 타입 등록
-[ ] 2. models/xyz-model.js          — Sequelize 모델 파일 생성
-[ ] 3. db/init.js                   — CREATE TABLE DDL 추가
-[ ] 4. cse/resources/xyz.js         — CRUD 핸들러 구현
-[ ] 5. cse/hostingCSE.js            — 모델·핸들러 import, 4개 switch에 case 추가, 2개 맵에 등록
-[ ] 6. cse/reqPrim.js               — 핸들러 import, 가상 자식 리소스(la/ol) 분기 추가 (해당되는 경우)
-[ ] 7. cse/validation/res_schema.js — Joi 스키마 정의 (권장)
-[ ] 8. cse/resources/sub.js         — 구독 허용 부모 타입 목록에 추가 (해당되는 경우)
-[ ] 9. config/default.json          — supportedResourceType 목록에 추가 (표준 리소스인 경우)
-```
+This guide covers every file to create or modify when adding a new oneM2M resource type to Mobius4.
+**Type 106 (`dts`, dataset)** is used throughout as a concrete reference example.
 
 ---
 
-## 단계별 상세 가이드
+## Checklist
 
-### 1. `config/enums.js` — 타입 코드 등록
+```
+[ ] 1. config/enums.js              — register type code in ty_str map
+[ ] 2. models/xyz-model.js          — create Sequelize model file
+[ ] 3. db/init.js                   — add CREATE TABLE DDL
+[ ] 4. cse/resources/xyz.js         — implement CRUD handler
+[ ] 5. cse/hostingCSE.js            — import model & handler, add cases to 4 switches, register in 2 maps
+[ ] 6. cse/reqPrim.js               — import handler, add la/ol virtual resource dispatch (if applicable)
+[ ] 7. cse/validation/res_schema.js — define Joi schemas (recommended)
+[ ] 8. cse/resources/sub.js         — add to subscribable parent type list (if applicable)
+[ ] 9. config/default.json          — add to supportedResourceType list (standard resources only)
+```
 
-**위치:** `ty_str` 객체 (line 24~44)
+---
+
+## Step-by-Step Guide
+
+### 1. `config/enums.js` — Register the type code
+
+**Location:** `ty_str` object (lines 24–44)
 
 ```javascript
 const ty_str = {
-    // 표준 리소스 (생략)
-    // 비표준 리소스 — 아래에 추가
+    // standard resources (omitted)
+    // non-standard resources — add below
     101: "mrp",
     102: "mmd",
     // ...
-    108: "xyz",  // ← 새 타입 추가
+    108: "xyz",  // ← add new type here
 };
 ```
 
-- 타입 코드(숫자)와 단축 이름(문자열) 매핑
-- `ty_str` 하나만 추가하면 됨. 역방향 맵은 별도 존재하지 않음
-- `get_a_new_rn(ty)`가 이 맵을 사용해 자동 리소스명(`xyz-abc123`) 생성
+- Maps a numeric type code to a short string name.
+- Only `ty_str` needs an entry — there is no separate reverse map.
+- `get_a_new_rn(ty)` uses this map to auto-generate resource names like `xyz-abc123`.
 
 ---
 
-### 2. `models/xyz-model.js` — Sequelize 모델 생성
+### 2. `models/xyz-model.js` — Create the Sequelize model
 
-**위치:** `models/` 디렉토리에 신규 파일 생성
+**Location:** create a new file in the `models/` directory
 
 ```javascript
 const { DataTypes } = require('sequelize');
 const sequelize = require('../db/sequelize');
 
 const XYZ = sequelize.define('xyz', {
-    // ── 필수 공통 속성 ──────────────────────────────
+    // ── Mandatory common attributes ─────────────────
     ri: {
         type: DataTypes.STRING(24),
         primaryKey: true,
@@ -62,7 +62,7 @@ const XYZ = sequelize.define('xyz', {
     ty: {
         type: DataTypes.INTEGER,
         allowNull: false,
-        defaultValue: 108,        // ← 타입 코드 지정
+        defaultValue: 108,        // ← set to your type code
     },
     sid:    DataTypes.STRING,
     int_cr: DataTypes.STRING,
@@ -81,30 +81,30 @@ const XYZ = sequelize.define('xyz', {
     },
     cr: DataTypes.STRING,
 
-    // ── 리소스 전용 속성 ────────────────────────────
-    // 예시: 단일값
+    // ── Resource-specific attributes ─────────────────
+    // single value
     some_attr: DataTypes.STRING,
-    // 예시: 배열
+    // array
     some_list: DataTypes.ARRAY(DataTypes.STRING),
-    // 예시: JSON
+    // JSON
     some_json: DataTypes.JSONB,
-    // 예시: 위치 (geo 지원 시)
+    // location (only if geo support is needed)
     loc: DataTypes.GEOMETRY('GEOMETRY', 4326),
 }, {
-    tableName: 'xyz',    // DB 테이블 이름 (ty_str 값과 일치)
+    tableName: 'xyz',    // must match the ty_str value
     timestamps: false,
 });
 
 module.exports = XYZ;
 ```
 
-**참고 모델:** `models/dts-model.js`, `models/mrp-model.js`
+**Reference models:** `models/dts-model.js`, `models/mrp-model.js`
 
 ---
 
-### 3. `db/init.js` — CREATE TABLE DDL 추가
+### 3. `db/init.js` — Add CREATE TABLE DDL
 
-**위치:** `create_tables()` 함수 내, 다른 `CREATE TABLE` 블록 바로 다음에 추가
+**Location:** inside the `create_tables()` function, after the last existing `CREATE TABLE` block
 
 ```javascript
 // create xyz table
@@ -123,7 +123,7 @@ await client.query(`
         acpi    VARCHAR(${len.structured_res_id})[],
         lbl     VARCHAR(${len.str_token})[],
 
-        -- 리소스 전용 컬럼
+        -- resource-specific columns
         some_attr   VARCHAR(${len.str_token}),
         some_list   VARCHAR(${len.str_token})[],
         some_json   JSONB
@@ -131,37 +131,37 @@ await client.query(`
 `);
 ```
 
-**인덱스 추가 위치:** `-- Performance indexes ---` 섹션 (line ~470)
+**Index location:** `-- Performance indexes ---` section (~line 470)
 
 ```javascript
-// xyz: pi 기반 자식 조회가 빈번하면 추가
+// add if pi-based child lookups are frequent
 await client.query(`
     CREATE INDEX IF NOT EXISTS idx_xyz_pi ON xyz (pi);
 `);
 ```
 
-**컬럼 크기 상수 (`len` 객체):**
+**Column size constants (`len` object):**
 
-| 상수 | 용도 |
-|------|------|
-| `len.ri_max` | ri, pi (리소스 ID) |
+| Constant | Used for |
+|----------|----------|
+| `len.ri_max` | ri, pi (resource ID) |
 | `len.structured_res_id` | sid, acpi |
-| `len.str_token` | rn, cr, lbl 등 일반 문자열 |
+| `len.str_token` | rn, cr, lbl, and general strings |
 | `len.timestamp` | et, ct, lt |
 
-**geo 지원 컬럼 (위치 필터 필요 시):**
+**Geo support column (if location filtering is needed):**
 ```sql
 loc GEOMETRY(GEOMETRY, 4326)
 ```
-+ `TYPE_MODEL`에서 `no_geo: false`로 설정 (→ 5단계 참조)
+Also set `no_geo: false` in `TYPE_MODEL` (see step 5).
 
 ---
 
-### 4. `cse/resources/xyz.js` — CRUD 핸들러 구현
+### 4. `cse/resources/xyz.js` — Implement the CRUD handler
 
-**위치:** `cse/resources/` 디렉토리에 신규 파일 생성
+**Location:** create a new file in the `cse/resources/` directory
 
-#### 파일 구조
+#### File structure
 
 ```javascript
 const { xyz_create_schema, xyz_update_schema } = require('../validation/res_schema');
@@ -171,13 +171,13 @@ const XYZ = require('../../models/xyz-model');
 const Lookup = require('../../models/lookup-model');
 const logger = require('../../logger').child({ module: 'xyz' });
 
-// 허용된 부모 리소스 타입 목록
-const xyz_parent_res_types = ['cb', 'ae', 'cnt'];  // ← 타입에 맞게 설정
+// allowed parent resource types
+const xyz_parent_res_types = ['cb', 'ae', 'cnt'];  // ← adjust as needed
 
 async function create_an_xyz(req_prim, resp_prim) { ... }
 async function retrieve_an_xyz(req_prim, resp_prim) { ... }
-async function update_an_xyz(req_prim, resp_prim) { ... }  // 필요 시
-// 가상 자식 리소스를 가질 경우:
+async function update_an_xyz(req_prim, resp_prim) { ... }  // optional
+// if the resource has ordered virtual children:
 // async function retrieve_ol(req_prim, resp_prim) { ... }
 // async function retrieve_la(req_prim, resp_prim) { ... }
 // async function delete_ol(req_prim, resp_prim) { ... }
@@ -190,13 +190,13 @@ module.exports = {
 };
 ```
 
-#### CREATE 패턴
+#### CREATE pattern
 
 ```javascript
 async function create_an_xyz(req_prim, resp_prim) {
     const prim_res = req_prim.pc['m2m:xyz'];
 
-    // 1. 스키마 검증
+    // 1. schema validation
     const validated = xyz_create_schema.validate(prim_res);
     if (validated.error) {
         const { message, path } = validated.error.details[0];
@@ -205,11 +205,11 @@ async function create_an_xyz(req_prim, resp_prim) {
         return;
     }
 
-    // 2. 부모 타입 확인
+    // 2. parent type check
     const parent_ty = req_prim.to_ty;
     if (!xyz_parent_res_types.includes(enums.ty_str[parent_ty.toString()])) {
         resp_prim.rsc = enums.rsc_str['INVALID_CHILD_RESOURCE_TYPE'];
-        resp_prim.pc = { 'm2m:dbg': 'cannot create <xyz> to this parent resource type' };
+        resp_prim.pc = { 'm2m:dbg': 'cannot create <xyz> under this parent resource type' };
         return;
     }
 
@@ -220,7 +220,7 @@ async function create_an_xyz(req_prim, resp_prim) {
     const xyz_sid = req_prim.sid + '/' + prim_res.rn;
 
     try {
-        // 3. 리소스 생성 (항상 두 테이블 동시에)
+        // 3. create resource — always write both tables
         await XYZ.create({
             ri, ty: 108, rn: prim_res.rn, pi: xyz_pi, sid: xyz_sid,
             int_cr: req_prim.fr,
@@ -228,7 +228,7 @@ async function create_an_xyz(req_prim, resp_prim) {
             cr: prim_res.cr === null ? req_prim.fr : null,
             acpi: prim_res.acpi || null,
             lbl:  prim_res.lbl  || null,
-            // 리소스 전용 속성
+            // resource-specific attributes
             some_attr: prim_res.some_attr || null,
         });
 
@@ -241,7 +241,7 @@ async function create_an_xyz(req_prim, resp_prim) {
             et: prim_res.et || et,
         });
 
-        // 4. 생성된 리소스를 조회해 응답
+        // 4. retrieve and return the created resource
         const tmp_req = { ri }, tmp_resp = {};
         await retrieve_an_xyz(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
@@ -253,11 +253,11 @@ async function create_an_xyz(req_prim, resp_prim) {
 }
 ```
 
-#### RETRIEVE 패턴
+#### RETRIEVE pattern
 
 ```javascript
 async function retrieve_an_xyz(req_prim, resp_prim) {
-    const xyz_obj = { 'm2m:xyz': {} };  // ← 응답 키는 'mäm:' + ty_str 값
+    const xyz_obj = { 'm2m:xyz': {} };  // response key = 'm2m:' + ty_str value
     const ri = req_prim.ri;
 
     try {
@@ -268,11 +268,11 @@ async function retrieve_an_xyz(req_prim, resp_prim) {
             return;
         }
 
-        // 내부 API 요청 시 int_cr 포함
+        // include int_cr for internal API calls
         if (req_prim?.int_cr_req === true)
             xyz_obj['m2m:xyz'].int_cr = db_res.int_cr;
 
-        // 필수 공통 속성
+        // mandatory common attributes
         xyz_obj['m2m:xyz'].ty = db_res.ty;
         xyz_obj['m2m:xyz'].ri = db_res.ri;
         xyz_obj['m2m:xyz'].rn = db_res.rn;
@@ -281,12 +281,12 @@ async function retrieve_an_xyz(req_prim, resp_prim) {
         xyz_obj['m2m:xyz'].ct = db_res.ct;
         xyz_obj['m2m:xyz'].lt = db_res.lt;
 
-        // 선택적 공통 속성
+        // optional common attributes
         if (db_res.acpi?.length) xyz_obj['m2m:xyz'].acpi = db_res.acpi;
         if (db_res.lbl?.length)  xyz_obj['m2m:xyz'].lbl  = db_res.lbl;
         if (db_res.cr)           xyz_obj['m2m:xyz'].cr   = db_res.cr;
 
-        // 리소스 전용 속성
+        // resource-specific attributes
         if (db_res.some_attr) xyz_obj['m2m:xyz'].some_attr = db_res.some_attr;
 
         resp_prim.pc = xyz_obj;
@@ -298,7 +298,7 @@ async function retrieve_an_xyz(req_prim, resp_prim) {
 }
 ```
 
-#### UPDATE 패턴 (선택)
+#### UPDATE pattern (optional)
 
 ```javascript
 async function update_an_xyz(req_prim, resp_prim) {
@@ -318,13 +318,13 @@ async function update_an_xyz(req_prim, resp_prim) {
 
         db_res.lt = get_cur_time();
 
-        // 변경 가능한 속성만 갱신
+        // update only mutable attributes
         if (prim_res.et)   db_res.et   = prim_res.et;
         if (prim_res.acpi) db_res.acpi = prim_res.acpi;
         if (prim_res.lbl)  db_res.lbl  = prim_res.lbl;
         if (prim_res.some_attr) db_res.some_attr = prim_res.some_attr;
 
-        // null 전송 시 속성 삭제
+        // null value removes the attribute
         if (prim_res.acpi === null) db_res.acpi = null;
         if (prim_res.lbl  === null) db_res.lbl  = null;
 
@@ -341,23 +341,23 @@ async function update_an_xyz(req_prim, resp_prim) {
 }
 ```
 
-**참고 핸들러:** `cse/resources/dts.js`, `cse/resources/mrp.js`, `cse/resources/cnt.js`
+**Reference handlers:** `cse/resources/dts.js`, `cse/resources/mrp.js`, `cse/resources/cnt.js`
 
 ---
 
-### 5. `cse/hostingCSE.js` — 4개 switch + 2개 맵 등록
+### 5. `cse/hostingCSE.js` — 4 switches + 2 maps
 
-#### 5-A. import 추가 (line ~26~55)
+#### 5-A. Add imports (~lines 26–55)
 
 ```javascript
-// 모델 import (상단 모델 섹션)
-const XYZ = require('../models/xyz-model');       // line ~32
+// model import (top model section)
+const XYZ = require('../models/xyz-model');
 
-// 핸들러 import (하단 핸들러 섹션)
-const xyz = require("./resources/xyz");           // line ~55
+// handler import (bottom handler section)
+const xyz = require("./resources/xyz");
 ```
 
-#### 5-B. CREATE switch (line ~122~178)
+#### 5-B. CREATE switch (~lines 122–178)
 
 ```javascript
 case 108:
@@ -365,7 +365,7 @@ case 108:
     break;
 ```
 
-#### 5-C. RETRIEVE switch (line ~217~269)
+#### 5-C. RETRIEVE switch (~lines 217–269)
 
 ```javascript
 case 108:
@@ -373,7 +373,7 @@ case 108:
     break;
 ```
 
-#### 5-D. UPDATE switch (line ~468~515) — 업데이트 가능한 경우에만
+#### 5-D. UPDATE switch (~lines 468–515) — only if the resource is updatable
 
 ```javascript
 case 108:
@@ -381,60 +381,60 @@ case 108:
     break;
 ```
 
-> UPDATE를 지원하지 않으면 추가하지 말 것. `default` case가 `OPERATION_NOT_ALLOWED`를 반환함.
+> If UPDATE is not supported, do not add a case — the `default` branch already returns `OPERATION_NOT_ALLOWED`.
 
-#### 5-E. DELETE_MODEL 맵 (line ~607~610)
+#### 5-E. DELETE_MODEL map (~lines 607–610)
 
 ```javascript
 const DELETE_MODEL = {
-    // ... 기존 항목
+    // ... existing entries
     106: DTS, 107: DSF,
-    108: XYZ,   // ← 추가
+    108: XYZ,   // ← add
 };
 ```
 
-자식 리소스 포함 일괄 삭제 시 사용됨. **반드시 추가해야 함.**
+Used for batch deletion of descendant resources. **Must be added.**
 
-#### 5-F. TYPE_MODEL 맵 (line ~653~668) — discovery 쿼리용
+#### 5-F. TYPE_MODEL map (~lines 653–668) — for discovery queries
 
 ```javascript
 const TYPE_MODEL = {
-    // ... 기존 항목
+    // ... existing entries
     107: { model: DSF, no_geo: true },
-    108: { model: XYZ, no_geo: true },   // ← 추가
-    //                          ↑ 위치 속성(loc)이 없으면 true, 있으면 false
+    108: { model: XYZ, no_geo: true },   // ← add
+    //                          ↑ true if no loc column, false if geo support needed
 };
 ```
 
-- `no_geo: true` — 위치 기반 Discovery 필터 미지원
-- `no_geo: false` — loc 컬럼이 있고 geo 필터를 지원
+- `no_geo: true` — location-based discovery filters are not supported
+- `no_geo: false` — resource has a `loc` column and supports geo filters
 
 ---
 
-### 6. `cse/reqPrim.js` — 가상 자식 리소스 분기 추가
+### 6. `cse/reqPrim.js` — Virtual child resource dispatch
 
-**해당되는 경우:** 새 리소스가 `la` (latest) / `ol` (oldest) 가상 자식 리소스를 가질 때만 추가.  
-예: `<container>`(`cnt`) ↔ `<contentInstance>`(`cin`) 관계처럼 자식 순서가 있는 경우.
+**Only required when** the new resource has ordered virtual children (`la` = latest, `ol` = oldest),
+similar to how `<container>` (`cnt`) contains `<contentInstance>` (`cin`).
 
-#### import 추가 (line ~17~19)
+#### Add import (~lines 17–19)
 
 ```javascript
 const xyz = require("./resources/xyz");
 ```
 
-#### `la` 분기 (line ~144~170)
+#### `la` dispatch (~lines 144–170)
 
 ```javascript
 else if ('la' === req_prim.vr) {
     switch (req_prim.op) {
         case 2:  // RETRIEVE latest
-            // ... 기존
+            // ... existing cases
             } else if (req_prim.parent_ty == 108) {
                 await xyz.retrieve_la(req_prim, resp_prim);
             }
             break;
         case 4:  // DELETE latest
-            // ... 기존
+            // ... existing cases
             } else if (req_prim.parent_ty == 108) {
                 await xyz.delete_la(req_prim, resp_prim);
             }
@@ -443,7 +443,7 @@ else if ('la' === req_prim.vr) {
 }
 ```
 
-#### `ol` 분기 (line ~171~197)
+#### `ol` dispatch (~lines 171–197)
 
 ```javascript
 else if ('ol' === req_prim.vr) {
@@ -464,95 +464,95 @@ else if ('ol' === req_prim.vr) {
 
 ---
 
-### 7. `cse/validation/res_schema.js` — Joi 스키마 정의 (권장)
+### 7. `cse/validation/res_schema.js` — Define Joi schemas (recommended)
 
-**위치:** 파일 내 다른 스키마 정의 다음에 추가
+**Location:** add after the last existing schema definition in the file
 
 ```javascript
 const xyz_create_schema = Joi.object().keys({
-    ...create_universal_attr,     // rn, et, acpi, lbl, cr 등 공통 속성
+    ...create_universal_attr,     // rn, et, acpi, lbl, cr, etc.
 
-    // 리소스 전용 속성 (필수)
+    // required resource-specific attribute
     required_field: Joi.string().required(),
 
-    // 리소스 전용 속성 (선택)
+    // optional resource-specific attribute
     optional_field: Joi.string().optional(),
 
-    // 생성 시 읽기 전용 (클라이언트 설정 불가)
+    // read-only at creation (client must not set this)
     read_only_field: Joi.forbidden(),
 });
 
 const xyz_update_schema = Joi.object().keys({
-    ...update_universal_attr,     // et, acpi, lbl 등 공통 업데이트 속성
+    ...update_universal_attr,     // et, acpi, lbl, etc.
 
-    // 업데이트 가능한 속성
+    // mutable attribute
     optional_field: Joi.string().optional(),
 
-    // 생성 후 변경 불가 속성
+    // immutable after creation
     required_field: Joi.forbidden(),
     read_only_field: Joi.forbidden(),
 });
 ```
 
-**export에 추가:**
+**Add to exports:**
 
 ```javascript
 module.exports = {
-    // ... 기존
+    // ... existing exports
     xyz_create_schema, xyz_update_schema,
 };
 ```
 
-**참고 스키마:** `dsp_create_schema`, `cnt_create_schema` (line ~285~336)
+**Reference schemas:** `dsp_create_schema`, `cnt_create_schema` (~lines 285–336)
 
 ---
 
-### 8. `cse/resources/sub.js` — 구독 허용 부모 목록 추가 (조건부)
+### 8. `cse/resources/sub.js` — Add to subscribable parent list (conditional)
 
-새 리소스에 `<sub>`(Subscription) 자식을 생성할 수 있게 허용하려면:
+To allow `<sub>` (Subscription) resources to be created under the new resource type:
 
-**위치:** line 12
+**Location:** line 12
 
 ```javascript
 const sub_parent_res_types = [
     "ae", "acp", "cb", "cnt", "csr", "grp", "flx",
     "mrp", "mmd", "mdp", "dpm",
-    "xyz",  // ← 추가
+    "xyz",  // ← add
 ];
 ```
 
 ---
 
-### 9. `config/default.json` — supportedResourceType 목록 (조건부)
+### 9. `config/default.json` — Add to supportedResourceType list (conditional)
 
-표준(Standard) 리소스이고 CSEBase의 `srt` 속성에 광고해야 하는 경우:
+Only needed for standard resources that should be advertised in the CSEBase `srt` attribute:
 
 ```json
 "supported_resource_types": [1, 2, 3, 4, 5, 9, 16, 23, 108]
 ```
 
-비표준 리소스(사내 확장)는 일반적으로 추가하지 않음.
+Non-standard (proprietary extension) resources are generally not added here.
 
 ---
 
-## 기능별 조건 분기표
+## Feature Decision Table
 
-| 기능 | 해당 조건 | 추가 위치 |
-|------|-----------|-----------|
-| 위치 기반 필터 (geo) | `loc` 컬럼이 있을 때 | `TYPE_MODEL`에 `no_geo: false`, DDL에 `GEOMETRY` 컬럼 |
-| 구독 (`<sub>`) 생성 | 자식으로 구독 허용 시 | `sub.js` `sub_parent_res_types` |
-| 가상 자식 (`la`/`ol`) | 순서 있는 자식을 가질 때 | `reqPrim.js` la/ol 분기, 핸들러에 4개 함수 구현 |
-| UPDATE 지원 | 변경 가능한 속성이 있을 때 | `hostingCSE.js` UPDATE switch, `update_an_xyz()` 구현 |
-| Joi 검증 | (항상 권장) | `res_schema.js` 스키마 정의, 핸들러에서 호출 |
+| Feature | When to add | Location |
+|---------|-------------|----------|
+| Location-based filter (geo) | Resource has a `loc` column | `TYPE_MODEL` `no_geo: false`, DDL `GEOMETRY` column |
+| Subscription (`<sub>`) | Resource can be a subscription target | `sub.js` `sub_parent_res_types` |
+| Virtual children (`la`/`ol`) | Resource contains ordered child resources | `reqPrim.js` la/ol dispatch, 4 handler functions |
+| UPDATE support | Resource has mutable attributes | `hostingCSE.js` UPDATE switch, `update_an_xyz()` |
+| Joi validation | (always recommended) | `res_schema.js` schema definition, called in handler |
 
 ---
 
-## 참고 파일 목록
+## Reference Files
 
-| 목적 | 참고 파일 |
-|------|----------|
-| 단순 비표준 리소스 | `cse/resources/dts.js`, `models/dts-model.js` |
-| 가상 자식(`la`/`ol`)이 있는 리소스 | `cse/resources/mrp.js`, `cse/resources/cnt.js` |
-| geo 지원 리소스 | `cse/resources/ae.js`, `cse/resources/cnt.js` |
-| 복잡한 Joi 스키마 | `cse/validation/res_schema.js` — `dsp_create_schema` |
-| DDL 패턴 전체 | `db/init.js` — `create_tables()` 함수 |
+| Purpose | Reference file |
+|---------|---------------|
+| Simple non-standard resource | `cse/resources/dts.js`, `models/dts-model.js` |
+| Resource with virtual children (`la`/`ol`) | `cse/resources/mrp.js`, `cse/resources/cnt.js` |
+| Geo-enabled resource | `cse/resources/ae.js`, `cse/resources/cnt.js` |
+| Complex Joi schema | `cse/validation/res_schema.js` — `dsp_create_schema` |
+| Full DDL pattern | `db/init.js` — `create_tables()` function |
