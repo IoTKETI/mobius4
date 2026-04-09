@@ -468,8 +468,37 @@ async function create_tables(client) {
             );
         `);
 
+        // --- Performance indexes ---
+        // lookup: pi for child-resource queries, et for expiry cleanup, (pi,ty) for typed child lookups
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_lookup_pi    ON lookup (pi);
+            CREATE INDEX IF NOT EXISTS idx_lookup_et    ON lookup (et);
+            CREATE INDEX IF NOT EXISTS idx_lookup_pi_ty ON lookup (pi, ty);
+        `);
+
+        // sub: pi is queried on every CRUD operation to find subscriptions
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_sub_pi ON sub (pi);
+        `);
+
+        // cnt: pi for child-resource queries
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_cnt_pi ON cnt (pi);
+        `);
+
+        // cin: pi for child-resource queries, ct for oldest-CIN lookup (mni/mbs eviction)
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_cin_pi ON cin (pi);
+            CREATE INDEX IF NOT EXISTS idx_cin_ct ON cin (ct);
+        `);
+
+        // ae: pi for child-resource queries
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_ae_pi ON ae (pi);
+        `);
+
         await client.query('COMMIT');
-        logger.info('resource tables created');
+        logger.info('resource tables and indexes created');
     } catch (err) {
         await client.query('ROLLBACK');
         logger.error({ err }, 'create tables failed');

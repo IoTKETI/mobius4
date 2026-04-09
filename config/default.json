@@ -86,7 +86,13 @@
     "host": "localhost",
     "name": "mobius4",
     "pw": "",
-    "port": 5432
+    "port": 5432,
+    "pool": {
+      "max": 30,
+      "idleTimeoutMs": 30000,
+      "connectionTimeoutMs": 2000,
+      "statementTimeoutMs": 30000
+    }
   },
   "length": {
     "timestamp": 20,

@@ -4,6 +4,7 @@ const enums = require('../../config/enums');
 
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 
+const sequelize = require('../../db/sequelize');
 const Lookup = require('../../models/lookup-model');
 const CNT = require('../../models/cnt-model');
 const CIN = require('../../models/cin-model');
@@ -35,20 +36,19 @@ async function create_a_cin(req_prim, resp_prim) {
         return;
     }
 
-    // get parent container info
-    const cnt_res = await CNT.findByPk(cin_pi);
+    // [C2] read only fields needed for validation — avoid SELECT *
+    const cnt_res = await CNT.findByPk(cin_pi, {
+        attributes: ['ri', 'mbs', 'mni', 'st', 'cni', 'cbs', 'cin_list']
+    });
     if (!cnt_res) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'parent <cnt> resource not found' };
         return;
     }
-    // getting 'st' of the parent container to be used for 'st' of the new <cin>
-    const parent_st = cnt_res.st;
 
     // content size 계산
     const { get_mem_size } = require('../hostingCSE');
     const content_size = get_mem_size(prim_res.con);
-    // to-do: the above is not equal to the size of the DB (this topic is being discussed in oneM2M)
 
     // when mbs < cs, it is not acceptable
     if (content_size > cnt_res.mbs) {
@@ -64,11 +64,10 @@ async function create_a_cin(req_prim, resp_prim) {
     // process 'loc' attribute
     if (prim_res.loc) {
         await convert_loc_to_geoJson(prim_res, resp_prim);
-        if (resp_prim.rsc) // from the prev function, error code is set
+        if (resp_prim.rsc)
             return;
     }
 
-    // create cin resource
     const cin_res = {
         ri,
         ty: 4,
@@ -78,100 +77,136 @@ async function create_a_cin(req_prim, resp_prim) {
         et: prim_res.et || et,
         ct: now,
         lt: now,
-        // common attributes
         cr: prim_res.cr === null ? req_prim.fr : null,
         acpi: prim_res.acpi || null,
         lbl: prim_res.lbl || null,
         loc: prim_res.loc,
-        st: parent_st + 1, // check if this is correct logic, to-do
-        // resource specific attributes
+        st: cnt_res.st + 1,
         cs: content_size,
-        con: prim_res.con, // mandatory
+        con: prim_res.con,
         cnf: prim_res.cnf || null,
     };
 
-    // set optional attributes
-    if (prim_res.cr === null) cin_res.cr = req_prim.fr;
-    if (prim_res.acpi) cin_res.acpi = prim_res.acpi;
-    if (prim_res.lbl) cin_res.lbl = prim_res.lbl;
-    if (prim_res.cnf) cin_res.cnf = prim_res.cnf;
-
     try {
-        await CIN.create(cin_res);
+        // [C7] CIN INSERT + CNT UPDATE + Lookup INSERT in a single transaction
+        const new_cnt = await sequelize.transaction(async (t) => {
+            await CIN.create(cin_res, { transaction: t });
 
-        // update parent container meta info and get stateTag
-        const this_st = await update_parent_container(cnt_res, ri, content_size);
+            // [C2] atomic CNT UPDATE — avoids separate findByPk + update and prevents race conditions
+            const [, updated] = await CNT.update(
+                {
+                    cni:      sequelize.literal('cni + 1'),
+                    cbs:      sequelize.literal(`cbs + ${content_size}`),
+                    st:       sequelize.literal('st + 1'),
+                    cin_list: sequelize.literal(`array_append(cin_list, '${ri}')`),
+                },
+                {
+                    where: { ri: cin_pi },
+                    returning: ['cni', 'cbs', 'st', 'mni', 'mbs', 'cin_list'],
+                    transaction: t,
+                }
+            );
 
-        // create lookup record
-        // await CSE.create_a_lookup_record(db_res.ty, db_res.rn, db_res.sid, db_res.ri, db_res.pi, db_res.cr || null, req_prim.fr, null);
-        await Lookup.create({
-            ri,
-            ty: 4,
-            rn: prim_res.rn,
-            sid: cin_sid,
-            lvl: cin_sid.split("/").length,
-            pi: cin_pi,
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            loc: prim_res.loc
+            await Lookup.create({
+                ri,
+                ty: 4,
+                rn: prim_res.rn,
+                sid: cin_sid,
+                lvl: cin_sid.split('/').length,
+                pi: cin_pi,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                loc: prim_res.loc
+            }, { transaction: t });
+
+            return updated[0];
         });
 
-        // retrieve the created resource and respond
-        const tmp_req = { ri };
-        await retrieve_a_cin(tmp_req, resp_prim);
+        // eviction after transaction: delete oldest CIN(s) if mni or mbs exceeded
+        if (new_cnt) {
+            await evict_if_needed(new_cnt, cin_pi);
+        }
+
+        // [C1] build response directly from cin_res — no extra DB round trip
+        resp_prim.pc = build_cin_response(cin_res);
+
     } catch (err) {
         logger.error({ err }, 'create_a_cin failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
-    return;
 }
 
-async function update_parent_container(cnt_res, cin_ri, content_size) {
+// [C1] build response object from in-memory cin_res (avoids re-reading from DB)
+function build_cin_response(cin_res) {
+    const cin_obj = { 'm2m:cin': {
+        ty:  cin_res.ty,
+        ri:  cin_res.ri,
+        rn:  cin_res.rn,
+        pi:  cin_res.pi,
+        ct:  cin_res.ct,
+        lt:  cin_res.lt,
+        et:  cin_res.et,
+        st:  cin_res.st,
+        cs:  cin_res.cs,
+        con: cin_res.con,
+    }};
+
+    if (cin_res.acpi && cin_res.acpi.length) cin_obj['m2m:cin'].acpi = cin_res.acpi;
+    if (cin_res.lbl && cin_res.lbl.length)  cin_obj['m2m:cin'].lbl  = cin_res.lbl;
+    if (cin_res.cr)                          cin_obj['m2m:cin'].cr   = cin_res.cr;
+    if (cin_res.cnf)                         cin_obj['m2m:cin'].cnf  = cin_res.cnf;
+    if (cin_res.loc)                         cin_obj['m2m:cin'].loc  = get_loc_attribute(cin_res.loc);
+
+    return cin_obj;
+}
+
+// [C4] evict oldest CIN(s) when mni or mbs is exceeded — runs after transaction commits
+async function evict_if_needed(cnt, cin_pi) {
     const { delete_a_res } = require('../hostingCSE');
 
-    let cni = cnt_res.cni;
-    let cbs = cnt_res.cbs;
-    let mni = cnt_res.mni;
-    let mbs = cnt_res.mbs;
-    let st = cnt_res.st + 1;
-    let cin_list = (cnt_res.cin_list) ? cnt_res.cin_list : [];
+    let { cni, cbs, mni, mbs, cin_list } = cnt.dataValues || cnt;
+    cin_list = [...(cin_list || [])];
 
-    // add this cin_ri into the cin_list of the parent container
-    cin_list.push(cin_ri);
-    cni++;
+    const to_delete = [];
 
-    // mni handling
-    if (cni > mni) {
-        const deleted_ri = cin_list.shift();
-
-        // delete the corresponding cin 
-        const tmp_resp = {};
-
-        await delete_a_res({ fr: config.cse.admin, to: deleted_ri, ri: deleted_ri, rqi: 'delete_a_cin', to_ty: 4, int_cr_req: true }, tmp_resp);
-        if (tmp_resp.pc && tmp_resp.pc['m2m:cin'] && tmp_resp.pc['m2m:cin'].cs) {
-            cbs = cbs - tmp_resp.pc['m2m:cin'].cs;
-        }
+    // mni: collect oldest CINs to remove until within limit
+    while (cni > mni && cin_list.length > 0) {
+        to_delete.push(cin_list.shift());
         cni--;
     }
 
-    // mbc handling
-    cbs += content_size;
-    while (cbs > mbs) {
-        const deleted_ri = cin_list.shift();
-        const tmp_resp = {};
-        await delete_a_res({ fr: config.cse.admin, to: deleted_ri, ri: deleted_ri, rqi: 'delete_a_cin', to_ty: 4, int_cr_req: true }, tmp_resp);
-        if (tmp_resp.pc && tmp_resp.pc['m2m:cin'] && tmp_resp.pc['m2m:cin'].cs) {
-            cbs = cbs - tmp_resp.pc['m2m:cin'].cs;
-        }
+    // mbs: collect oldest CINs until within size limit
+    while (cbs > mbs && cin_list.length > 0) {
+        to_delete.push(cin_list.shift());
         cni--;
     }
 
-    // parent container resource update
-    await CNT.update({ cni, cbs, st, cin_list }, { where: { ri: cnt_res.ri } });
+    if (to_delete.length === 0) return;
 
-    return st;
+    // delete each evicted CIN (int_cr_req=true skips the per-CIN CNT update in delete_a_res)
+    let cbs_reduction = 0;
+    for (const old_ri of to_delete) {
+        const tmp_resp = {};
+        await delete_a_res(
+            { fr: config.cse.admin, to: old_ri, ri: old_ri, rqi: 'evict_cin', to_ty: 4, int_cr_req: true },
+            tmp_resp
+        );
+        if (tmp_resp.pc?.['m2m:cin']?.cs) {
+            cbs_reduction += tmp_resp.pc['m2m:cin'].cs;
+        }
+    }
+
+    // update CNT to reflect evicted CINs
+    await CNT.update(
+        {
+            cni:      sequelize.literal(`cni - ${to_delete.length}`),
+            cbs:      sequelize.literal(`cbs - ${cbs_reduction}`),
+            cin_list: cin_list,
+        },
+        { where: { ri: cin_pi } }
+    );
 }
 
 async function retrieve_a_cin(req_prim, resp_prim) {
