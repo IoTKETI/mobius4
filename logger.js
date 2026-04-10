@@ -1,5 +1,6 @@
 'use strict';
 
+const path = require('path');
 const pino = require('pino');
 const config = require('config');
 
@@ -27,7 +28,7 @@ if (logConfig.file.enabled) {
     targets.push({
         target: 'pino-roll',
         options: {
-            file: logConfig.file.path,
+            file: path.join(__dirname, logConfig.file.path),
             frequency: logConfig.file.rotate,
             size: logConfig.file.maxSize,
             limit: { count: logConfig.file.maxFiles },
@@ -47,14 +48,9 @@ const logger = pino(
             pid: process.pid,
             cseId: config.get('cse.cse_id')
         },
-        timestamp: pino.stdTimeFunctions.isoTime,
-        formatters: {
-            level(label) {
-                return { level: label };
-            }
-        }
+        timestamp: pino.stdTimeFunctions.isoTime
     },
-    pino.transport({ targets })
+    pino.transport({ targets, sync: true })
 );
 
 module.exports = logger;

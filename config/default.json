@@ -1,11 +1,11 @@
 {
   "cse": {
     "cse_type": 1,
-    "sp_id": "//mydomain.io",
+    "sp_id": "//localhost",
     "cse_id": "/Mobius4",
     "csebase_rn": "Mobius",
     "poa": [
-      "http://192.168.0.236:7599"
+      "http://localhost:7599"
     ],
     "registrar": {  
       "cse_type": 1,

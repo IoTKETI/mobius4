@@ -1,9 +1,37 @@
 {
-  "_comment": "Copy this file to config/local.json and fill in your local values. local.json is gitignored and always takes priority over default.json.",
+  "_comment": "Copy this file to config/local.json and fill in your deployment values. local.json is gitignored and always takes priority over default.json.",
+
+  "cse": {
+    "_comment_cse": "CSE identity — must be unique per deployment",
+    "sp_id": "//your-domain.io",
+    "cse_id": "/Mobius4",
+    "csebase_rn": "Mobius",
+    "poa": [
+      "http://YOUR_SERVER_IP:7599"
+    ],
+
+    "_comment_registrar": "Only needed for MN-CSE or ASN-CSE (cse_type 2 or 3). Remove if IN-CSE (cse_type 1).",
+    "registrar": {
+      "ip": "PARENT_CSE_IP",
+      "port": 7579
+    }
+  },
+
+  "http": {
+    "port": 7599
+  },
+
+  "mqtt": {
+    "enabled": true,
+    "ip": "localhost",
+    "port": 1883
+  },
+
   "db": {
     "user": "your_db_user",
     "pw": "your_db_password"
   },
+
   "logging": {
     "level": "debug",
     "console": {
@@ -13,6 +41,7 @@
       "enabled": false
     }
   },
+
   "security": {
     "helmet": {
       "enabled": false
