@@ -584,7 +584,7 @@ async function delete_a_res(req_prim, resp_prim) {
 		cnt_res.cni--;
 		cnt_res.cbs = cnt_res.cbs - cs;
 
-		cnt_res.save();
+		await cnt_res.save();
 	}
 
 	//
