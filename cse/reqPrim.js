@@ -20,7 +20,8 @@ const dts = require("./resources/dts"); // <dataset>
 
 
 async function prim_handling(req_prim) {
-  logger.debug({ op: req_prim.op, to: req_prim.to, fr: req_prim.fr, rqi: req_prim.rqi }, 'request primitive received');
+  logger.info({ op: req_prim.op, to: req_prim.to, fr: req_prim.fr, rqi: req_prim.rqi }, 'request primitive received');
+  logger.debug({ pc: req_prim.pc }, 'request primitive payload');
   logger.trace({ prim: req_prim }, 'full request primitive');
 
   // set default parameters for the request primitive
@@ -294,6 +295,9 @@ async function prim_handling(req_prim) {
         break;
     }
   }
+
+  logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi }, 'response primitive');
+  logger.debug({ pc: resp_prim.pc }, 'response primitive payload');
 
   return resp_prim;
 }
