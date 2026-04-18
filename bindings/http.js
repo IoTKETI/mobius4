@@ -31,6 +31,24 @@ if (rateLimitConfig.enabled) {
   }));
 }
 
+// JSON body parsing BEFORE pinoHttp so req.body is available in the serializer
+app.use(express.json({
+  limit: config.get("request.max_body_size"),
+  type: ['application/json', 'application/vnd.onem2m-res+json', 'application/*+json']
+}));
+app.use(express.urlencoded({ extended: true, limit: config.get("request.max_body_size") }));
+app.use(cors());
+
+// Capture response body so pino-http res serializer can include it
+app.use((req, res, next) => {
+  const _json = res.json.bind(res);
+  res.json = function(body) {
+    res._body = body;
+    return _json(body);
+  };
+  next();
+});
+
 // HTTP request/response structured logging
 app.use(pinoHttp({
   logger,
@@ -48,27 +66,20 @@ app.use(pinoHttp({
         op: req.headers["x-m2m-op"],
         fr: req.headers["x-m2m-origin"],
         rqi: req.headers["x-m2m-ri"],
-        rvi: req.headers["x-m2m-rvi"]
+        rvi: req.headers["x-m2m-rvi"],
+        body: req.body || undefined,
       };
     },
     res(res) {
       return {
         statusCode: res.statusCode,
-        rsc: res.getHeader ? res.getHeader("x-m2m-rsc") : undefined
+        rsc: res.getHeader ? res.getHeader("x-m2m-rsc") : undefined,
+        body: res._body || undefined,
       };
     }
   },
   autoLogging: { ignore: (req) => req.url === "/health" || req.url === "/metrics" }
 }));
-
-// JSON parsing middleware (application/json)
-app.use(express.json({
-  limit: config.get("request.max_body_size"),
-  type: ['application/json', 'application/vnd.onem2m-res+json', 'application/*+json']
-}));
-// URL-encoded parsing middleware (if needed)
-app.use(express.urlencoded({ extended: true, limit: config.get("request.max_body_size") }));
-app.use(cors());
 
 // HTTP metrics middleware (no-op when metrics.enabled is false)
 app.use((req, res, next) => {
