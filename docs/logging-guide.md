@@ -193,10 +193,26 @@ HTTP requests and responses are logged automatically by `pino-http` middleware i
 | `req.op` | oneM2M operation (from `X-M2M-Op` header) |
 | `req.fr` | Originator (from `X-M2M-Origin`) |
 | `req.rqi` | Request ID (from `X-M2M-RI`) |
+| `req.body` | Parsed request body (available at `debug` level) |
 | `res.statusCode` | HTTP status code |
 | `res.rsc` | oneM2M response status code (from `X-M2M-RSC`) |
+| `res.body` | Response body (captured via `res.json()` interceptor) |
 
-The `/health` endpoint is excluded from HTTP logging.
+The `/health` and `/metrics` endpoints are excluded from HTTP logging.
+
+---
+
+## oneM2M Primitive Logging
+
+All oneM2M requests and responses pass through `cse/reqPrim.js`, which logs them at `info` level regardless of transport (HTTP or MQTT).
+
+| Event | Level | Fields |
+|-------|-------|--------|
+| Request received | `info` | `op`, `to`, `fr`, `rqi`, `pc` (payload, omitted if empty) |
+| Response sent | `info` | `rsc`, `rqi`, `pc` (payload, omitted if empty) |
+| Full raw primitive | `trace` | `prim` |
+
+`pc` is the oneM2M payload content — equivalent to the HTTP body. It is automatically omitted from the log when empty (e.g. RETRIEVE or DELETE requests).
 
 ---
 
@@ -216,7 +232,7 @@ const logger = require('../logger').child({ module: 'mqtt', binding: 'mqtt' });
 | Subscriptions ready | `info` | `cseId` |
 | Request received | `debug` | `topic`, `originator`, `rqi`, `op`, `to` |
 | Response sent | `debug` | `topic`, `rsc`, `rqi` |
-| Full primitive | `trace` | `prim` |
+| Full primitive | `debug` | `prim` |
 | Publish failed | `error` | `err`, `topic` |
 | Reconnecting | `warn` | `endpoint` |
 | Offline | `error` | `endpoint` |
@@ -228,10 +244,13 @@ const logger = require('../logger').child({ module: 'mqtt', binding: 'mqtt' });
 ### JSON (production)
 
 ```json
-{"level":"info","time":"2026-04-04T10:23:11.452Z","pid":1234,"cseId":"/Mobius4","module":"db","msg":"PostgreSQL connected"}
-{"level":"info","time":"2026-04-04T10:23:11.502Z","pid":1234,"cseId":"/Mobius4","module":"http","port":7599,"msg":"HTTP server listening"}
-{"level":"debug","time":"2026-04-04T10:23:15.100Z","pid":1234,"cseId":"/Mobius4","module":"mqtt","binding":"mqtt","topic":"/oneM2M/req/C1234/Mobius4/json","originator":"C1234","op":1,"to":"Mobius","msg":"mqtt request received"}
-{"level":"error","time":"2026-04-04T10:23:16.200Z","pid":1234,"cseId":"/Mobius4","module":"cnt","err":{"message":"duplicate key value","stack":"..."},"msg":"create_a_cnt failed"}
+{"level":30,"time":"2026-04-04T19:23:11.452+09:00","pid":1234,"cseId":"/Mobius4","module":"db","msg":"PostgreSQL connected"}
+{"level":30,"time":"2026-04-04T19:23:11.502+09:00","pid":1234,"cseId":"/Mobius4","module":"http","port":7599,"msg":"HTTP server listening"}
+{"level":20,"time":"2026-04-04T19:23:15.100+09:00","pid":1234,"cseId":"/Mobius4","module":"mqtt","binding":"mqtt","topic":"/oneM2M/req/C1234/Mobius4/json","originator":"C1234","op":1,"to":"Mobius","msg":"mqtt request received"}
+{"level":50,"time":"2026-04-04T19:23:16.200+09:00","pid":1234,"cseId":"/Mobius4","module":"cnt","err":{"message":"duplicate key value","stack":"..."},"msg":"create_a_cnt failed"}
+
+> **Note:** The `level` field in file logs is a numeric value (pino standard). See the [Log Levels](#log-levels) table for the mapping. Timestamps use the system's local timezone automatically.
+> To view file logs in human-readable form: `cat logs/mobius4.log | npx pino-pretty`
 ```
 
 ### Pretty-print (development, `console.pretty: true`)
