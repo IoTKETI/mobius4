@@ -100,7 +100,7 @@ async function mqtt_receiver(req_topic, req_prim_str) {
     const req_prim = JSON.parse(req_prim_str.toString());
 
     logger.debug({ topic: req_topic, originator, rqi: req_prim.rqi, op: req_prim.op, to: req_prim.to }, 'mqtt request received');
-    logger.trace({ prim: req_prim }, 'mqtt request full primitive');
+    logger.debug({ prim: req_prim }, 'mqtt request full primitive');
 
     if (req_topic.startsWith('self/datasetManager/')) {
         const { self_noti_handler } = require('../cse/noti');
@@ -115,7 +115,7 @@ async function mqtt_receiver(req_topic, req_prim_str) {
     try {
         await mqtt_client.publish(resp_topic, JSON.stringify(resp_prim));
         logger.debug({ topic: resp_topic, rsc: resp_prim.rsc, rqi: resp_prim.rqi }, 'mqtt response sent');
-        logger.trace({ prim: resp_prim }, 'mqtt response full primitive');
+        logger.debug({ prim: resp_prim }, 'mqtt response full primitive');
     } catch (err) {
         logger.error({ err, topic: resp_topic }, 'mqtt publish failed');
     }
@@ -130,7 +130,7 @@ exports.mqtt_transmitter = async function (req_topic, req_prim) {
     try {
         await mqtt_client.publish(req_topic, JSON.stringify(req_prim));
         logger.debug({ topic: req_topic, op: req_prim.op, rqi: req_prim.rqi }, 'mqtt transmitter sent');
-        logger.trace({ prim: req_prim }, 'mqtt transmit full primitive');
+        logger.debug({ prim: req_prim }, 'mqtt transmit full primitive');
     } catch (err) {
         logger.error({ err, topic: req_topic }, 'mqtt transmit failed');
         return false;
