@@ -3,6 +3,12 @@ const axios = require('axios');
 const { JSONPath } = require("jsonpath-plus");
 const logger = require("../logger").child({ module: "reqPrim" });
 
+// Cache config values used in get_to_info on every request
+const _SP_ID = config.cse.sp_id;
+const _CSE_ID = config.cse.cse_id;
+const _CSEBASE_RN = config.cse.csebase_rn;
+const _SP_CSE_PREFIX = _SP_ID + _CSE_ID;
+
 const enums = require("../config/enums");
 const { req_prim_schema } = require("./validation/prim_schema");
 const Lookup = require('../models/lookup-model');
@@ -371,45 +377,51 @@ function get_to_info(req_prim) {
   const to = req_prim.to;
   let shortest_to = null, is_for_me = false;
 
-  // absolute ID format
   if (to.startsWith('//')) {
-    // request for me
-    if (to.startsWith(config.cse.sp_id + config.cse.cse_id)) {
-      // remove the SP-ID and CSE-ID from the 'to' param, so it becomes CSE-relative ID format
-      shortest_to = to.split(config.cse.sp_id + config.cse.cse_id + '/')[1];
+    // absolute ID format: //sp-id/cse-id[/path]
+    if (to.startsWith(_SP_CSE_PREFIX + '/') || to === _SP_CSE_PREFIX) {
+      // exact sp_id + cse_id match → for me
+      shortest_to = to.slice(_SP_CSE_PREFIX.length + 1) || _CSEBASE_RN;
       is_for_me = true;
+    } else {
+      // extract the cse-id portion regardless of sp-id
+      // format: //domain/cse-id[/path] → skip "//" then find first "/"
+      const after_slashes = to.slice(2);
+      const domain_end = after_slashes.indexOf('/');
+      if (domain_end !== -1) {
+        const cse_path = after_slashes.slice(domain_end); // "/cse-id[/path]"
+        if (cse_path.startsWith(_CSE_ID + '/') || cse_path === _CSE_ID) {
+          // different sp-id but our cse-id → still for me
+          shortest_to = cse_path.slice(_CSE_ID.length + 1) || _CSEBASE_RN;
+          is_for_me = true;
+        } else if (to.startsWith(_SP_ID)) {
+          // same sp domain, different cse → forward
+          shortest_to = to.slice(_SP_ID.length);
+        } else {
+          // different sp domain → forward
+          shortest_to = to;
+        }
+      } else {
+        shortest_to = to;
+      }
     }
-    // request for the other CSE in the same SP domain
-    else if (to.startsWith(config.cse.sp_id)) {
-      shortest_to = to.split(config.cse.sp_id)[1];
-    }
-    // request for the other CSE in the different SP domain
-    else {
+  } else if (to.startsWith('/')) {
+    // SP-relative ID format: /cse-id[/path]
+    if (to.startsWith(_CSE_ID + '/') || to === _CSE_ID) {
+      shortest_to = to.slice(_CSE_ID.length + 1) || _CSEBASE_RN;
+      is_for_me = true;
+    } else {
       shortest_to = to;
     }
-  }
-  // SP-relative ID format
-  else if (to.startsWith('/')) {
-    // request for me
-    if (to.startsWith(config.cse.cse_id)) {
-      // remove the CSE-ID from the 'to' param, so it becomes CSE-relative ID format
-      shortest_to = to.split(config.cse.cse_id + '/')[1];
-      is_for_me = true;
-    }
-    else {
-      shortest_to = to;
-    }
-  }
-  // CSE-relative ID format
-  else {
-    // consider all CSE-relative ID format 'to' param as request for me
+  } else {
+    // CSE-relative format → always for me
     shortest_to = to;
     is_for_me = true;
   }
 
-  // by the spec, '-' is the wildcard for the 'rn' of the <CSEBase> resource
+  // '-' is the wildcard for the CSEBase rn per oneM2M spec
   if (shortest_to[0] === '-') {
-    shortest_to = shortest_to.replace('-', config.cse.csebase_rn);
+    shortest_to = _CSEBASE_RN + shortest_to.slice(1);
   }
 
   return { shortest_to, is_for_me };
@@ -525,7 +537,7 @@ async function request_forwarding(req_prim, shortest_to) {
   if (!csr_res) {
     resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
     resp_prim.pc = { 'm2m:dbg': 'CSR resource not found' };
-    return;
+    return resp_prim;
   }
 
   // get 'poa' of the <remoteCSE> resource
