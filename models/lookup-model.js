@@ -10,7 +10,7 @@ const Lookup = sequelize.define('lookup', {
   pi: { type: DataTypes.STRING },
   cr: { type: DataTypes.STRING },
   int_cr: { type: DataTypes.STRING },
-  et: { type: DataTypes.STRING(14), allowNull: true }, // expirationTime in "YYYYMMDDTHHmmss" format
+  et: { type: DataTypes.STRING(20), allowNull: true }, // expirationTime in "YYYYMMDDTHHmmss" format (15 chars)
   loc: { type: DataTypes.GEOMETRY('GEOMETRY', 4326) }, // PostGIS geometry
 }, {
   tableName: 'lookup',

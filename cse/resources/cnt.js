@@ -2,6 +2,7 @@ const config = require('config');
 const { cnt_create_schema, cnt_update_schema } = require('../validation/res_schema');
 
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
+const sequelize = require('../../db/sequelize');
 
 const enums = require('../../config/enums');
 const cin = require('./cin');
@@ -55,38 +56,42 @@ async function create_a_cnt(req_prim, resp_prim) {
     }
 
     try {
-        await CNT.create({
-            // mandatory attributes
-            ri,
-            rn: prim_res.rn,
-            pi: cnt_pi,
-            sid: cnt_sid,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            ct: now,
-            lt: now,
-            // optional attributes
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            acpi: prim_res.acpi || null,
-            lbl: prim_res.lbl || null,
-            mni: prim_res.mni || config.default.container.mni,
-            mbs: prim_res.mbs || config.default.container.mbs,
-            mia: prim_res.mia || config.default.container.mia,
-            loc: prim_res.loc || null,
+        await sequelize.transaction(async (t) => {
+            await CNT.create({
+                // mandatory attributes
+                ri,
+                rn: prim_res.rn,
+                pi: cnt_pi,
+                sid: cnt_sid,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                ct: now,
+                lt: now,
+                // optional attributes
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                acpi: prim_res.acpi || null,
+                lbl: prim_res.lbl || null,
+                mni: prim_res.mni || config.default.container.mni,
+                mbs: prim_res.mbs || config.default.container.mbs,
+                mia: prim_res.mia || config.default.container.mia,
+                loc: prim_res.loc || null,
+            }, { transaction: t });
+
+            await Lookup.create({
+                ri,
+                ty: 3,
+                rn: prim_res.rn,
+                sid: cnt_sid,
+                lvl: cnt_sid.split("/").length,
+                pi: cnt_pi,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                loc: prim_res.loc,
+            }, { transaction: t });
         });
 
-        await Lookup.create({
-            ri,
-            ty: 3,
-            rn: prim_res.rn,
-            sid: cnt_sid,
-            lvl: cnt_sid.split("/").length,
-            pi: cnt_pi,
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            loc: prim_res.loc,
-        });
+        logger.info({ ri, cnt_sid }, 'cnt lookup entry created');
 
         // retrieve the created resource and respond
         const tmp_req = { ri }, tmp_resp = {};

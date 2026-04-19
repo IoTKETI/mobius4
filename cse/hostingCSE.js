@@ -1000,7 +1000,19 @@ async function set_ri_sid(req_prim) {
 		return { ri: cached.ri, sid: cached.sid, to_ty: cached.to_ty };
 	}
 
-	req_prim.ri    = await get_unstructuredID(req_prim.to);
+	req_prim.ri = await get_unstructuredID(req_prim.to);
+
+	// Single retry to handle race with a concurrent CREATE that hasn't committed yet.
+	// PostgreSQL READ COMMITTED means an in-flight SELECT won't see an uncommitted INSERT;
+	// waiting 50ms covers the typical transaction commit time.
+	if (!req_prim.ri) {
+		await new Promise(r => setTimeout(r, 50));
+		req_prim.ri = await get_unstructuredID(req_prim.to);
+		if (!req_prim.ri) {
+			logger.warn({ sid: req_prim.to }, 'set_ri_sid: no lookup entry found after retry');
+		}
+	}
+
 	req_prim.sid   = await get_structuredID(req_prim.to);
 	req_prim.to_ty = await get_ty_from_unstructuredID(req_prim.ri);
 
