@@ -7,6 +7,7 @@ const enums = require("../config/enums");
 const { req_prim_schema } = require("./validation/prim_schema");
 const Lookup = require('../models/lookup-model');
 const CSR = require('../models/csr-model');
+const pendingCreates = require('./pending-creates');
 
 const hostingCSE = require("./hostingCSE");
 const cnt = require("./resources/cnt");
@@ -53,15 +54,42 @@ async function prim_handling(req_prim) {
   else {
     // to handle the request with 'to' as 'sid' or 'ri' in the Database, there shall be no SP-ID or CSE-ID
     req_prim.to = shortest_to;
+
+    // Early pendingCreates registration for CREATE ops with structured 'to' (e.g. "Mobius/MyAE").
+    // Must happen before the first await so concurrent requests for child resources find the promise.
+    if (req_prim.op === 1 && req_prim.pc && req_prim.to.includes('/')) {
+      const pcValues = Object.values(req_prim.pc)[0];
+      if (pcValues?.rn) {
+        const new_sid = req_prim.to + '/' + pcValues.rn;
+        hostingCSE.invalidateLookupCache(new_sid);
+        let pendingResolve;
+        pendingCreates.set(new_sid, new Promise(r => pendingResolve = r));
+        req_prim._pendingCreate = { sid: new_sid, resolve: pendingResolve };
+      }
+    }
   }
 
   // continue to process the request as below since I'm the hosting CSE
+
+  try {
 
   // check if the target resource as a normal resource exists or not
   // while the setting 'ri' and 'sid' in the req_prim, the target resource existence is checked for normal resource
   // if the target resource does not exist, 'ri' is set to null
   // also for the virtual resource, 'ri' is set to null 
   const { ri } = await hostingCSE.set_ri_sid(req_prim);
+
+  // Fallback: unstructured 'to' (e.g. AE registration with to="Mobius") — sid only known after set_ri_sid
+  if (req_prim.op === 1 && req_prim.pc && req_prim.sid && !req_prim._pendingCreate) {
+    const pcValues = Object.values(req_prim.pc)[0];
+    if (pcValues?.rn) {
+      const new_sid = req_prim.sid + '/' + pcValues.rn;
+      hostingCSE.invalidateLookupCache(new_sid);
+      let pendingResolve;
+      pendingCreates.set(new_sid, new Promise(r => pendingResolve = r));
+      req_prim._pendingCreate = { sid: new_sid, resolve: pendingResolve };
+    }
+  }
 
   // check if the target is a virtual resource
   await set_virtual_res_info(req_prim); // to-do: should change the function name? a bit misleading for the following code
@@ -294,9 +322,20 @@ async function prim_handling(req_prim) {
     }
   }
 
-  logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi, pc: resp_prim.pc }, 'response primitive');
-
   return resp_prim;
+
+  } catch (err) {
+    logger.error({ err }, 'prim_handling uncaught error');
+    resp_prim.rsc = enums.rsc_str["INTERNAL_SERVER_ERROR"];
+    resp_prim.pc = { "m2m:dbg": err.message || "Internal server error" };
+    return resp_prim;
+  } finally {
+    logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi, ri: req_prim.ri, dbg: resp_prim.pc?.['m2m:dbg'] }, 'response primitive');
+    if (req_prim._pendingCreate) {
+      req_prim._pendingCreate.resolve();
+      pendingCreates.delete(req_prim._pendingCreate.sid);
+    }
+  }
 }
 
 function set_default_req_params(req_prim) {

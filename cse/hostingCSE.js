@@ -205,7 +205,8 @@ async function create_a_res(req_prim, resp_prim) {
 		// after creation, check and send notification(s) if needed
 		// skip this for <sub> resource creation
 		if (req_prim.ty !== 23) {
-			noti.check_and_send_noti(req_prim, resp_prim_copy, "create");
+			noti.check_and_send_noti(req_prim, resp_prim_copy, "create")
+				.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 		}
 	}
 
@@ -518,7 +519,8 @@ async function update_a_res(req_prim, resp_prim) {
 		resp_prim.rsc = enums.rsc_str["UPDATED"];
 
 		// after update, check and send notification(s) if needed
-		noti.check_and_send_noti(req_prim, resp_prim, "update");
+		noti.check_and_send_noti(req_prim, resp_prim, "update")
+			.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 	}
 
 	return;
@@ -571,7 +573,8 @@ async function delete_a_res(req_prim, resp_prim) {
 	resp_prim.rsc = enums.rsc_str["DELETED"];
 
 	// after deletion, check and send notification(s) if needed
-	noti.check_and_send_noti(req_prim, tmp_resp, "delete");
+	noti.check_and_send_noti(req_prim, tmp_resp, "delete")
+		.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 
 	// to-do
 	// when delete a <cin> resource, update the parent <cnt> resource's 'cbs' attribute
@@ -1002,14 +1005,17 @@ async function set_ri_sid(req_prim) {
 
 	req_prim.ri = await get_unstructuredID(req_prim.to);
 
-	// Single retry to handle race with a concurrent CREATE that hasn't committed yet.
-	// PostgreSQL READ COMMITTED means an in-flight SELECT won't see an uncommitted INSERT;
-	// waiting 50ms covers the typical transaction commit time.
 	if (!req_prim.ri) {
-		await new Promise(r => setTimeout(r, 50));
-		req_prim.ri = await get_unstructuredID(req_prim.to);
+		// A concurrent CREATE may have registered a pending promise before its transaction commits.
+		// Awaiting it avoids the 50ms blind sleep while still handling the READ COMMITTED race.
+		const pendingCreates = require('./pending-creates');
+		const pending = pendingCreates.get(req_prim.to);
+		if (pending) {
+			await pending;
+			req_prim.ri = await get_unstructuredID(req_prim.to);
+		}
 		if (!req_prim.ri) {
-			logger.warn({ sid: req_prim.to }, 'set_ri_sid: no lookup entry found after retry');
+			logger.warn({ sid: req_prim.to }, 'set_ri_sid: resource not found');
 		}
 	}
 
@@ -1079,8 +1085,9 @@ async function access_decision(req_prim, resp_prim) {
 
 	// set int_cr request indicator as true for Case D.
 	req_prim.int_cr_req = true;
-	// deep copy of req_prim to temp_req
-	const temp_req = structuredClone(req_prim);
+	// deep copy of req_prim to temp_req (_pendingCreate contains a function, exclude it)
+	const { _pendingCreate, ...cloneable } = req_prim;
+	const temp_req = structuredClone(cloneable);
 
 	// for virtual resources, access decision is different per resource type
 	if (temp_req.vr) {
@@ -1494,6 +1501,10 @@ async function expired_resource_cleanup() {
 	return expired_res_list;
 }
 
+function invalidateLookupCache(key) {
+	lookupCache.del(key);
+}
+
 module.exports = {
 	set_ri_sid,
 	create_a_lookup_record,
@@ -1513,4 +1524,5 @@ module.exports = {
 	access_decision,
 	expired_resource_cleanup,
 	virtual_res_names,
+	invalidateLookupCache,
 }

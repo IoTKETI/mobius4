@@ -91,7 +91,7 @@ async function create_a_cnt(req_prim, resp_prim) {
             }, { transaction: t });
         });
 
-        logger.info({ ri, cnt_sid }, 'cnt lookup entry created');
+        logger.info({ ri, cnt_sid }, 'cnt created');
 
         // retrieve the created resource and respond
         const tmp_req = { ri }, tmp_resp = {};
@@ -101,6 +101,8 @@ async function create_a_cnt(req_prim, resp_prim) {
         logger.error({ err }, 'create_a_cnt failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
+    } finally {
+        req_prim._pendingCreate?.resolve();
     }
 
     return;

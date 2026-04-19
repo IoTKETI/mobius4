@@ -1,11 +1,12 @@
 const { sub_create_schema, sub_update_schema } = require('../validation/res_schema');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const sequelize = require('../../db/sequelize');
 
 const enums = require("../../config/enums");
 
 const SUB = require('../../models/sub-model');
-const Lookup = require('../../models/lookup-model');  
+const Lookup = require('../../models/lookup-model');
 
 const logger = require('../../logger').child({ module: 'sub' });
 
@@ -58,39 +59,40 @@ async function create_a_sub(req_prim, resp_prim) {
   const et = get_default_et();
 
   try {
-    await SUB.create({
-      // mandatory attributes
-      ri,
-      ty: 23,
-      sid: sub_sid,
-      int_cr: req_prim.fr,
-      rn: prim_res.rn,
-      pi: sub_pi,
-      et: prim_res.et || et,
-      ct: now,
-      lt: now,
-      // optional attributes
-      acpi: prim_res.acpi || null,
-      lbl: prim_res.lbl || null,
-      enc: prim_res.enc || null, 
-      exc: prim_res.exc,
-      nu: prim_res.nu,
-      nct: prim_res.nct || 1,
-      cr: prim_res.cr === null ? req_prim.fr : null,
-      su: prim_res.su || null,
-    });
+    await sequelize.transaction(async (t) => {
+      await SUB.create({
+        // mandatory attributes
+        ri,
+        ty: 23,
+        sid: sub_sid,
+        int_cr: req_prim.fr,
+        rn: prim_res.rn,
+        pi: sub_pi,
+        et: prim_res.et || et,
+        ct: now,
+        lt: now,
+        // optional attributes
+        acpi: prim_res.acpi || null,
+        lbl: prim_res.lbl || null,
+        enc: prim_res.enc || null,
+        exc: prim_res.exc,
+        nu: prim_res.nu,
+        nct: prim_res.nct || 1,
+        cr: prim_res.cr === null ? req_prim.fr : null,
+        su: prim_res.su || null,
+      }, { transaction: t });
 
-    // add lookup record
-    await Lookup.create({
-      ri,
-      ty: 23,
-      rn: prim_res.rn,
-      sid: sub_sid,
-      lvl: sub_sid.split("/").length,
-      pi: sub_pi,
-      cr: prim_res.cr === null ? req_prim.fr : null,
-      int_cr: req_prim.fr,
-      loc: null
+      await Lookup.create({
+        ri,
+        ty: 23,
+        rn: prim_res.rn,
+        sid: sub_sid,
+        lvl: sub_sid.split("/").length,
+        pi: sub_pi,
+        cr: prim_res.cr === null ? req_prim.fr : null,
+        int_cr: req_prim.fr,
+        loc: null
+      }, { transaction: t });
     });
 
     // retrieve the created resource and respond
@@ -101,6 +103,8 @@ async function create_a_sub(req_prim, resp_prim) {
     logger.error({ err }, 'create_a_sub failed');
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": err.message };
+  } finally {
+    req_prim._pendingCreate?.resolve();
   }
   return;
 }

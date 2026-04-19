@@ -3,6 +3,7 @@ const config = require('config');
 const randomstring = require('randomstring');
 
 const { get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
+const sequelize = require('../../db/sequelize');
 
 const enums = require('../../config/enums');
 const AE = require('../../models/ae-model');
@@ -116,18 +117,20 @@ async function create_an_ae(req_prim, resp_prim) {
     };
 
     try {
-        await AE.create(ae_res);
-        await Lookup.create({
-            ri: ae_res.ri,
-            ty: ae_res.ty,
-            rn: ae_res.rn,
-            sid: ae_res.sid,
-            lvl: ae_res.sid.split("/").length,
-            pi: ae_res.pi,
-            cr: (ae_res.cr === null) ? aei : null,
-            int_cr: ae_res.int_cr,
-            et: prim_res.et || et,
-            loc: prim_res.loc || null
+        await sequelize.transaction(async (t) => {
+            await AE.create(ae_res, { transaction: t });
+            await Lookup.create({
+                ri: ae_res.ri,
+                ty: ae_res.ty,
+                rn: ae_res.rn,
+                sid: ae_res.sid,
+                lvl: ae_res.sid.split("/").length,
+                pi: ae_res.pi,
+                cr: (ae_res.cr === null) ? aei : null,
+                int_cr: ae_res.int_cr,
+                et: prim_res.et || et,
+                loc: prim_res.loc || null
+            }, { transaction: t });
         });
         const tmp_req = { ri: ae_res.ri }, tmp_resp = {};
         await retrieve_an_ae(tmp_req, tmp_resp);
@@ -136,6 +139,8 @@ async function create_an_ae(req_prim, resp_prim) {
         logger.error({ err }, 'create_an_ae failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
+    } finally {
+        req_prim._pendingCreate?.resolve();
     }
     return;
 }
