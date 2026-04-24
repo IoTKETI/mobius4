@@ -1,5 +1,5 @@
 const pool = require('../../db/connection');
-const logger = require('../../logger').child({ module: 'cb' });
+const logger = require('../../logger').forFile(__filename);
 
 async function retrieve_a_cb(resp_prim) {
     const cb_obj = { "m2m:cb": {} };

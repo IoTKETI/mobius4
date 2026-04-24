@@ -6,7 +6,7 @@ const dsf = require('./dsf');
 const Lookup = require('../../models/lookup-model');
 const DTS = require('../../models/dts-model');
 
-const logger = require('../../logger').child({ module: 'dts' });
+const logger = require('../../logger').forFile(__filename);
 
 const dts_parent_res_types = ["cb", "ae", "csr"];
 

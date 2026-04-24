@@ -5,7 +5,7 @@ const enums = require("../../config/enums");
 const mmd = require("./mmd");
 const MRP = require("../../models/mrp-model");
 
-const logger = require('../../logger').child({ module: 'mrp' });
+const logger = require('../../logger').forFile(__filename);
 
 const mrp_parent_res_types = ["cb", "ae", "csr"];
 

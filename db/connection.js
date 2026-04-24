@@ -8,6 +8,10 @@ const pool = new Pool({
     database: config.get('db.name'),
     password: config.get('db.pw'),
     port: config.get('db.port'),
+    max: config.get('db.pool.max'),
+    idleTimeoutMillis: config.get('db.pool.idleTimeoutMs'),
+    connectionTimeoutMillis: config.get('db.pool.connectionTimeoutMs'),
+    statement_timeout: config.get('db.pool.statementTimeoutMs'),
 });
 
 module.exports = pool;

@@ -73,13 +73,16 @@ const logger = pino(
             paths: logConfig.http.redactPaths,
             censor: '[REDACTED]'
         },
-        base: {
-            pid: process.pid,
-            cseId: config.get('cse.cse_id')
-        },
+        base: { pid: process.pid },
         timestamp: localIsoTime
     },
     dest
 );
 
+const PROJECT_ROOT = __dirname;
+
 module.exports = logger;
+module.exports.forFile = function(filename) {
+    const rel = path.relative(PROJECT_ROOT, filename).replace(/\\/g, '/');
+    return logger.child({ module: rel });
+};

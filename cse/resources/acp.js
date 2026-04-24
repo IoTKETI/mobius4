@@ -4,9 +4,10 @@ const ACP = require('../../models/acp-model');
 const Lookup = require('../../models/lookup-model');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
 
-const logger = require('../../logger').child({ module: 'acp' });
+const logger = require('../../logger').forFile(__filename);
 
 const acp_parent_res_types = ['cb', 'ae'];
 
@@ -45,46 +46,50 @@ async function create_an_acp(req_prim, resp_prim) {
     }
 
     try {
-        await ACP.create({
-            // mandatory attributes
-            ri,
-            ty: 1,
-            sid: acp_sid,
-            int_cr: req_prim.fr,
-            rn: prim_res.rn,
-            pi: acp_pi,
-            et: prim_res.et || et,
-            ct: now,
-            lt: now,
-            // common attributes
-            acpi: prim_res.acpi || null,
-            lbl: prim_res.lbl || null,
-            cr: prim_res.cr === null ? req_prim.fr : null, 
-            // resource specific attributes
-            pv: prim_res.pv, // mandatory
-            pvs: prim_res.pvs // mandatory and array shall not be empty
-        });
+        await sequelize.transaction(async (t) => {
+            await ACP.create({
+                // mandatory attributes
+                ri,
+                ty: 1,
+                sid: acp_sid,
+                int_cr: req_prim.fr,
+                rn: prim_res.rn,
+                pi: acp_pi,
+                et: prim_res.et || et,
+                ct: now,
+                lt: now,
+                // common attributes
+                acpi: prim_res.acpi || null,
+                lbl: prim_res.lbl || null,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                // resource specific attributes
+                pv: prim_res.pv,
+                pvs: prim_res.pvs
+            }, { transaction: t });
 
-        await Lookup.create({
-            ri,
-            ty: 1,
-            rn: prim_res.rn,
-            sid: acp_sid,
-            lvl: acp_sid.split("/").length,
-            pi: acp_pi,
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            et: prim_res.et || et,
-            int_cr: req_prim.fr
+            await Lookup.create({
+                ri,
+                ty: 1,
+                rn: prim_res.rn,
+                sid: acp_sid,
+                lvl: acp_sid.split("/").length,
+                pi: acp_pi,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                et: prim_res.et || et,
+                int_cr: req_prim.fr
+            }, { transaction: t });
         });
 
         const tmp_req = {ri}, tmp_resp = {};
         await retrieve_an_acp(tmp_req, tmp_resp);
 
         resp_prim.pc = tmp_resp.pc;
-    } catch (err) {        
+    } catch (err) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
-    } 
+    } finally {
+        req_prim._pendingCreate?.resolve();
+    }
 }
 
 async function retrieve_an_acp(req_prim, resp_prim) {

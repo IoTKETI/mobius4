@@ -2,6 +2,7 @@ const config = require('config');
 const { cnt_create_schema, cnt_update_schema } = require('../validation/res_schema');
 
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
+const sequelize = require('../../db/sequelize');
 
 const enums = require('../../config/enums');
 const cin = require('./cin');
@@ -9,7 +10,7 @@ const CIN = require('../../models/cin-model');
 const CNT = require('../../models/cnt-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'cnt' });
+const logger = require('../../logger').forFile(__filename);
 
 const cnt_parent_res_types = ['ae', 'cnt', 'csr', 'cb', 'flx'];
 
@@ -55,38 +56,42 @@ async function create_a_cnt(req_prim, resp_prim) {
     }
 
     try {
-        await CNT.create({
-            // mandatory attributes
-            ri,
-            rn: prim_res.rn,
-            pi: cnt_pi,
-            sid: cnt_sid,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            ct: now,
-            lt: now,
-            // optional attributes
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            acpi: prim_res.acpi || null,
-            lbl: prim_res.lbl || null,
-            mni: prim_res.mni || config.default.container.mni,
-            mbs: prim_res.mbs || config.default.container.mbs,
-            mia: prim_res.mia || config.default.container.mia,
-            loc: prim_res.loc || null,
+        await sequelize.transaction(async (t) => {
+            await CNT.create({
+                // mandatory attributes
+                ri,
+                rn: prim_res.rn,
+                pi: cnt_pi,
+                sid: cnt_sid,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                ct: now,
+                lt: now,
+                // optional attributes
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                acpi: prim_res.acpi || null,
+                lbl: prim_res.lbl || null,
+                mni: prim_res.mni || config.default.container.mni,
+                mbs: prim_res.mbs || config.default.container.mbs,
+                mia: prim_res.mia || config.default.container.mia,
+                loc: prim_res.loc || null,
+            }, { transaction: t });
+
+            await Lookup.create({
+                ri,
+                ty: 3,
+                rn: prim_res.rn,
+                sid: cnt_sid,
+                lvl: cnt_sid.split("/").length,
+                pi: cnt_pi,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                loc: prim_res.loc,
+            }, { transaction: t });
         });
 
-        await Lookup.create({
-            ri,
-            ty: 3,
-            rn: prim_res.rn,
-            sid: cnt_sid,
-            lvl: cnt_sid.split("/").length,
-            pi: cnt_pi,
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            loc: prim_res.loc,
-        });
+        logger.info({ ri, cnt_sid }, 'cnt created');
 
         // retrieve the created resource and respond
         const tmp_req = { ri }, tmp_resp = {};
@@ -96,6 +101,8 @@ async function create_a_cnt(req_prim, resp_prim) {
         logger.error({ err }, 'create_a_cnt failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
+    } finally {
+        req_prim._pendingCreate?.resolve();
     }
 
     return;
@@ -227,139 +234,82 @@ async function update_a_cnt(req_prim, resp_prim) {
 }
 
 async function retrieve_ol(req_prim, resp_prim) {
-    const cnt_res = await CNT.findOne({
-        where: { ri: req_prim.parent_ri },
-        attributes: ['cin_list']
+    const oldest = await CIN.findOne({
+        where: { pi: req_prim.parent_ri },
+        order: [['st', 'ASC']],
+        attributes: ['ri'],
     });
-    
-    if (!cnt_res) {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<cnt> resource which is the parent of <ol> not found' };
-        return;
-    }
-
-    const cin_list = cnt_res.cin_list;
-    if (cin_list.length > 0) {
-        const cin_ri = cin_list[0];
-        const tmp_req = { ri: cin_ri }, tmp_resp = {};
-        await cin.retrieve_a_cin(tmp_req, tmp_resp);
-
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["OK"];
-        resp_prim.pc = tmp_resp.pc;
-    } else {
+    if (!oldest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no <cin> resource' };
+        return;
     }
-    return;
+    const tmp_req = { ri: oldest.ri }, tmp_resp = {};
+    await cin.retrieve_a_cin(tmp_req, tmp_resp);
+    resp_prim.rsc = enums.rsc_str["OK"];
+    resp_prim.pc = tmp_resp.pc;
 }
 
 // if we want to apply 'attrl' filter here, then we can use "retrieve_a_res" function, rather than "retrieve_a_cin"
 async function retrieve_la(req_prim, resp_prim) {
-    const cnt_res = await CNT.findOne({
-        where: { ri: req_prim.parent_ri },
-        attributes: ['cin_list']
+    const latest = await CIN.findOne({
+        where: { pi: req_prim.parent_ri },
+        order: [['st', 'DESC']],
+        attributes: ['ri'],
     });
-    if (!cnt_res) {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<cnt> resource which is the parent of <la> not found' };
-        return;
-    }
-
-    const cin_list = cnt_res.cin_list;
-    if (cin_list.length > 0) {
-        const cin_ri = cin_list[cin_list.length - 1];
-        const tmp_req = { ri: cin_ri }, tmp_resp = {};
-
-        await cin.retrieve_a_cin(tmp_req, tmp_resp);
-
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["OK"];
-        resp_prim.pc = tmp_resp.pc;
-    } else {
+    if (!latest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no <cin> resource' };
+        return;
     }
-    return;
+    const tmp_req = { ri: latest.ri }, tmp_resp = {};
+    await cin.retrieve_a_cin(tmp_req, tmp_resp);
+    resp_prim.rsc = enums.rsc_str["OK"];
+    resp_prim.pc = tmp_resp.pc;
 }
 
 async function delete_la(req_prim, resp_prim) {
-    const cnt_res = await CNT.findByPk(req_prim.parent_ri);
-
-    if (!cnt_res) {
+    const latest = await CIN.findOne({
+        where: { pi: req_prim.parent_ri },
+        order: [['st', 'DESC']],
+        attributes: ['ri'],
+    });
+    if (!latest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<cnt> resource which is the parent of <la> not found' };
+        resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };
         return;
     }
 
-    if (cnt_res.cin_list.length > 0) {
-        // delete the 'cin_ri' in the cin_list and update it in the 'cnt' table where 'ri' is 'req_prim.parent_ri'
-        const cin_ri = cnt_res.cin_list[cnt_res.cin_list.length - 1];
-        const new_cin_list = cnt_res.cin_list.slice(0, -1);
-        const content_size = (await CIN.findByPk(cin_ri, { attributes: ['cs'] })).cs;
+    // delete_a_res handles CNT cni/cbs update internally
+    const tmp_req = { ri: latest.ri, to_ty: 4 }, tmp_resp = {};
+    const { delete_a_res } = require('../hostingCSE');
+    await delete_a_res(tmp_req, tmp_resp);
 
-        // update 'cni', 'cbs' for the ramining <cin> resources
-        await update_cnt_meta_info(cnt_res, new_cin_list, content_size);
-
-        const tmp_req = { ri: cin_ri, to_ty: 4 }, tmp_resp = {};
-        const { delete_a_res } = require('../hostingCSE');
-        await delete_a_res(tmp_req, tmp_resp);
-
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["DELETED"];
-        // by default in the spec (w/o other 'rcn' options), 'pc' is empty
-        resp_prim.pc = tmp_resp.pc || undefined;
-    } else {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };
-    }
-
-    return;
+    resp_prim.rsc = enums.rsc_str["DELETED"];
+    resp_prim.pc = tmp_resp.pc || undefined;
 }
 
 async function delete_ol(req_prim, resp_prim) {
-    const cnt_res = await CNT.findByPk(req_prim.parent_ri);
-
-    if (!cnt_res) {
+    const oldest = await CIN.findOne({
+        where: { pi: req_prim.parent_ri },
+        order: [['st', 'ASC']],
+        attributes: ['ri'],
+    });
+    if (!oldest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<cnt> resource which is the parent of <la> not found' };
+        resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };
         return;
     }
 
-    if (cnt_res.cin_list.length > 0) {
-        // delete the 'cin_ri' in the cin_list and update it in the 'cnt' table where 'ri' is 'req_prim.parent_ri'
-        const cin_ri = cnt_res.cin_list[0];
-        const new_cin_list = cnt_res.cin_list.slice(1);
-        const cin_size = (await CIN.findByPk(cin_ri, { attributes: ['cs'] })).cs;
+    // delete_a_res handles CNT cni/cbs update internally
+    const tmp_req = { ri: oldest.ri, to_ty: 4 }, tmp_resp = {};
+    const { delete_a_res } = require('../hostingCSE');
+    await delete_a_res(tmp_req, tmp_resp);
 
-        // update 'cni', 'cbs' for the ramining <cin> resources
-        await update_cnt_meta_info(cnt_res, new_cin_list, cin_size);
-
-        const tmp_req = { ri: cin_ri, to_ty: 4 }, tmp_resp = {};
-        const { delete_a_res } = require('../hostingCSE');
-        await delete_a_res(tmp_req, tmp_resp);
-
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["DELETED"];
-        // by default in the spec (w/o other 'rcn' options), 'pc' is empty
-        resp_prim.pc = tmp_resp.pc || undefined;
-    }
-    else {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };
-    }
-
-    return;
+    resp_prim.rsc = enums.rsc_str["DELETED"];
+    resp_prim.pc = tmp_resp.pc || undefined;
 }
 
-async function update_cnt_meta_info(cnt_res, cin_list, content_size) {
-    cnt_res.cin_list = cin_list;
-    cnt_res.cni = cnt_res.cin_list.length;
-    cnt_res.cbs = cnt_res.cbs - content_size;
-
-    // no need to wait for the save operation to complete (no 'await')
-    await cnt_res.save();
-}
 
 // to-do
 async function aggregate_cin_res(req_prim, ri_list) {

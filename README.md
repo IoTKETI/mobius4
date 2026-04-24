@@ -68,6 +68,10 @@ Try oneM2M APIs over HTTP binding with Postman client. You can download [Postman
 There are some modifications from the previous version so please check 
 [Mobius4 how-to](docs/how-to.md) for the Mobius developers. If you're trying the new oneM2M features on AI, check [Rel-5 features how-to](docs/rel-5-how-to.md).
 
+For developers adding new oneM2M resource types to Mobius4: [Adding a new resource type](docs/new-resource-guide.md) — covers every file to create or modify (enums, model, DDL, CRUD handler, dispatch switches, discovery maps, validation schema) with copy-paste code patterns.
+
+For upgrading an existing deployment: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md) — covers schema changes (dropped column, widened column, new indexes) with step-by-step instructions and rollback procedure.
+
 
 # Running Mobius4
 
@@ -129,3 +133,5 @@ iotketi@keti.re.kr
 | 4.0.0 | 2025-09-22 | Initial release of Mobius4 |
 | 4.1.0 | 2026-03-13 | oneM2M Rel-2 certification |
 | 4.2.0 | 2026-04-05 | logging module update |
+| 4.3.0 | 2026-04-09 | performance improvements |
+| 4.4.0 | 2026-04-19 | conformance updates for performance improvements (for earlier versions, DB migration is needed: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md)) |

@@ -1,7 +1,9 @@
 const { JSONPath } = require("jsonpath-plus");
+const axios = require("axios");
+const LRU = require("lru-cache");
 const config = require("config");
 const enums = require("../config/enums");
-const logger = require("../logger").child({ module: "hostingCSE" });
+const logger = require("../logger").forFile(__filename);
 const randomstring = require("randomstring");
 const jose = require("jose");
 const pool = require('../db/connection');
@@ -53,6 +55,10 @@ const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
 
 const virtual_res_names = ["fopt", "la", "ol"]; // fopt shall come first in the list
+
+// [C6] LRU cache for Lookup table: key = 'to' path, value = { ri, sid, to_ty }
+// TTL 5 minutes — invalidated on resource delete
+const lookupCache = new LRU({ max: 5000, maxAge: 1000 * 60 * 5 });
 
 
 // this is obsolete, replaced by the sequelize model in each resource create function
@@ -199,7 +205,8 @@ async function create_a_res(req_prim, resp_prim) {
 		// after creation, check and send notification(s) if needed
 		// skip this for <sub> resource creation
 		if (req_prim.ty !== 23) {
-			noti.check_and_send_noti(req_prim, resp_prim_copy, "create");
+			noti.check_and_send_noti(req_prim, resp_prim_copy, "create")
+				.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 		}
 	}
 
@@ -512,7 +519,8 @@ async function update_a_res(req_prim, resp_prim) {
 		resp_prim.rsc = enums.rsc_str["UPDATED"];
 
 		// after update, check and send notification(s) if needed
-		noti.check_and_send_noti(req_prim, resp_prim, "update");
+		noti.check_and_send_noti(req_prim, resp_prim, "update")
+			.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 	}
 
 	return;
@@ -557,12 +565,16 @@ async function delete_a_res(req_prim, resp_prim) {
 	await retrieve_a_res(req_prim, tmp_resp);
 	if (tmp_resp.pc) {
 		delete_resources([{ ri: req_prim.ri, ty: req_prim.to_ty }]);
+		// [C6] invalidate lookup cache for deleted resource
+		if (req_prim.sid) lookupCache.del(req_prim.sid);
+		if (req_prim.to)  lookupCache.del(req_prim.to);
 	}
 	resp_prim.pc = tmp_resp.pc;
 	resp_prim.rsc = enums.rsc_str["DELETED"];
 
 	// after deletion, check and send notification(s) if needed
-	noti.check_and_send_noti(req_prim, tmp_resp, "delete");
+	noti.check_and_send_noti(req_prim, tmp_resp, "delete")
+		.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 
 	// to-do
 	// when delete a <cin> resource, update the parent <cnt> resource's 'cbs' attribute
@@ -594,67 +606,36 @@ async function delete_a_res(req_prim, resp_prim) {
 	return;
 };
 
-async function delete_resources(res_list) {
-	try {
-		for (const res of res_list) {
-			// delete lookup record
-			await Lookup.destroy({ where: { ri: res.ri } });
+// model registry for batch delete
+const DELETE_MODEL = {
+	1: ACP, 2: AE, 3: CNT, 4: CIN, 9: GRP, 16: CSR, 23: SUB,
+	101: MRP, 102: MMD, 103: MDP, 104: DPM, 105: DSP, 106: DTS, 107: DSF,
+};
 
-			// delete resource in each table
-			switch (res.ty) {
-				case 1:
-					await ACP.destroy({ where: { ri: res.ri } });
-					break;
-				case 2:
-					await AE.destroy({ where: { ri: res.ri } });
-					break;
-				case 3:
-					await CNT.destroy({ where: { ri: res.ri } });
-					break;
-				case 4:
-					await CIN.destroy({ where: { ri: res.ri } });
-					break;
-				case 9:
-					await GRP.destroy({ where: { ri: res.ri } });
-					break;
-				case 16:
-					await CSR.destroy({ where: { ri: res.ri } });
-					break;
-				case 23:
-					await SUB.destroy({ where: { ri: res.ri } });
-					break;
-				// case 24:
-				//   await SMD.destroy({ where: { ri: child_res.ri } });
-				//   break;
-				// case 28:
-				//   await FLX.destroy({ where: { ri: child_res.ri } });
-				//   break;
-				case 101:
-					await MRP.destroy({ where: { ri: res.ri } });
-					break;
-				case 102:
-					await MMD.destroy({ where: { ri: res.ri } });
-					break;
-				case 103:
-					await MDP.destroy({ where: { ri: res.ri } });
-					break;
-				case 104:
-					await DPM.destroy({ where: { ri: res.ri } });
-					break;
-				case 105:
-					await DSP.destroy({ where: { ri: res.ri } });
-					break;
-				case 106:
-					await DTS.destroy({ where: { ri: res.ri } });
-					break;
-				case 107:
-					await DSF.destroy({ where: { ri: res.ri } });
-					break;
-			}
+async function delete_resources(res_list) {
+	if (!res_list || res_list.length === 0) return;
+
+	try {
+		// group ri's by type for batch DELETE instead of one-by-one
+		const by_type = {};
+		const all_ri = [];
+		for (const res of res_list) {
+			if (!by_type[res.ty]) by_type[res.ty] = [];
+			by_type[res.ty].push(res.ri);
+			all_ri.push(res.ri);
 		}
+
+		// batch delete lookup records and each resource table in parallel
+		await Promise.all([
+			Lookup.destroy({ where: { ri: { [Op.in]: all_ri } } }),
+			...Object.entries(by_type).map(([ty, ri_list]) => {
+				const model = DELETE_MODEL[parseInt(ty)];
+				if (!model) return Promise.resolve();
+				return model.destroy({ where: { ri: { [Op.in]: ri_list } } });
+			}),
+		]);
 	} catch (error) {
 		logger.error({ err: error }, 'resource deletion failed');
-		// Additional error handling can be added here if needed
 	}
 }
 
@@ -665,175 +646,51 @@ async function discovery_core(req_prim) {
 	const { where, has_geo_query } = set_where_clause(req_prim);
 
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
+	const ofst = req_prim.fc.ofst || 0;
 	const ty_list = req_prim.fc.ty || Object.keys(enums.ty_str);
 
+	// fetch enough per-type to cover offset + limit + 1 (for partial detection)
+	const fetch_lim = Math.min(ofst + lim + 1, config.cse.discovery_limit);
 
-	for (const ty_str of ty_list) {
-		const ty = parseInt(ty_str);
-		let temp_list = [];
+	// model registry: type code → { model, no_geo }
+	const TYPE_MODEL = {
+		1:   { model: ACP, no_geo: true  },
+		2:   { model: AE,  no_geo: false },
+		3:   { model: CNT, no_geo: false },
+		4:   { model: CIN, no_geo: false },
+		9:   { model: GRP, no_geo: true  },
+		16:  { model: CSR, no_geo: false },
+		23:  { model: SUB, no_geo: true  },
+		101: { model: MRP, no_geo: true  },
+		102: { model: MMD, no_geo: true  },
+		103: { model: MDP, no_geo: true  },
+		104: { model: DPM, no_geo: true  },
+		105: { model: DSP, no_geo: true  },
+		106: { model: DTS, no_geo: true  },
+		107: { model: DSF, no_geo: true  },
+	};
 
-		// new resource type guide
-		// add new resource type handling here
-		if (1 === ty && !has_geo_query) {
-			temp_list = await ACP.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = temp_list;
-			continue;
-		}
-		if (2 === ty) {
-			temp_list = await AE.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (3 === ty) {
-			temp_list = await CNT.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (4 === ty) {
-			temp_list = await CIN.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (9 === ty && !has_geo_query) {
-			temp_list = await GRP.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (16 === ty) {
-			temp_list = await CSR.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (23 === ty && !has_geo_query) {
-			temp_list = await SUB.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		// if (24 === ty) {
-		//   temp_list = await SMD.findAll({
-		//     where: where,
-		//     attributes: ['sid', 'ri'],
-		//     limit: lim,
-		//   });
-		//   ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri })));
-		//   ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-		//   continue;
-		// }
-		// if (28 === ty) {
-		//   temp_list = await FLX.findAll({
-		//     where: where,
-		//     attributes: ['sid', 'ri'],
-		//     limit: lim,
-		//   });
-		//   ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri })));
-		//   ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-		//   continue;
-		// }
-		if (101 === ty && !has_geo_query) {
-			temp_list = await MRP.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (102 === ty && !has_geo_query) {
-			temp_list = await MMD.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (103 === ty && !has_geo_query) {
-			temp_list = await MDP.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (104 === ty && !has_geo_query) {
-			temp_list = await DPM.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (105 === ty && !has_geo_query) {
-			temp_list = await DSP.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (106 === ty && !has_geo_query) {
-			temp_list = await DTS.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
-		if (107 === ty && !has_geo_query) {
-			temp_list = await DSF.findAll({
-				where: where,
-				attributes: ['sid', 'ri', 'ty'],
-				limit: lim,
-			});
-			ids_list = ids_list.concat(temp_list.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty })));
-			ids_list_per_ty[enums.ty_str[ty.toString()]] = ids_list;
-			continue;
-		}
+	// run all type queries in parallel instead of sequentially
+	const query_tasks = ty_list
+		.map(ty_str => parseInt(ty_str))
+		.filter(ty => {
+			const entry = TYPE_MODEL[ty];
+			if (!entry) return false;
+			if (entry.no_geo && has_geo_query) return false;
+			return true;
+		})
+		.map(ty => {
+			const { model } = TYPE_MODEL[ty];
+			return model.findAll({ where, attributes: ['sid', 'ri', 'ty'], limit: fetch_lim })
+				.then(rows => ({ ty, rows }));
+		});
+
+	const results = await Promise.all(query_tasks);
+
+	for (const { ty, rows } of results) {
+		const mapped = rows.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty }));
+		ids_list = ids_list.concat(mapped);
+		ids_list_per_ty[enums.ty_str[ty.toString()]] = mapped;
 	}
 
 	if (config.cse.allow_discovery_for_any === false) {
@@ -853,7 +710,20 @@ async function discovery_core(req_prim) {
 		ids_list = filtered_ids_list;
 	}
 
-	return { ids_list, ids_list_per_ty };
+	// apply offset and limit to aggregated result
+	const paged = ids_list.slice(ofst);
+	const is_partial = paged.length > lim;
+	const final_list = paged.slice(0, lim);
+
+	// reconstruct ids_list_per_ty from final paginated list
+	const final_per_ty = {};
+	for (const item of final_list) {
+		const ty_name = enums.ty_str[item.ty.toString()];
+		if (!final_per_ty[ty_name]) final_per_ty[ty_name] = [];
+		final_per_ty[ty_name].push(item);
+	}
+
+	return { ids_list: final_list, ids_list_per_ty: final_per_ty, is_partial };
 }
 
 function set_where_clause(req_prim) {
@@ -997,8 +867,14 @@ function set_where_clause(req_prim) {
 					return where;
 			}
 
-			// add PostGIS spatial query condition
-			const spatialCondition = Sequelize.literal(`${postgis_function}(loc, ST_GeomFromGeoJSON('${JSON.stringify(geojson)}'))`); // loc is the geometry column
+			// add PostGIS spatial query condition (parameterized to prevent SQL injection)
+			const spatialCondition = Sequelize.where(
+				Sequelize.fn(postgis_function,
+					Sequelize.col('loc'),
+					Sequelize.fn('ST_GeomFromGeoJSON', JSON.stringify(geojson))
+				),
+				true
+			);
 
 			// add spatial query condition to WHERE object
 			const andConditions = [];
@@ -1031,32 +907,31 @@ function set_where_clause(req_prim) {
 }
 
 async function fu1_discovery(req_prim, resp_prim) {
-	const { ids_list } = await discovery_core(req_prim);
+	const { ids_list, is_partial } = await discovery_core(req_prim);
 	let uril = [];
 	if (!req_prim.drt) {
 		req_prim.drt = 1;
 	}
 
 	if (req_prim.drt === 1) {
-		uril = ids_list.map((item) => {
-			// console.log("item", item);
-			return item.sid;
-		});
+		uril = ids_list.map((item) => item.sid);
 	} else if (req_prim.drt === 2) {
-		uril = ids_list.map((item) => {
-			return item.ri;
-		});
+		uril = ids_list.map((item) => item.ri);
 	} else {
 		resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
 		resp_prim.pc = { "m2m:dbg": "unsupported drt" };
 		return resp_prim;
 	}
 
-	if (req_prim.lim) {
-		uril = uril.slice(0, req_prim.lim);
-	}
-
 	resp_prim.pc = { "m2m:uril": uril };
+
+	// set pagination response parameters when result is partial
+	if (is_partial) {
+		const ofst = req_prim.fc.ofst || 0;
+		const lim = req_prim.fc.lim || config.cse.discovery_limit;
+		resp_prim.cnst = 1;          // partial
+		resp_prim.cnot = ofst + lim; // offset for next request
+	}
 
 	return;
 }
@@ -1119,9 +994,37 @@ async function get_unstructuredID(to) {
 }
 
 async function set_ri_sid(req_prim) {
+	// [C6] serve from cache for repeated requests to the same resource path
+	const cached = lookupCache.get(req_prim.to);
+	if (cached) {
+		req_prim.ri     = cached.ri;
+		req_prim.sid    = cached.sid;
+		req_prim.to_ty  = cached.to_ty;
+		return { ri: cached.ri, sid: cached.sid, to_ty: cached.to_ty };
+	}
+
 	req_prim.ri = await get_unstructuredID(req_prim.to);
-	req_prim.sid = await get_structuredID(req_prim.to);
+
+	if (!req_prim.ri) {
+		// A concurrent CREATE may have registered a pending promise before its transaction commits.
+		// Awaiting it avoids the 50ms blind sleep while still handling the READ COMMITTED race.
+		const pendingCreates = require('./pending-creates');
+		const pending = pendingCreates.get(req_prim.to);
+		if (pending) {
+			await pending;
+			req_prim.ri = await get_unstructuredID(req_prim.to);
+		}
+		if (!req_prim.ri) {
+			logger.warn({ sid: req_prim.to }, 'set_ri_sid: resource not found');
+		}
+	}
+
+	req_prim.sid   = await get_structuredID(req_prim.to);
 	req_prim.to_ty = await get_ty_from_unstructuredID(req_prim.ri);
+
+	if (req_prim.ri) {
+		lookupCache.set(req_prim.to, { ri: req_prim.ri, sid: req_prim.sid, to_ty: req_prim.to_ty });
+	}
 
 	return { ri: req_prim.ri, sid: req_prim.sid, to_ty: req_prim.to_ty };
 }
@@ -1182,8 +1085,9 @@ async function access_decision(req_prim, resp_prim) {
 
 	// set int_cr request indicator as true for Case D.
 	req_prim.int_cr_req = true;
-	// deep copy of req_prim to temp_req
-	const temp_req = JSON.parse(JSON.stringify(req_prim));
+	// deep copy of req_prim to temp_req (_pendingCreate contains a function, exclude it)
+	const { _pendingCreate, ...cloneable } = req_prim;
+	const temp_req = structuredClone(cloneable);
 
 	// for virtual resources, access decision is different per resource type
 	if (temp_req.vr) {
@@ -1337,21 +1241,19 @@ async function access_decision(req_prim, resp_prim) {
 	return access_grant;
 }
 
-let request = require("sync-request");
-
 async function parse_dynamic_auth_resp(dap, req_seci) {
-	let resp = request("POST", dap, {
+	const resp = await axios.post(dap, req_seci, {
 		headers: {
 			Accept: "application/json",
 			"X-M2M-RI": 12345,
 			"X-M2M-Origin": config.cse.cse_id,
 			"Content-Type": "application/json",
 		},
-		body: JSON.stringify(req_seci),
+		timeout: 5000,
 	});
 
-	logger.debug({ body: JSON.parse(resp.getBody()) }, 'dynamic auth response');
-	const seci = JSON.parse(resp.getBody())["m2m:seci"];
+	logger.debug({ body: resp.data }, 'dynamic auth response');
+	const seci = resp.data["m2m:seci"];
 
 	let dai = null,
 		tokens = null;
@@ -1579,24 +1481,28 @@ async function expired_resource_cleanup() {
 	}));
 
 	logger.info({ count: expired_res_list.length }, 'expired resource cleanup started');
-	expired_res_list.forEach(async (res) => {
+	await Promise.all(expired_res_list.map(async (res) => {
 		// 'res' include 'ri', 'ty', 'sid'
 		logger.info({ sid: res.sid }, 'deleting expired resource');
 		await delete_resources([res]);
 
-		// get decendant resources of the expired resource
+		// get descendant resources of the expired resource
 		const child_res_list = await Lookup.findAll({
 			where: { sid: { [Op.like]: `${res.sid}/%` } },
 			attributes: ['ri', 'ty', 'sid'],
 		});
 
-		child_res_list.forEach(async (child_res) => {
+		await Promise.all(child_res_list.map(async (child_res) => {
 			logger.debug({ sid: child_res.sid }, 'deleting descendant of expired resource');
 			await delete_resources([child_res]);
-		});
-	});
+		}));
+	}));
 
 	return expired_res_list;
+}
+
+function invalidateLookupCache(key) {
+	lookupCache.del(key);
 }
 
 module.exports = {
@@ -1618,4 +1524,5 @@ module.exports = {
 	access_decision,
 	expired_resource_cleanup,
 	virtual_res_names,
+	invalidateLookupCache,
 }

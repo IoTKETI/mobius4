@@ -1,10 +1,12 @@
 const axios = require("axios");
 const config = require("config");
+const { Op } = require('sequelize');
 
-const logger = require("../logger").child({ module: "noti" });
+const logger = require("../logger").forFile(__filename);
 const mqtt = require("../bindings/mqtt");
 const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');
+const Lookup = require('../models/lookup-model');
 
 
 // supported notificationEventType (net) = {
@@ -15,95 +17,111 @@ const AE = require('../models/ae-model');
 // }
 
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
-    // get subscribed-to resource info, which is the parent of the sub resource
     const sub_res_pi = req_prim.ri;
 
-    // get <sub> children resources
     const sub_res = (await SUB.findAll({ where: { pi: sub_res_pi } }))
         .map(sub => sub.toJSON());
 
-    if (sub_res.length === 0) {
-        return;
-    }
-    else {
-        sub_res.forEach(async (sub_res) => {
-            // by spec, when 'enc' is null, default criteria is 'updated attributes'
-            if (!sub_res.enc) sub_res.enc = { net: [1] };
+    if (sub_res.length === 0) return;
 
-            if (sub_res.enc.net.includes(3) == true && "create" == event_type) {
-                // net 3: Create of Direct Child Resource
-                let this_ty = req_prim.ty;
-                // console.log('\nsub_res for the creation target: ', sub_res);
-                if (sub_res.enc.chty) {
-                    if (sub_res.enc.chty.includes(this_ty)) {
-                        send_a_noti(sub_res, resp_prim.pc, 3);
-                    }
-                } else {
-                    send_a_noti(sub_res, resp_prim.pc, 3);
-                }
-            } else if (sub_res.enc.net.includes(1) == true && "update" == event_type) {
-                // net 1: Update of Resource
-                if (2 == sub_res.nct) {
-                    // notificationContentType 2: modified attributes
-                    // to-do: check if this works fine
-                    send_a_noti(sub_res, req_prim.pc, 1);
-                } else if (1 == sub_res.nct) {
-                    // notificationContentType 1: all attributes (default)
-                    // console.log('noti obj: ', resp_prim.pc);
-                    send_a_noti(sub_res, resp_prim.pc, 1);
-                }
-            } else if (sub_res.enc.net.includes(2) == true && "delete" == event_type) {
-                // net 2: Delete of Resource
-                send_a_noti(sub_res, resp_prim.pc, 2); // to-do: working on it
-                // to-do: check if I need to return the deleted resource (currently return it)
+    // pre-fetch all AE poa values in one batch to avoid N+1 queries
+    const ae_poa_map = await prefetch_ae_poa(sub_res);
+
+    await Promise.all(sub_res.map(async (sub) => {
+        if (!sub.enc) sub.enc = { net: [1] };
+
+        if (sub.enc.net.includes(3) && event_type === 'create') {
+            const this_ty = req_prim.ty;
+            if (!sub.enc.chty || sub.enc.chty.includes(this_ty)) {
+                await send_a_noti(sub, resp_prim.pc, 3, ae_poa_map);
             }
-        });
+        } else if (sub.enc.net.includes(1) && event_type === 'update') {
+            const pc = sub.nct === 2 ? req_prim.pc : resp_prim.pc;
+            await send_a_noti(sub, pc, 1, ae_poa_map);
+        } else if (sub.enc.net.includes(2) && event_type === 'delete') {
+            await send_a_noti(sub, resp_prim.pc, 2, ae_poa_map);
+        }
+    }));
 
-        // iterate calling 'send_noti' function to send one or more notifications
-        send_a_noti(null, null);
-
-        // to-do: do something for the notification reponse
-    }
-
-    return true; // for now, this is meaningless
+    return true;
 }
 
-async function send_a_noti(sub_res, event_obj, notificationEventType) {
-    // to-do: figure out when this function get a null sub_res from forEach
-    if (sub_res == null) {
-        return;
+// batch-load AE poa for all non-URL nu targets across all subscriptions
+async function prefetch_ae_poa(sub_list) {
+    const { get_to_info } = require('./reqPrim');
+
+    // collect unique AE resource IDs (nu that are not http/mqtt URLs)
+    const res_id_set = new Set();
+    for (const sub of sub_list) {
+        for (const nu of (sub.nu || [])) {
+            if (!nu.startsWith('http') && !nu.startsWith('mqtt')) {
+                const { shortest_to } = get_to_info({ to: nu });
+                if (shortest_to) res_id_set.add(shortest_to);
+            }
+        }
     }
+
+    if (res_id_set.size === 0) return {};
+
+    const res_ids = [...res_id_set];
+
+    // batch-resolve structured IDs to ri
+    const structured = res_ids.filter(id => id.includes('/'));
+    const unstructured = res_ids.filter(id => !id.includes('/'));
+
+    const lookups = structured.length > 0
+        ? await Lookup.findAll({ where: { sid: structured }, attributes: ['ri', 'sid'] })
+        : [];
+
+    const sid_to_ri = Object.fromEntries(lookups.map(l => [l.sid, l.ri]));
+    const all_ri = [
+        ...lookups.map(l => l.ri),
+        ...unstructured,
+    ];
+
+    if (all_ri.length === 0) return {};
+
+    // batch-fetch AE poa in a single query
+    const ae_list = await AE.findAll({
+        where: { ri: { [Op.in]: all_ri } },
+        attributes: ['ri', 'poa'],
+    });
+    const ri_to_poa = Object.fromEntries(ae_list.map(ae => [ae.ri, ae.poa]));
+
+    // build map: res_id → poa[]
+    const poa_map = {};
+    for (const res_id of res_ids) {
+        const ri = sid_to_ri[res_id] || res_id;
+        poa_map[res_id] = ri_to_poa[ri] || [];
+    }
+    return poa_map;
+}
+
+async function send_a_noti(sub_res, event_obj, notificationEventType, ae_poa_map = {}) {
+    if (sub_res == null) return;
 
     const sgn = {
         "m2m:sgn": {
-            nev: {
-                rep: event_obj,
-                net: notificationEventType,
-            },
-            sur: sub_res.sid
+            nev: { rep: event_obj, net: notificationEventType },
+            sur: sub_res.sid,
         },
-    }; // single notificaiton
+    };
 
-    for (noti_target of sub_res.nu) {
-        if (noti_target.indexOf("http") == 0) http_noti(noti_target, sgn);
-        else if (noti_target.indexOf("mqtt") == 0) mqtt_noti(noti_target, sgn);
-        else {
-            // last case: nu represents the ID of an <AE> resource
-            const { get_to_info } = require('./reqPrim');
-            const { shortest_to: res_id } = get_to_info({ to: noti_target });
+    for (const noti_target of sub_res.nu) {
+        if (noti_target.startsWith('http'))  { http_noti(noti_target, sgn); continue; }
+        if (noti_target.startsWith('mqtt'))  { mqtt_noti(noti_target, sgn); continue; }
 
-            // when res_id is null, ignore it and skip it
-            if (res_id) {
-                const urls = await get_urls_from_poa(res_id);
-                for (const url of urls) {
-                    let result = null;
-                    if (url.indexOf("http") == 0) result = await http_noti(url, sgn);
-                    else if (url.indexOf("mqtt") == 0) result = await mqtt_noti(url, sgn);
+        // AE resource ID — use pre-fetched poa map, fall back to DB query if not found
+        const { get_to_info } = require('./reqPrim');
+        const { shortest_to: res_id } = get_to_info({ to: noti_target });
+        if (!res_id) continue;
 
-                    // if the notification is sent successfully, stop the loop
-                    if (result === true) break;
-                }
-            }
+        const urls = ae_poa_map[res_id] ?? await get_urls_from_poa(res_id);
+        for (const url of urls) {
+            let result = null;
+            if (url.startsWith('http'))  result = await http_noti(url, sgn);
+            else if (url.startsWith('mqtt')) result = await mqtt_noti(url, sgn);
+            if (result === true) break;
         }
     }
 }

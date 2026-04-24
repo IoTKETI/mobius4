@@ -8,7 +8,7 @@ const enums = require('../../config/enums');
 const Lookup = require('../../models/lookup-model');
 const DSP = require('../../models/dsp-model');
 
-const logger = require('../../logger').child({ module: 'dsp' });
+const logger = require('../../logger').forFile(__filename);
 
 const dsp_parent_res_types = ["cb", "ae", "csr"];
 

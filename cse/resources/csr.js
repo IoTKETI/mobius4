@@ -1,11 +1,12 @@
 const { csr_create_schema, csr_update_schema } = require('../validation/res_schema');
 
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
+const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'csr' });
+const logger = require('../../logger').forFile(__filename);
 
 const csr_parent_res_types = ['cb'];
 
@@ -72,18 +73,20 @@ async function create_a_csr(req_prim, resp_prim) {
     };
 
     try {
-        await CSR.create(csr_res);
-        await Lookup.create({
-            ri: csr_res.ri,
-            ty: csr_res.ty,
-            rn: csr_res.rn,
-            sid: csr_res.sid,
-            lvl: csr_res.sid.split("/").length,
-            pi: csr_res.pi,
-            cr: csr_res.cr,
-            int_cr: csr_res.int_cr,
-            et: prim_res.et || et,
-            loc: prim_res.loc || null,
+        await sequelize.transaction(async (t) => {
+            await CSR.create(csr_res, { transaction: t });
+            await Lookup.create({
+                ri: csr_res.ri,
+                ty: csr_res.ty,
+                rn: csr_res.rn,
+                sid: csr_res.sid,
+                lvl: csr_res.sid.split("/").length,
+                pi: csr_res.pi,
+                cr: csr_res.cr,
+                int_cr: csr_res.int_cr,
+                et: prim_res.et || et,
+                loc: prim_res.loc || null,
+            }, { transaction: t });
         });
 
         const tmp_req = { ri }, tmp_resp = {};
@@ -93,6 +96,8 @@ async function create_a_csr(req_prim, resp_prim) {
         logger.error({ err }, 'create_a_csr failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
+    } finally {
+        req_prim._pendingCreate?.resolve();
     }
     return;
 }

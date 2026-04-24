@@ -5,7 +5,7 @@ const Lookup = require('../../models/lookup-model');
 const MDP = require('../../models/mdp-model');
 const DPM = require('../../models/dpm-model');
 
-const logger = require('../../logger').child({ module: 'dpm' });
+const logger = require('../../logger').forFile(__filename);
 
 const mmd_parent_res_types = ["mdp"];
 

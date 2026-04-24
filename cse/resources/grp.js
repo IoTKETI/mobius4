@@ -1,11 +1,12 @@
 const { grp_create_schema, grp_update_schema } = require('../validation/res_schema');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
 const GRP = require('../../models/grp-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'grp' });
+const logger = require('../../logger').forFile(__filename);
 
 const grp_parent_res_types = ['ae', 'rce', 'cb'];
 
@@ -56,43 +57,44 @@ async function create_a_grp(req_prim, resp_prim) {
     const et = get_default_et();
 
     try {
-        await GRP.create({
-            // mandatory attributes
-            ri,
-            ty: 9,
-            sid: grp_sid,
-            int_cr: req_prim.fr,
-            rn: prim_res.rn,
-            pi: grp_pi,
-            et: prim_res.et || et,
-            ct: now,
-            lt: now,
-            // optional attributes
-            acpi: prim_res.acpi || null,
-            lbl: prim_res.lbl || null,
-            cr: prim_res.cr === null ? req_prim.fr : null,
-            mt: prim_res.mt || 0, // '0' means 'mixed'
-            mtv: prim_res.mtv ? prim_res.mtv : null,
-            cnm: prim_res.mid ? prim_res.mid.length : 0,
-            mnm: prim_res.mnm,
-            csy: prim_res.csy || 1, // '1' means 'ABANDON_MEMBER'
-            mid: prim_res.mid || [], // empty list is allowed by the spec
-            macp: prim_res.macp || null, // empty list is allowed by the spec
-            gn: prim_res.gn || null,
-        });
+        await sequelize.transaction(async (t) => {
+            await GRP.create({
+                // mandatory attributes
+                ri,
+                ty: 9,
+                sid: grp_sid,
+                int_cr: req_prim.fr,
+                rn: prim_res.rn,
+                pi: grp_pi,
+                et: prim_res.et || et,
+                ct: now,
+                lt: now,
+                // optional attributes
+                acpi: prim_res.acpi || null,
+                lbl: prim_res.lbl || null,
+                cr: prim_res.cr === null ? req_prim.fr : null,
+                mt: prim_res.mt || 0,
+                mtv: prim_res.mtv ? prim_res.mtv : null,
+                cnm: prim_res.mid ? prim_res.mid.length : 0,
+                mnm: prim_res.mnm,
+                csy: prim_res.csy || 1,
+                mid: prim_res.mid || [],
+                macp: prim_res.macp || null,
+                gn: prim_res.gn || null,
+            }, { transaction: t });
 
-        // add to Lookup table
-        await Lookup.create({
-            ri,
-            ty: 9,
-            rn: prim_res.rn,
-            sid: grp_sid,
-            lvl: grp_sid.split("/").length,
-            pi: grp_pi,
-            cr: prim_res.cr === null ? req_prim.fr : prim_res.cr,
-            int_cr: req_prim.fr,
-            et: prim_res.et || et,
-            loc: null
+            await Lookup.create({
+                ri,
+                ty: 9,
+                rn: prim_res.rn,
+                sid: grp_sid,
+                lvl: grp_sid.split("/").length,
+                pi: grp_pi,
+                cr: prim_res.cr === null ? req_prim.fr : prim_res.cr,
+                int_cr: req_prim.fr,
+                et: prim_res.et || et,
+                loc: null
+            }, { transaction: t });
         });
 
         // retrieve the created resource and respond
@@ -103,6 +105,8 @@ async function create_a_grp(req_prim, resp_prim) {
         logger.error({ err }, 'create_a_grp failed');
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
+    } finally {
+        req_prim._pendingCreate?.resolve();
     }
     return;
 }

@@ -5,7 +5,7 @@ const MDP = require('../../models/mdp-model');
 const enums = require("../../config/enums");
 const dpm = require("./dpm");
 
-const logger = require('../../logger').child({ module: 'mdp' });
+const logger = require('../../logger').forFile(__filename);
 
 const mdp_parent_res_types = ["cb", "ae", "csr"];
 
