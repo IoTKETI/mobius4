@@ -2,7 +2,7 @@ const config = require('config');
 const dsp_default = config.get('default.datasetPolicy');
 const admin_id = config.get('cse.admin');
 const csebase_rn = config.get('cse.csebase_rn');
-const logger = require('../logger').child({ module: 'datasetManager' });
+const logger = require('../logger').forFile(__filename);
 const enums = require('../config/enums');
 const moment = require('moment');
 

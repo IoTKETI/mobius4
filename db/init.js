@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 const config = require('config');
 const moment = require('moment');
 const { generate_ri } = require('../cse/utils');
-const logger = require('../logger').child({ module: 'db' });
+const logger = require('../logger').forFile(__filename);
 const timestamp_format = config.get('cse.timestamp_format');
 const len = config.get('length');
 

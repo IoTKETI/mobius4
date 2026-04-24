@@ -6,7 +6,7 @@ const enums = require('../../config/enums');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'csr' });
+const logger = require('../../logger').forFile(__filename);
 
 const csr_parent_res_types = ['cb'];
 

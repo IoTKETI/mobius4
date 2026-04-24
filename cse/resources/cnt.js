@@ -10,7 +10,7 @@ const CIN = require('../../models/cin-model');
 const CNT = require('../../models/cnt-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'cnt' });
+const logger = require('../../logger').forFile(__filename);
 
 const cnt_parent_res_types = ['ae', 'cnt', 'csr', 'cb', 'flx'];
 

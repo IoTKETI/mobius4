@@ -8,7 +8,7 @@ const enums = require("../../config/enums");
 const SUB = require('../../models/sub-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'sub' });
+const logger = require('../../logger').forFile(__filename);
 
 const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm"];
 

@@ -9,7 +9,7 @@ const enums = require('../../config/enums');
 const AE = require('../../models/ae-model');
 const Lookup = require('../../models/lookup-model');
 
-const logger = require('../../logger').child({ module: 'ae' });
+const logger = require('../../logger').forFile(__filename);
 
 const ae_parent_res_types = ['cb'];
 

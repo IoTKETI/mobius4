@@ -7,7 +7,7 @@ const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
 
-const logger = require('../../logger').child({ module: 'acp' });
+const logger = require('../../logger').forFile(__filename);
 
 const acp_parent_res_types = ['cb', 'ae'];
 

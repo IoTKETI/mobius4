@@ -1,7 +1,7 @@
 const MQTT = require("async-mqtt");
 const config = require("config");
 
-const logger = require("../logger").child({ module: "mqtt", binding: "mqtt" });
+const logger = require("../logger").forFile(__filename);
 const reqPrim = require('../cse/reqPrim');
 const metrics = require('../metrics');
 

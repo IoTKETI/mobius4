@@ -1,7 +1,7 @@
 const axios = require('axios');
 
 const config = require('config');
-const logger = require('../logger').child({ module: 'registree' });
+const logger = require('../logger').forFile(__filename);
 const registree = config.cse;
 const registrar = config.cse.registrar;
 

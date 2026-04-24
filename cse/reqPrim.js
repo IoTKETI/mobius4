@@ -1,7 +1,7 @@
 const config = require("config");
 const axios = require('axios');
 const { JSONPath } = require("jsonpath-plus");
-const logger = require("../logger").child({ module: "reqPrim" });
+const logger = require("../logger").forFile(__filename);
 
 // Cache config values used in get_to_info on every request
 const _SP_ID = config.cse.sp_id;
@@ -336,7 +336,7 @@ async function prim_handling(req_prim) {
     resp_prim.pc = { "m2m:dbg": err.message || "Internal server error" };
     return resp_prim;
   } finally {
-    logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi, ri: req_prim.ri, dbg: resp_prim.pc?.['m2m:dbg'] }, 'response primitive');
+    logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi, ri: req_prim.ri, prim: resp_prim.pc }, 'response primitive');
     if (req_prim._pendingCreate) {
       req_prim._pendingCreate.resolve();
       pendingCreates.delete(req_prim._pendingCreate.sid);

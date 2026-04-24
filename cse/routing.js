@@ -1,5 +1,5 @@
 const config = require('config');
-const logger = require('../logger').child({ module: 'routing' });
+const logger = require('../logger').forFile(__filename);
 
 function check_to_is_mine(to) {
     var str, cse_id_token, sp_id_token;

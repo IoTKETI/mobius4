@@ -2,7 +2,7 @@ const axios = require("axios");
 const config = require("config");
 const { Op } = require('sequelize');
 
-const logger = require("../logger").child({ module: "noti" });
+const logger = require("../logger").forFile(__filename);
 const mqtt = require("../bindings/mqtt");
 const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');

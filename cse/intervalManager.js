@@ -1,4 +1,4 @@
-const logger = require('../logger').child({ module: 'intervalManager' });
+const logger = require('../logger').forFile(__filename);
 
 class MultiIntervalManager {
     constructor() {
