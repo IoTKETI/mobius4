@@ -94,6 +94,80 @@ test("net=4 — 직속 자식을 명시적으로 DELETE하면 통지한다", asy
   assert.equal(got.body["m2m:sgn"].nev.net, 4);
 });
 
+test("net=4 — 통지 내용에 삭제된 자식의 표현이 담긴다", async () => {
+  // DEC-038: nev.rep은 삭제되기 직전 자식의 전체 표현이다. ID만 담거나 비워 보내면
+  // 응용이 '무엇을 잃었는지' 알 수 없어 이 기능의 목적을 잃는다.
+  const { cntSid, subSid } = await cntWithSub({ net: [4] });
+  const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { payload: "keep-me" } } });
+  const rn = cin.body["m2m:cin"].rn;
+  await remove(srv.baseUrl, `${cntSid}/${rn}`);
+
+  const got = await sink.waitFor((i) => netOf(i) === 4 && i.body["m2m:sgn"].sur === subSid);
+  const rep = got.body["m2m:sgn"].nev.rep;
+  assert.ok(rep["m2m:cin"], `삭제된 CIN의 표현이 담겨야 한다: ${JSON.stringify(rep)}`);
+  assert.equal(rep["m2m:cin"].rn, rn);
+  assert.deepEqual(rep["m2m:cin"].con, { payload: "keep-me" });
+});
+
+test("net=4 — enc.chty가 자식 타입을 걸러낸다", async () => {
+  // TS-0004:7.5.1.2.2 Step 1.0 — chty가 있으면 그 타입의 자식이 삭제될 때만 발화한다.
+  // chty=[3](컨테이너)만 허용하므로 CIN 삭제는 통지되지 않아야 한다.
+  const { cntSid, subSid } = await cntWithSub({ net: [4], chty: [3] });
+  const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: 1 } } });
+  const del = await remove(srv.baseUrl, `${cntSid}/${cin.body["m2m:cin"].rn}`);
+  assert.equal(del.rsc, "2002", "삭제가 성공해야 이 테스트가 의미를 갖는다");
+
+  const notis = await sink.expectNone((i) => i.body?.["m2m:sgn"]?.sur === subSid);
+  assert.deepEqual(notis.map(netOf), [], "chty에 없는 타입이므로 통지가 없어야 한다");
+});
+
+test("net=4 — 조부모 구독은 발화하지 않는다 (직속 부모만)", async () => {
+  // DEC-038: 이벤트 이름이 'Delete of *Direct* Child Resource'다. 조상까지 전파하면
+  // 깊은 트리에서 삭제 1건이 깊이만큼의 통지를 만든다.
+  const gp = uniqueRn("gp");
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: gp } });
+  const gpSub = uniqueRn("gpsub");
+  await create(srv.baseUrl, `${root.sid}/${gp}`, 23, {
+    "m2m:sub": { rn: gpSub, nu: [sink.url], enc: { net: [4] }, nct: 1 },
+  });
+  const gpSubSid = `${root.sid}/${gp}/${gpSub}`;
+
+  // 손자: 조부모 → 자식 컨테이너 → CIN
+  const mid = uniqueRn("mid");
+  await create(srv.baseUrl, `${root.sid}/${gp}`, 3, { "m2m:cnt": { rn: mid } });
+  const cin = await create(srv.baseUrl, `${root.sid}/${gp}/${mid}`, 4, { "m2m:cin": { con: { v: 1 } } });
+  const del = await remove(srv.baseUrl, `${root.sid}/${gp}/${mid}/${cin.body["m2m:cin"].rn}`);
+  assert.equal(del.rsc, "2002");
+
+  const notis = await sink.expectNone((i) => i.body?.["m2m:sgn"]?.sur === gpSubSid);
+  assert.deepEqual(notis.map(netOf), [], "조부모 구독은 발화하지 않아야 한다");
+});
+
+test("캐스케이드 자손 삭제는 통지를 발생시키지 않는다 (indirect deletion)", async () => {
+  // DEC-039 / SQ-001: 부모를 지워 자손이 함께 사라질 때, 그 자손에 대한 net=4는
+  // 발화하지 않는다. 현재 delete_resources가 통지 함수를 아예 호출하지 않는다는
+  // 사실을 테스트로 고정해, 나중에 누가 그 경로에 통지를 붙이면 여기서 걸리게 한다.
+  const outer = uniqueRn("outer");
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: outer } });
+  const inner = uniqueRn("inner");
+  await create(srv.baseUrl, `${root.sid}/${outer}`, 3, { "m2m:cnt": { rn: inner } });
+
+  // inner 아래 CIN이 삭제될 때 발화할 net=4 구독을 inner에 단다
+  const innerSub = uniqueRn("isub");
+  await create(srv.baseUrl, `${root.sid}/${outer}/${inner}`, 23, {
+    "m2m:sub": { rn: innerSub, nu: [sink.url], enc: { net: [4] }, nct: 1 },
+  });
+  const innerSubSid = `${root.sid}/${outer}/${inner}/${innerSub}`;
+  await create(srv.baseUrl, `${root.sid}/${outer}/${inner}`, 4, { "m2m:cin": { con: { v: 1 } } });
+
+  // outer를 삭제하면 inner와 그 CIN이 캐스케이드로 사라진다
+  const del = await remove(srv.baseUrl, `${root.sid}/${outer}`);
+  assert.equal(del.rsc, "2002");
+
+  const notis = await sink.expectNone((i) => i.body?.["m2m:sgn"]?.sur === innerSubSid);
+  assert.deepEqual(notis.map(netOf), [], "캐스케이드 자손 삭제는 통지하지 않아야 한다");
+});
+
 test("net=4 — mni 초과 eviction에서도 통지한다", { todo: true }, async () => {
   // 미구현이 아니라 규격 확인 대기(SQ-001): eviction(int_cr_req:true)이 indirect
   // deletion으로서 통지를 발생시켜야 하는지 oneM2M 규격상 확정되지 않았다(DEC-039).
