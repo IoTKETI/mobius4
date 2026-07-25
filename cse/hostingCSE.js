@@ -42,14 +42,6 @@ const cin = require("./resources/cin");
 const grp = require("./resources/grp");
 const sub = require("./resources/sub");
 // const smd = require("./resources/smd");
-
-// SQL LIKE에서 '%'와 '_'는 와일드카드다. 리소스 이름에는 밑줄이 흔하므로(예: 3부 표준의
-// '{modelId}_{version}_{instanceId}', 기본 ACP의 cb_default_acp) 이스케이프하지 않으면
-// 형제 리소스까지 매칭된다 — 디스커버리에서는 결과 오염, 삭제에서는 남의 리소스 삭제다.
-// PostgreSQL LIKE의 기본 이스케이프 문자가 백슬래시라 별도 ESCAPE 절이 필요 없다.
-function escape_like(s) {
-	return String(s).replace(/([\\%_])/g, '\\$1');
-}
 // const flx = require("./resources/flx");
 const noti = require("./noti");
 
@@ -61,6 +53,14 @@ const dpm = require("./resources/dpm"); // <modelDeployment>
 const dsp = require("./resources/dsp"); // <datasetPolicy>
 const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
+
+// SQL LIKE에서 '%'와 '_'는 와일드카드다. 리소스 이름에는 밑줄이 흔하므로(예: 3부 표준의
+// '{modelId}_{version}_{instanceId}', 기본 ACP의 cb_default_acp) 이스케이프하지 않으면
+// 형제 리소스까지 매칭된다 — 디스커버리에서는 결과 오염, 삭제에서는 남의 리소스 삭제다.
+// PostgreSQL LIKE의 기본 이스케이프 문자가 백슬래시라 별도 ESCAPE 절이 필요 없다.
+function escape_like(s) {
+	return String(s).replace(/([\\%_])/g, '\\$1');
+}
 
 const virtual_res_names = ["fopt", "la", "ol"]; // fopt shall come first in the list
 
