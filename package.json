@@ -43,7 +43,7 @@
   "scripts": {
     "start": "node mobius4.js",
     "dev": "NODE_ENV=dev node mobius4.js",
-    "test:basic": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-concurrency=1 'test/**/*.test.js'"
   },
   "keywords": [
     "oneM2M"
