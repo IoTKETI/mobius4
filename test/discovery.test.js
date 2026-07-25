@@ -4,14 +4,15 @@ const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
 const { create, discover, urils, createRoot, uniqueRn } = require("./helpers/onem2m");
 
-let srv, root, c1, g1, cinRn;
+let srv, root, c1, g1, cinRn, c1Ri;
 
 before(async () => {
   srv = await startServer();
   root = await createRoot(srv.baseUrl, "disc");
   // 3단 트리: root / c1 / g1 / <cin>
   c1 = uniqueRn("c1");
-  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: c1, lbl: ["depth1"] } });
+  const c1Res = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: c1, lbl: ["depth1"] } });
+  c1Ri = c1Res.body["m2m:cnt"].ri; // 비구조적(ri) 주소 지정 테스트용
   g1 = uniqueRn("g1");
   await create(srv.baseUrl, `${root.sid}/${c1}`, 3, { "m2m:cnt": { rn: g1 } });
   const cin = await create(srv.baseUrl, `${root.sid}/${c1}/${g1}`, 4, { "m2m:cin": { con: { v: 1 } } });
@@ -79,6 +80,16 @@ test("lvl은 대상으로부터의 상대 깊이다 (하위 노드 기준)", asy
   // TS-0001:8.1.2 — 대상 자신이 level 0, 직속 자식이 1.
   // 절대 깊이로 잘못 구현하면 트리 최상위에서만 우연히 맞고 여기서 틀린다.
   const list = urils(await discover(srv.baseUrl, `${root.sid}/${c1}`, { lvl: "1" }));
+  assert.deepEqual(list, [`${root.sid}/${c1}/${g1}`]);
+});
+
+test("lvl=1 → 비구조적 ID(ri)로 주소 지정해도 구조적 경로와 동일하게 동작한다", async () => {
+  // Finding 1 회귀 방지: target_lvl을 req_prim.sid(항상 실제 절대 깊이)가 아니라
+  // req_prim.to(주소 지정에 쓴 값)로 잘못 계산하면, ri로 주소 지정했을 때 to의 깊이(1)와
+  // 실제 sid 깊이(3)가 달라 상한이 너무 작게 잡혀 직속 자식이 통째로 빠진다
+  // (RSC 2000 + 빈 목록 — 이 기능이 없애려는 바로 그 무음 누락). c1을 ri로 조회해도
+  // 구조적 경로(`${root.sid}/${c1}`)로 조회한 것과 같은 직속 자식 g1이 나와야 한다.
+  const list = urils(await discover(srv.baseUrl, c1Ri, { lvl: "1" }));
   assert.deepEqual(list, [`${root.sid}/${c1}/${g1}`]);
 });
 

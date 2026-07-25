@@ -792,7 +792,11 @@ function set_where_clause(req_prim) {
 			Sequelize.fn('string_to_array', Sequelize.col('sid'), '/'),
 			1
 		);
-		const lvl_condition = Sequelize.where(sid_depth, { [Op.lte]: target_lvl + lvl });
+		// 바인딩마다 lvl 타입 강제가 다르다 — HTTP는 parseInt를 거치지만 MQTT는 JSON.parse된
+		// fc를 그대로 넘기고 Joi도 coerced 값을 되쓰지 않는다. 문자열이면 target_lvl + lvl이
+		// 산술이 아니라 연결이 되어(예: 2 + "2" → "22") 상한이 사실상 무제한이 되므로 여기서
+		// 명시적으로 숫자로 강제한다.
+		const lvl_condition = Sequelize.where(sid_depth, { [Op.lte]: target_lvl + Number(lvl) });
 		if (where[Op.and] && Array.isArray(where[Op.and])) {
 			where[Op.and].push(lvl_condition);
 		} else {
