@@ -22,3 +22,10 @@ test("개발 포트(7599)가 아닌 동적 포트를 쓴다", () => {
   assert.notEqual(srv.port, 7599);
   assert.ok(srv.port > 1024);
 });
+
+test("HTTPS 리스너도 개발 포트(7580)와 겹치지 않는 동적 포트를 쓴다", () => {
+  // bindings/http.js는 https 리스너에 enabled 플래그가 없어 항상 뜬다 — 격리하지
+  // 않으면 개발 인스턴스가 물고 있는 7580과 충돌한다.
+  assert.notEqual(srv.httpsPort, 7580);
+  assert.notEqual(srv.httpsPort, srv.port);
+});

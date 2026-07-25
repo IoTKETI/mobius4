@@ -27,14 +27,23 @@ function freePort() {
   });
 }
 
+// 진단 버퍼 상한 — 수다스러운 서버라도 무한정 자라지 않게 마지막 ~64KB만 남긴다.
+const DIAG_BUFFER_MAX = 64 * 1024;
+
 async function startServer() {
   const port = await freePort();
+  // bindings/http.js는 https 리스너에 enabled 플래그가 없이 config.https.port(기본 7580)로
+  // 무조건 listen한다. 개발 인스턴스가 그 포트를 이미 물고 있으므로 여기서도 별도의
+  // 빈 포트를 골라 겹치지 않게 한다(HTTPS 자체는 이 테스트들이 검증 대상으로 삼지 않는다).
+  const httpsPort = await freePort();
   const overrides = {
     http: { port },
+    https: { port: httpsPort },
     db: { name: TEST_DB },
     mqtt: { enabled: false },
     // default.json이 logs/mobius4.log 파일 로깅을 켜므로 명시적으로 끈다.
-    // console은 남겨 둔다 — 기동 실패 시 stderr가 유일한 단서다.
+    // console은 남겨 둔다 — logger.js는 stdout에만 쓰고 stderr에는 아무것도 쓰지 않으므로
+    // 기동 실패 시 단서는 stdout(예: fatal 로그)에 있다. 그래서 stdout·stderr를 모두 모은다.
     logging: { level: "error", file: { enabled: false } },
   };
 
@@ -46,20 +55,25 @@ async function startServer() {
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
 
-  let stderr = "";
-  child.stderr.on("data", (c) => { stderr += c.toString(); });
-  child.stdout.resume(); // 버퍼가 차서 멈추지 않게 흘려보낸다
+  let diag = "";
+  function appendDiag(chunk) {
+    diag += chunk.toString();
+    if (diag.length > DIAG_BUFFER_MAX) diag = diag.slice(diag.length - DIAG_BUFFER_MAX);
+  }
+  // 두 파이프 모두 반드시 소비한다 — 읽지 않은 파이프는 버퍼가 차서 자식 프로세스를 멈춰 세운다.
+  child.stdout.on("data", appendDiag);
+  child.stderr.on("data", appendDiag);
 
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`서버 기동 타임아웃(${START_TIMEOUT_MS}ms). stderr:\n${stderr}`));
+      reject(new Error(`서버 기동 타임아웃(${START_TIMEOUT_MS}ms). 출력:\n${diag}`));
     }, START_TIMEOUT_MS);
 
     const onMessage = (m) => { if (m === "ready") { cleanup(); resolve(); } };
     const onExit = (code) => {
       cleanup();
-      reject(new Error(`서버가 기동 중 종료됨(code=${code}). stderr:\n${stderr}`));
+      reject(new Error(`서버가 기동 중 종료됨(code=${code}). 출력:\n${diag}`));
     };
     function cleanup() {
       clearTimeout(timer);
@@ -71,7 +85,7 @@ async function startServer() {
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  return { child, port, baseUrl, stderr: () => stderr, stop: () => stopServer(child) };
+  return { child, port, httpsPort, baseUrl, diagnostics: () => diag, stop: () => stopServer(child) };
 }
 
 function stopServer(child) {
