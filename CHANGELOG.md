@@ -44,12 +44,14 @@
 | 디스커버리 | `fu=1` 전체 반환 / `ty`·`lbl` 필터 / `cra`·`crb`(`YYYYMMDDThhmmss`) / **`lvl` 미지정 시 전체 반환** |
 | 통지 | `net=1`(갱신)·`net=2`(구독 대상 삭제)·`net=3`(직속 자식 생성) 발화 / `enc.chty` 필터 / 통지 봉투(`sur`·`nev.rep`·`nev.net`) / **`net=[3]`만 설정된 구독은 CIN 삭제 시 무통지** |
 
-### ⚠️ 알려진 미수정 결함 (이번 변경에서 고치지 않음)
+### ⚠️ 알려진 미수정 결함
 
-아래 두 건은 **테스트로 기록만 했고 수정하지 않았다.** `{ todo: true }`로 달려 있어
+> `net=4`는 2026-07-26에 구현했다(아래 별도 절). 여기 남은 것은 `lvl` 하나다.
+
+아래 건은 **테스트로 기록만 했고 수정하지 않았다.** `{ todo: true }`로 달려 있어
 스위트를 실패시키지 않지만, `not ok … # TODO`로 목록에 남는다.
 
-**1. `lvl` 필터 크리테리아가 질의에 반영되지 않는다** (todo 4건)
+**`lvl` 필터 크리테리아가 질의에 반영되지 않는다** (todo 4건)
 
 `bindings/http.js`가 파싱하고 `cse/validation/prim_schema.js`가 검증하지만,
 `cse/hostingCSE.js`에서 `const lvl = req_prim.fc.lvl;`로 선언만 하고 WHERE 절 구성에
@@ -65,29 +67,58 @@ resource itself is zero and the level of the direct children of the target is on
 이므로 대상 깊이를 더해 비교해야 한다 — 이 환산을 빠뜨리면 트리 최상위에서만 우연히 맞고
 하위 노드에서 틀린다(테스트가 이 경우를 구분한다).
 
-**2. `net=4`(Delete of Direct Child Resource) 통지가 발화하지 않는다** (todo 2건)
-
-`cse/noti.js`의 주석은 `net` 1~4를 지원한다고 적고 있으나 **코드에 4번 분기가 없다.**
-구조적 원인은 `check_and_send_noti()`가 구독을 `pi === req_prim.ri`(동작 대상의 자식)로만
-조회한다는 점이다. net 1·2·3은 이 조회로 충분하지만, net=4는 **삭제되는 자식**이 동작
-대상이고 구독은 **부모** 아래 있어 조회 기준이 어긋난다.
-
-실측(2026-07-25): `mni=3` 컨테이너에 CIN 4개 투입 → eviction 발생(cni 4→3), `net=3` 통지
-4건 수신, **`net=4` 0건**. CIN 명시적 DELETE(RSC 2002) → **`net=4` 0건**. 대조로 구독이
-달린 컨테이너 자체를 DELETE하면 `net=2`가 1건 온다 — **통지 파이프라인 자체는 정상이고
-`net=4`만 없다.**
-
-실피해: `cse/resources/cin.js`의 `mni`/`mbs` 초과 eviction이 이 경로를 타므로,
-**컨테이너가 `mni`를 넘기면 수집 데이터가 아무 통지 없이 삭제되고 응용 서비스가 유실을
-감지할 수단이 없다.**
-
-참고로 eviction은 `int_cr_req: true` 내부 요청이지만, `delete_a_res`의 통지 호출은 그
-플래그와 무관하게 실행된다 — 즉 **통지 함수는 호출되고 있고 구독을 못 찾을 뿐이다.**
-수정 시 이 플래그는 건드릴 필요가 없다.
-
 > 고친 뒤에는 `npm test 2>&1 | grep "# TODO"`로 확인한다. `ok … # TODO`로 바뀌면 성공이며,
 > 해당 테스트의 `{ todo: true }` 플래그를 떼서 진짜 회귀 테스트로 승격시켜야 한다.
 > `npm test`의 요약 줄과 종료 코드는 수정 전후가 동일하므로 요약만 보면 알 수 없다.
+
+### `net=4` (Delete of Direct Child Resource) 통지 구현 (2026-07-26)
+
+**구현했다.** `cse/noti.js`의 주석이 오래도록 `net` 1~4 지원을 표방했으나 실제로는 4번
+분기가 없었고, 이제 코드와 주석이 일치한다.
+
+**구조적 원인**은 `check_and_send_noti()`가 구독을 `pi === req_prim.ri`(동작 대상의 자식)로만
+조회한다는 점이었다. net 1·2·3은 이 조회로 충분하지만, net=4는 **삭제되는 자식**이 동작
+대상이고 구독은 **부모** 아래 있어 조회 기준이 어긋났다.
+
+**변경**: `cse/noti.js` 한 파일. `notify_parent_of_child_deletion(deleted_pc, deleted_ty)`를
+신설하고 `check_and_send_noti` 진입부에서 호출한다. `delete_a_res`·`cin.js`·`hostingCSE.js`는
+**건드리지 않았다.**
+
+구현 시 주의한 지점 셋:
+
+- **조기 반환보다 앞에 둬야 한다.** `check_and_send_noti`는 동작 대상 자신의 구독이 0건이면
+  즉시 반환하는데, `<contentInstance>` 아래에는 보통 구독이 없다. net=4 처리를 그 뒤에 두면
+  주 사용 사례에서 영영 실행되지 않는다.
+- **자기 구독 조회를 먼저 '발사'해 둔다.** `delete_a_res`가 통지와 캐스케이드 삭제를 동시에
+  굴리므로, 자기 구독 SELECT가 net=4 조회 뒤로 밀리면 `delete_resources`의 `SUB.destroy`가
+  먼저 도착해 **그 리소스의 net=2 통지가 조용히 사라진다.**
+- **net=4 실패를 격리한다.** 부모 구독의 고장(예: 잘못된 `nu`)이 삭제된 리소스 자신의
+  net=1/2/3 통지까지 죽이지 않도록 `.catch`로 막았다.
+
+**규격 근거**: oneM2M `TS-0004:6.3.4.2.19`(`4 = Delete_of_Direct_Child_Resource`),
+`TS-0004:7.5.1.2.2` Step 1.0(`childResourceType` 필터는 net=3과 동일 규칙, 없으면 모든 자식
+타입에 발화 / `notificationEventType` 미설정 시 기본값은 `Update_of_Resource`),
+같은 절 Step 2.1(통지 내용은 **자식** 리소스의 표현). 공인 시험은 `TC_CSE_SUB_DEL_003`.
+
+**구현 범위 — 직접 DELETE만.** 아래 둘은 **의도적으로 제외**했다.
+
+| 삭제 유형 | 동작 | 사유 |
+|---|---|---|
+| 직접 DELETE | **통지함** | 공인 시험 범위, 규격이 명확 |
+| CIN eviction(`mni`/`mbs` 초과) | 통지 안 함 | `int_cr_req !== true` 가드로 배제 — 아래 참조 |
+| 캐스케이드 자손(부모 삭제로 함께 삭제) | 통지 안 함 | `delete_resources`가 통지 함수를 호출하지 않음(기존 동작 유지) |
+
+**⚠️ 열린 질문**: oneM2M 표준화 논의에서 **indirect deletion**(다른 리소스를 삭제하면서
+부수적으로 발생하는 삭제)은 통지 이벤트를 발생시키지 않는 것으로 다뤄졌다. 캐스케이드
+자손 삭제가 여기 해당한다. **CIN eviction이 여기 포함되는지는 확인이 필요하다** — eviction을
+유발하는 것은 DELETE가 아니라 CREATE이므로 문자 그대로는 해당하지 않는다. 확인 전까지
+보수적으로 제외했고, 회귀 테스트를 `todo`로 남겨 질문이 살아 있음을 표시했다.
+
+이 답에 따라 **`mni` 초과 시 수집 데이터가 무통지로 사라지는 문제**의 성격이 갈린다 —
+규격상 정상 동작이거나, 아직 남은 결함이거나.
+
+**테스트**: `test/notification.test.js`에 6건(발화·`nev.rep` 내용·`chty` 양방향·조부모
+미발화·캐스케이드 무통지). eviction 1건은 `todo`로 유지.
 
 ### 검증 중 발견한 그 밖의 사항 (미수정, 테스트 없음)
 
