@@ -12,14 +12,6 @@ createdb mobius4_test
 PostgreSQL과 PostGIS 확장이 필요하다(개발용 DB와 동일 요구사항). 테이블·CSEBase·기본 ACP는
 첫 실행 때 자동 생성된다.
 
-## 실행
-
-```bash
-npm test
-```
-
-PostgreSQL과 PostGIS 확장이 필요하다(개발용 DB와 동일 요구사항).
-
 테스트는 `NODE_CONFIG`로 DB 이름·포트·MQTT·로깅만 덮어쓰고, 나머지 설정은 `config/`에서
 그대로 가져온다. 따라서 `cse.admin`(기본 `SM`)·`cse.csebase_rn`(기본 `Mobius`)·
 `cse.cse_type`(기본 `1`)을 **로컬 설정에서 바꿔 두었다면 테스트가 깨진다** —
