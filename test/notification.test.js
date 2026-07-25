@@ -73,7 +73,11 @@ test("net=[3]만 설정된 구독은 CIN 삭제 시 통지하지 않는다 (회�
   const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: 3 } } });
   await sink.waitFor((i) => netOf(i) === 3 && i.body["m2m:sgn"].sur === subSid);
 
-  await remove(srv.baseUrl, `${cntSid}/${cin.body["m2m:cin"].rn}`);
+  // 삭제가 실제로 성공했는지 먼저 단정한다 — 삭제가 조용히 실패하면 "삭제 통지가 없다"가
+  // 저절로 참이 되어, 아무것도 검증하지 못한 채 초록불이 뜬다.
+  const del = await remove(srv.baseUrl, `${cntSid}/${cin.body["m2m:cin"].rn}`);
+  assert.equal(del.rsc, "2002", `CIN 삭제가 성공해야 이 회귀 테스트가 의미를 갖는다: ${del.raw.slice(0, 200)}`);
+
   const deleteNotis = await sink.expectNone(
     (i) => i.body?.["m2m:sgn"]?.sur === subSid && [2, 4].includes(netOf(i))
   );
