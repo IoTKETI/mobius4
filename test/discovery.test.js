@@ -127,3 +127,10 @@ test("gmty 범위 밖은 4000, 규격상 유효하나 미구현이면 5001", asy
     const unimpl = await discover(srv.baseUrl, root.sid, { gmty: "4", gsf: "1", geom: "[1,2]" });
     assert.equal(unimpl.rsc, "5001", `미구현 gmty는 5001이어야 한다. 실제 ${unimpl.rsc}`);
 });
+
+test("디스커버리 실패는 2000으로 둔갑하지 않는다", async () => {
+    // 예외가 삼켜지면 빈 목록 + 2000이 되어 '결과 없음'과 구별되지 않는다.
+    const res = await discover(srv.baseUrl, root.sid, { gmty: "5", gsf: "1", geom: "[1,2]" });
+    assert.notEqual(res.rsc, "2000", "실패가 성공으로 둔갑했다");
+    assert.equal(res.rsc, "5001");
+});
