@@ -44,32 +44,44 @@
 | 디스커버리 | `fu=1` 전체 반환 / `ty`·`lbl` 필터 / `cra`·`crb`(`YYYYMMDDThhmmss`) / **`lvl` 미지정 시 전체 반환** |
 | 통지 | `net=1`(갱신)·`net=2`(구독 대상 삭제)·`net=3`(직속 자식 생성) 발화 / `enc.chty` 필터 / 통지 봉투(`sur`·`nev.rep`·`nev.net`) / **`net=[3]`만 설정된 구독은 CIN 삭제 시 무통지** |
 
-### ⚠️ 알려진 미수정 결함
+### `lvl` (level) 필터 크리테리아 적용 (2026-07-26)
 
-> `net=4`는 2026-07-26에 구현했다(아래 별도 절). 여기 남은 것은 `lvl` 하나다.
+**구현했다.** `lvl`은 그동안 파싱과 검증까지만 되고 질의에 반영되지 않아, 요청이 RSC 2000으로
+성공 응답하면서 필터를 **조용히 버리고** 모든 깊이의 리소스를 돌려주고 있었다.
 
-아래 건은 **테스트로 기록만 했고 수정하지 않았다.** `{ todo: true }`로 달려 있어
-스위트를 실패시키지 않지만, `not ok … # TODO`로 목록에 남는다.
+**변경**: `cse/hostingCSE.js` 한 곳 — 디스커버리 WHERE 절의 `sid` 접두어 조건 바로 다음.
 
-**`lvl` 필터 크리테리아가 질의에 반영되지 않는다** (todo 4건)
-
-`bindings/http.js`가 파싱하고 `cse/validation/prim_schema.js`가 검증하지만,
-`cse/hostingCSE.js`에서 `const lvl = req_prim.fc.lvl;`로 선언만 하고 WHERE 절 구성에
-쓰이지 않는다. 요청은 **RSC 2000으로 성공 응답하면서 필터를 조용히 버린다.**
-
-실측(2026-07-25, 3단 트리): `fu=1` → 3건, `fu=1&lvl=1` → **3건**(기대 1건),
-`fu=1&lvl=2` → **3건**(기대 2건).
-
-규격: oneM2M TS-0001 §8.1.2 — *"The maximum level of resource tree that the Hosting CSE
-shall perform the operation starting from the target resource… The level of the target
+**규격 근거**: oneM2M `TS-0001:8.1.2` — *"The maximum level of resource tree that the Hosting
+CSE shall perform the operation starting from the target resource… The level of the target
 resource itself is zero and the level of the direct children of the target is one."*
-즉 **대상으로부터의 상대 깊이**다. 저장된 `lvl` 컬럼은 절대 깊이(`sid.split("/").length`)
-이므로 대상 깊이를 더해 비교해야 한다 — 이 환산을 빠뜨리면 트리 최상위에서만 우연히 맞고
-하위 노드에서 틀린다(테스트가 이 경우를 구분한다).
+즉 `lvl`은 **대상으로부터의 상대 깊이**다. 미지정 시 깊이 제한이 없다는 것도 같은 절에 있다.
 
-> 고친 뒤에는 `npm test 2>&1 | grep "# TODO"`로 확인한다. `ok … # TODO`로 바뀌면 성공이며,
-> 해당 테스트의 `{ todo: true }` 플래그를 떼서 진짜 회귀 테스트로 승격시켜야 한다.
-> `npm test`의 요약 줄과 종료 코드는 수정 전후가 동일하므로 요약만 보면 알 수 없다.
+**구현 시 주의한 지점 셋:**
+
+- **상대 → 절대 환산.** 저장된 깊이는 `Mobius`=1부터 시작하는 절대값이라, 대상의 절대 깊이를
+  더해 상한으로 바꿔야 한다. 이 환산을 빠뜨리면 **트리 최상위에서만 우연히 맞고 하위
+  노드에서 틀린다.**
+- **`lookup.lvl` 컬럼은 쓸 수 없다.** 디스커버리는 `lookup`이 아니라 타입별 테이블
+  (`cnt`·`cin`·`acp`…)을 각각 조회하는데 그 테이블들에는 `lvl` 컬럼이 없다. 대신 모든
+  타입 테이블에 공통인 `sid`에서 SQL로 깊이를 센다
+  (`array_length(string_to_array(sid,'/'),1)` — 모든 sid에서 `sid.split("/").length`와
+  정확히 일치함을 검증했다).
+- **SQL WHERE에서 거른다.** 조회 후 애플리케이션에서 거르면 `lim`(기본 200)이 먼저 적용돼
+  깊은 노드가 정원을 채우고 정작 원하는 얕은 결과가 잘려나간다.
+
+**부수 효과(의도됨)**: `rcn=4/8` 중첩 조회도 같은 경로를 타므로 `lvl`을 함께 존중하게 됐다.
+`TS-0001:8.1.2`가 `offset`·`limit`·`level`을 한 묶음으로 규정하는 것과 맞는 동작이다.
+
+**알려진 이탈**: `lvl=0`은 `prim_schema.js`가 `min(1)`로 거부해 4000이 된다. 규격은 "대상
+자신이 level 0"이라고 하지만, 디스커버리(`fu=1`)는 대상 자신을 반환하지 않으므로 `lvl=0`은
+어차피 빈 결과다. 스키마 변경은 범위 밖으로 두었다.
+
+**공인 시험 없음**: ATS 전체를 확인한 결과 `level`을 세팅하는 테스트 케이스가 하나도 없다
+(템플릿은 전부 `omit`). TTA·oneM2M 인증에는 필요하지 않으며, 자동 검증 수단은 이 저장소의
+회귀 테스트 5건이 전부다.
+
+**테스트**: `test/discovery.test.js`에 5건(`lvl=1`·`lvl=2`·상대 깊이·`lvl`+`ty` AND·
+비구조화 ID 주소 지정).
 
 ### `net=4` (Delete of Direct Child Resource) 통지 구현 (2026-07-26)
 
