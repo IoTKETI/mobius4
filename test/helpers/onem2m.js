@@ -56,6 +56,38 @@ function urils(res) {
   return [];
 }
 
+// mobius4의 delete_a_res(cse/hostingCSE.js)는 대상 리소스는 물론 그 자손들까지도
+// await 없이 fire-and-forget으로 지운다(2002 응답 후 백그라운드에서 삭제 진행).
+// 테스트가 remove() 직후 srv.stop()으로 서버를 SIGTERM하면 이 비동기 삭제가 중간에
+// 끊겨 고아 row가 DB에 남는다 — 그리고 고아를 ri로 조회하면 응답 자체가 오지 않아
+// (타임아웃) 이후 테스트 실행까지 오염시킬 수 있다. 그래서 DELETE 후에는 고정 sleep이
+// 아니라, 서브트리가 실제로 비었는지 discovery로 폴링해 확인한 뒤 반환한다.
+const REMOVE_WAIT_TIMEOUT_MS = 5000;
+const REMOVE_WAIT_INTERVAL_MS = 100;
+
+// sid 아래(그리고 sid 자신)가 더 이상 조회되지 않을 때까지 폴링한다.
+//
+// 주의: discover(baseUrl, sid)를 sid 자신에 대고 쏘면 안 된다 — delete_a_res는 대상
+// 리소스 자신의 삭제(hostingCSE.js:559)와 자손 삭제(hostingCSE.js:592)를 서로 다른
+// fire-and-forget 태스크로 던지고, 자신의 삭제(단일 row)가 자손 삭제(N개 순차 처리)보다
+// 먼저 끝나는 경우가 실제로 있다. sid 자신의 row가 먼저 사라지면 reqPrim.js의 set_ri_sid
+// 조기 반환(hostingCSE.js:60-73, 'to'가 안 풀리면 discovery까지 가지도 않고 즉시 4004)
+// 때문에, 자손이 아직 남아있어도 폴링이 "끝났다"고 오판하게 된다(실측: 이 방식으로는
+// 3회 연속 실행 후 자손 컨테이너가 orphan으로 남았다). 그래서 항상 살아있는 CSE_BASE를
+// discovery 대상으로 삼고, 응답을 클라이언트 쪽에서 sid 접두어로 걸러 판단한다.
+async function waitForSubtreeGone(baseUrl, sid) {
+  const deadline = Date.now() + REMOVE_WAIT_TIMEOUT_MS;
+  for (;;) {
+    const res = await discover(baseUrl, CSE_BASE);
+    const remaining = urils(res).filter((u) => u === sid || u.startsWith(`${sid}/`));
+    if (remaining.length === 0) return;
+    // 타임아웃에 도달해도 절대 throw하지 않는다 — 정리 지연이 실제 테스트 실패를
+    // 가리면 안 된다. 남은 고아는 다음 실행의 DB 카운트 증가로 드러난다.
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, REMOVE_WAIT_INTERVAL_MS));
+  }
+}
+
 // 각 테스트 파일이 CSEBase 아래에 자기 루트를 하나 만들고, 끝나면 그 서브트리만 지운다.
 async function createRoot(baseUrl, prefix = "t") {
   const rn = uniqueRn(prefix);
@@ -64,11 +96,18 @@ async function createRoot(baseUrl, prefix = "t") {
     throw new Error(`테스트 루트 생성 실패: rsc=${res.rsc} body=${res.raw.slice(0, 200)}`);
   }
   const sid = `${CSE_BASE}/${rn}`;
-  return { rn, sid, remove: () => remove(baseUrl, sid) };
+  return {
+    rn, sid,
+    remove: async () => {
+      const res = await remove(baseUrl, sid);
+      await waitForSubtreeGone(baseUrl, sid);
+      return res;
+    },
+  };
 }
 
 module.exports = {
   CSE_BASE, ADMIN,
   request, create, retrieve, update, remove, discover,
-  uniqueRn, createRoot, urils,
+  uniqueRn, createRoot, urils, waitForSubtreeGone,
 };

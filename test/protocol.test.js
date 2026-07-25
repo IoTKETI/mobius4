@@ -2,7 +2,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
-const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
+const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE, waitForSubtreeGone } = require("./helpers/onem2m");
 
 let srv, root;
 before(async () => { srv = await startServer(); root = await createRoot(srv.baseUrl); });
@@ -84,6 +84,9 @@ test("fanout 응답은 m2m:agr 봉투로 감싸인다", async () => {
     }
   } finally {
     // root 서브트리 밖(CSEBase 직속)에 만들었으므로 root.remove()로는 지워지지 않는다 — 직접 정리.
+    // delete_a_res는 대상 리소스 자신의 삭제도 fire-and-forget이라(hostingCSE.js:559),
+    // grp 자신도 root와 같은 레이스에 걸린다 — 동일하게 폴링해서 실제로 지워졌는지 확인한다.
     await remove(srv.baseUrl, gsid);
+    await waitForSubtreeGone(srv.baseUrl, gsid);
   }
 });
