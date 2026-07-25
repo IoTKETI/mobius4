@@ -60,14 +60,14 @@ test("lvl 미지정 시 전체 깊이를 반환한다 (회귀 방지)", async ()
   assert.equal(list.length, 3);
 });
 
-test("lvl=1 → 직속 자식만 반환한다", { todo: true }, async () => {
-  // 미구현: lvl이 파싱·검증되지만 WHERE 절에 반영되지 않는다.
-  // 2026-07-25 실측 — RSC 2000으로 성공 응답하면서 필터를 조용히 버리고 3건을 반환.
+test("lvl=1 → 직속 자식만 반환한다", async () => {
+  // 구현 완료 — lvl이 파싱·검증된 뒤 WHERE 절(sid 깊이 환산)에 반영된다.
+  // 2026-07-26: RSC 2000 응답에서 직속 자식(c1)만 반환됨을 확인.
   const list = urils(await discover(srv.baseUrl, root.sid, { lvl: "1" }));
   assert.deepEqual(list, [`${root.sid}/${c1}`]);
 });
 
-test("lvl=2 → 2단계까지 반환한다", { todo: true }, async () => {
+test("lvl=2 → 2단계까지 반환한다", async () => {
   const list = urils(await discover(srv.baseUrl, root.sid, { lvl: "2" }));
   assert.deepEqual(
     list.sort(),
@@ -75,14 +75,14 @@ test("lvl=2 → 2단계까지 반환한다", { todo: true }, async () => {
   );
 });
 
-test("lvl은 대상으로부터의 상대 깊이다 (하위 노드 기준)", { todo: true }, async () => {
+test("lvl은 대상으로부터의 상대 깊이다 (하위 노드 기준)", async () => {
   // TS-0001:8.1.2 — 대상 자신이 level 0, 직속 자식이 1.
   // 절대 깊이로 잘못 구현하면 트리 최상위에서만 우연히 맞고 여기서 틀린다.
   const list = urils(await discover(srv.baseUrl, `${root.sid}/${c1}`, { lvl: "1" }));
   assert.deepEqual(list, [`${root.sid}/${c1}/${g1}`]);
 });
 
-test("lvl과 ty가 AND로 결합된다", { todo: true }, async () => {
+test("lvl과 ty가 AND로 결합된다", async () => {
   // lvl=2 + ty=3 조합은 쓰지 않는다 — 이 트리에서 ty=3(cnt)인 리소스가 c1(1단)·g1(2단)
   // 뿐이라 lvl이 무시돼도(버그) ty 필터 단독 결과가 우연히 기대값과 같아져 결함을
   // 못 잡는다(2026-07-25 실측: ok # TODO로 관측 — 단정이 결함을 잡지 못함, 브리프의

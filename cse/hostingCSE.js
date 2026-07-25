@@ -770,6 +770,36 @@ function set_where_clause(req_prim) {
 	// basically, target resources are all children of the discovery target
 	where.sid = { [Op.like]: `${req_prim.sid}/%` };
 
+	// lvl(level)은 '대상으로부터의 상대 깊이' 상한이다(TS-0001:8.1.2 — 대상 자신이 0,
+	// 직속 자식이 1). 반면 sid.split("/").length로 셀 수 있는 절대 깊이는 Mobius=1부터
+	// 시작한다. 그래서 대상의 절대 깊이(target_lvl)를 더해 상한으로 환산한다 — 이 환산을
+	// 빠뜨리면 트리 최상위에서만 우연히 맞고 하위 노드에서 틀린다.
+	//
+	// lookup 테이블에는 이 절대 깊이가 lvl 컬럼으로 미리 채워져 있지만(Mobius=1),
+	// 디스커버리는 lookup이 아니라 타입별 테이블(cnt/cin/acp/...)을 각각 조회하며
+	// 그 테이블들에는 lvl 컬럼이 없다(실측 2026-07-26: `SELECT ... FROM cnt WHERE
+	// lvl <= 3` → "column lvl does not exist", where.lvl을 그대로 쓰면 타입별 질의가
+	// 전부 에러로 죽어 디스커버리가 빈 결과를 반환한다). 그래서 모든 타입 테이블에
+	// 공통으로 있는 sid 컬럼으로부터 SQL에서 직접 깊이(슬래시 개수+1)를 셈해 비교한다.
+	//
+	// 애플리케이션에서 사후 필터링하지 않고 WHERE에 넣는 이유(DEC-040): 디스커버리는
+	// lim(기본 200)으로 결과를 자르므로, 나중에 거르면 깊은 노드가 정원을 먼저 채워
+	// 정작 원하는 얕은 결과가 잘려나간다.
+	if (lvl !== undefined) {
+		const target_lvl = req_prim.sid.split("/").length;
+		const sid_depth = Sequelize.fn(
+			'array_length',
+			Sequelize.fn('string_to_array', Sequelize.col('sid'), '/'),
+			1
+		);
+		const lvl_condition = Sequelize.where(sid_depth, { [Op.lte]: target_lvl + lvl });
+		if (where[Op.and] && Array.isArray(where[Op.and])) {
+			where[Op.and].push(lvl_condition);
+		} else {
+			where[Op.and] = [lvl_condition];
+		}
+	}
+
 	// bigger than or smaller than
 	if (cra || crb) {
 		where.ct = {};
