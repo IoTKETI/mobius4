@@ -41,7 +41,11 @@ const req_prim_schema = Joi.object().keys({
         lvl: Joi.number().integer().min(1),
         lim: Joi.number().integer().min(0),
         ofst: Joi.number().integer().min(1),
-        gmty: Joi.number().optional(),
+        // TS-0004:6.3.4.2.74 — geometryType 유효값은 1..6이다. 범위 밖은 잘못된 요청이므로
+        // 여기서 4000으로 막는다(gsf가 이미 같은 방식으로 1..3을 막고 있다).
+        // 4..6(MultiPoint/MultiLineString/MultiPolygon)은 규격상 유효하지만 mobius4가
+        // 구현하지 않았다 — 그것은 스키마가 아니라 처리 단계에서 5001로 알린다.
+        gmty: Joi.number().integer().min(1).max(6).optional(),
         gsf: Joi.number().integer().min(1).max(3).optional(),
         geom: Joi.array().optional(),
         smf: Joi.string().optional(),

@@ -643,7 +643,14 @@ async function discovery_core(req_prim) {
 	let ids_list = []; // this is for discovery response
 	let ids_list_per_ty = {}; // this is for rcn = 4 or rcn = 8 response
 
-	const { where, has_geo_query } = set_where_clause(req_prim);
+	const { where, has_geo_query, unsupported_geo } = set_where_clause(req_prim);
+	if (unsupported_geo) {
+		// 규격상 유효하나 미구현인 지오메트리 타입 — TS-0004:7.3.2.1의 "지원하지 않으면
+		// 거부한다"에 따라 조용히 무시하지 않는다.
+		const err = new Error('unsupported geometry type');
+		err.rsc_hint = 'NOT_IMPLEMENTED';
+		throw err;
+	}
 
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
 	const ofst = req_prim.fc.ofst || 0;
@@ -874,8 +881,11 @@ function set_where_clause(req_prim) {
 					postgis_geometry_type = 'Polygon';
 					break;
 				default:
+					// 스키마가 1..6만 통과시키므로 여기 오는 값은 규격상 유효하지만
+					// mobius4가 구현하지 않은 타입(4..6)이다. 조용히 무시하면 lvl에서
+					// 겪은 것과 같은 사고가 난다 — 호출부가 5001을 낼 수 있게 표시한다.
 					logger.warn({ geometry_type }, 'unsupported geometry type');
-					return where;
+					return { where, has_geo_query, unsupported_geo: true };
 			}
 
 			// create geometry object in GeoJSON format
@@ -897,8 +907,13 @@ function set_where_clause(req_prim) {
 					postgis_function = 'ST_Intersects';
 					break;
 				default:
+					// 이 함수의 계약은 { where, has_geo_query }다. where만 반환하면
+					// 호출부의 구조분해에서 where가 undefined가 되고, findAll({ where:
+					// undefined })는 조건 없이 테이블 전체를 돌려준다 — 대상 서브트리로
+					// 좁히는 sid 조건까지 함께 사라진다. gsf는 스키마가 1..3으로 막고
+					// 있어 도달 불가지만, 계약을 geometry_type 분기와 일관되게 유지한다.
 					logger.warn({ geo_function }, 'unsupported geo function');
-					return where;
+					return { where, has_geo_query, unsupported_geo: true };
 			}
 
 			// add PostGIS spatial query condition (parameterized to prevent SQL injection)

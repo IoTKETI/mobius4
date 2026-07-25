@@ -2,7 +2,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
-const { create, discover, urils, createRoot, uniqueRn } = require("./helpers/onem2m");
+const { create, discover, urils, createRoot, uniqueRn, CSE_BASE, remove } = require("./helpers/onem2m");
 
 let srv, root, c1, g1, cinRn, c1Ri;
 
@@ -101,4 +101,29 @@ test("lvl과 ty가 AND로 결합된다", async () => {
   // lvl이 버려지면 ty=3 전체(c1, g1)가 나와 실제로 어긋난다.
   const list = urils(await discover(srv.baseUrl, root.sid, { lvl: "1", ty: "3" }));
   assert.deepEqual(list, [`${root.sid}/${c1}`]);
+});
+
+test("지원하지 않는 gmty가 와도 대상 서브트리 밖 리소스가 새어나오지 않는다", async () => {
+    // set_where_clause가 지오 분기에서 계약을 어기고 where만 반환하면 호출부에서
+    // where가 undefined가 되어 sid 범위 제한까지 사라진다 → 테이블 전체 반환.
+    // 이 테스트는 '범위가 지켜지는가'만 본다(오류 코드는 아래 별도 테스트).
+    const outsider = uniqueRn("outsider");
+    await create(srv.baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn: outsider } });
+    try {
+        const res = await discover(srv.baseUrl, root.sid, { gmty: "9", gsf: "1", geom: "[1,2]" });
+        const leaked = urils(res).filter((u) => !u.startsWith(`${root.sid}/`) && u !== root.sid);
+        assert.deepEqual(leaked, [], `대상 밖 리소스가 반환됐다: ${JSON.stringify(leaked)}`);
+    } finally {
+        await remove(srv.baseUrl, `${CSE_BASE}/${outsider}`);
+    }
+});
+
+test("gmty 범위 밖은 4000, 규격상 유효하나 미구현이면 5001", async () => {
+    // TS-0004:6.3.4.2.74 — geometryType 유효값은 1..6. mobius4는 1..3만 구현한다.
+    // 범위 밖(9)은 잘못된 요청이고, 4(MultiPoint)는 유효하지만 미구현이다.
+    const bad = await discover(srv.baseUrl, root.sid, { gmty: "9", gsf: "1", geom: "[1,2]" });
+    assert.equal(bad.rsc, "4000", `범위 밖 gmty는 4000이어야 한다. 실제 ${bad.rsc}`);
+
+    const unimpl = await discover(srv.baseUrl, root.sid, { gmty: "4", gsf: "1", geom: "[1,2]" });
+    assert.equal(unimpl.rsc, "5001", `미구현 gmty는 5001이어야 한다. 실제 ${unimpl.rsc}`);
 });
