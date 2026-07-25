@@ -17,6 +17,16 @@ const Lookup = require('../models/lookup-model');
 // }
 
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
+    // net=4는 삭제된 리소스의 **부모** 아래 구독을 봐야 하므로, 아래의 자기 자신 기준
+    // 조회와 "구독 0건이면 조기 반환"보다 **먼저** 처리한다. CIN처럼 자기 아래에 구독이
+    // 없는 리소스가 삭제될 때 조기 반환에 걸려 net=4를 통째로 놓치는 것을 막는다.
+    //
+    // int_cr_req는 eviction 등 내부 요청 표시다. indirect deletion이 통지를 발생시키는지는
+    // 규격 확인 대기 중이므로(SQ-001, DEC-039) 지금은 발화시키지 않는다.
+    if (event_type === 'delete' && req_prim.int_cr_req !== true) {
+        await notify_parent_of_child_deletion(resp_prim.pc, req_prim.to_ty);
+    }
+
     const sub_res_pi = req_prim.ri;
 
     const sub_res = (await SUB.findAll({ where: { pi: sub_res_pi } }))
@@ -43,6 +53,37 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
         }
     }));
 
+    return true;
+}
+
+// net=4 (Delete of Direct Child Resource): 구독은 삭제된 자식이 아니라 그 **부모** 아래에 있다.
+// check_and_send_noti의 기본 조회(pi === req_prim.ri)는 삭제된 리소스 자신의 자식 구독만
+// 찾으므로 net=4를 영영 찾지 못한다. 그래서 부모 기준으로 따로 조회한다.
+//
+// 삭제된 리소스의 '표현'과 '타입'만 받는 형태로 분리해 둔 이유(DEC-039): eviction과
+// 캐스케이드 자손 삭제는 규격 확인(SQ-001) 전까지 범위 밖이지만, 확인되면 호출부만
+// 늘려 확장할 수 있게 하기 위함이다.
+async function notify_parent_of_child_deletion(deleted_pc, deleted_ty) {
+    const deleted_res = deleted_pc && Object.values(deleted_pc)[0];
+    const parent_ri = deleted_res && deleted_res.pi;
+    if (!parent_ri) return false;
+
+    const parent_subs = (await SUB.findAll({ where: { pi: parent_ri } }))
+        .map(sub => sub.toJSON());
+    if (parent_subs.length === 0) return false;
+
+    const targets = parent_subs.filter((sub) => {
+        // enc가 없으면 기본값이 Update_of_Resource이므로 net=4 대상이 아니다
+        // (TS-0004:7.5.1.2.2 Step 1.0).
+        if (!sub.enc || !Array.isArray(sub.enc.net) || !sub.enc.net.includes(4)) return false;
+        // chty가 있으면 삭제된 자식의 타입이 목록에 있을 때만 발화한다. 없으면 모든
+        // 자식 타입에 대해 발화한다 (같은 절 Step 1.0 — net=3과 동일 규칙).
+        return !sub.enc.chty || sub.enc.chty.includes(deleted_ty);
+    });
+    if (targets.length === 0) return false;
+
+    const ae_poa_map = await prefetch_ae_poa(targets);
+    await Promise.all(targets.map(sub => send_a_noti(sub, deleted_pc, 4, ae_poa_map)));
     return true;
 }
 

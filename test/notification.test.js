@@ -84,10 +84,9 @@ test("net=[3]만 설정된 구독은 CIN 삭제 시 통지하지 않는다 (회�
   assert.deepEqual(deleteNotis.map(netOf), [], "삭제 통지가 없어야 한다");
 });
 
-test("net=4 — 직속 자식을 명시적으로 DELETE하면 통지한다", { todo: true }, async () => {
-  // 미구현: check_and_send_noti가 구독을 pi === req_prim.ri로만 조회한다.
-  // net=4는 삭제되는 자식이 동작 대상이고 구독은 부모 아래 있어 조회 기준이 어긋난다.
-  // 2026-07-25 실측 — RSC 2002로 삭제는 되지만 통지 0건.
+test("net=4 — 직속 자식을 명시적으로 DELETE하면 통지한다", async () => {
+  // 구현 완료: check_and_send_noti 진입부에서 notify_parent_of_child_deletion으로
+  // 삭제된 자식의 부모 아래 구독을 별도 조회해 net=4를 발화한다.
   const { cntSid, subSid } = await cntWithSub({ net: [4] });
   const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: 4 } } });
   await remove(srv.baseUrl, `${cntSid}/${cin.body["m2m:cin"].rn}`);
@@ -96,10 +95,10 @@ test("net=4 — 직속 자식을 명시적으로 DELETE하면 통지한다", { t
 });
 
 test("net=4 — mni 초과 eviction에서도 통지한다", { todo: true }, async () => {
-  // 이것이 본 결함의 실피해다: mni를 넘기면 수집 데이터가 아무 통지 없이 삭제되어
-  // 응용 서비스가 유실을 감지할 수 없다. 2026-07-25 실측 — cni 4→3이 되지만 통지 0건.
-  // 참고로 eviction은 int_cr_req:true 내부 요청이지만, delete_a_res의 통지 호출은
-  // 그 플래그와 무관하게 실행된다 — 즉 통지 함수는 호출되고 구독을 못 찾을 뿐이다.
+  // 미구현이 아니라 규격 확인 대기(SQ-001): eviction(int_cr_req:true)이 indirect
+  // deletion으로서 통지를 발생시켜야 하는지 oneM2M 규격상 확정되지 않았다(DEC-039).
+  // check_and_send_noti는 int_cr_req !== true 조건으로 eviction을 의도적으로 제외하므로
+  // 지금은 통지 0건이 맞다 — 확인되면 조건을 조정하고 이 테스트를 뒤집는다.
   const { cntSid, subSid } = await cntWithSub({ net: [4] }, { mni: 3 });
   for (let i = 1; i <= 4; i++) {
     const r = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { seq: i } } });
