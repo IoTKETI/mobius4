@@ -70,8 +70,8 @@ const REMOVE_WAIT_INTERVAL_MS = 100;
 // 주의: discover(baseUrl, sid)를 sid 자신에 대고 쏘면 안 된다 — delete_a_res는 대상
 // 리소스 자신의 삭제(hostingCSE.js:559)와 자손 삭제(hostingCSE.js:592)를 서로 다른
 // fire-and-forget 태스크로 던지고, 자신의 삭제(단일 row)가 자손 삭제(N개 순차 처리)보다
-// 먼저 끝나는 경우가 실제로 있다. sid 자신의 row가 먼저 사라지면 reqPrim.js의 set_ri_sid
-// 조기 반환(hostingCSE.js:60-73, 'to'가 안 풀리면 discovery까지 가지도 않고 즉시 4004)
+// 먼저 끝나는 경우가 실제로 있다. sid 자신의 row가 먼저 사라지면 reqPrim.js의 조기 반환
+// (reqPrim.js의 4004 가드 — 'to'가 안 풀리면 discovery까지 가지도 않고 즉시 4004)
 // 때문에, 자손이 아직 남아있어도 폴링이 "끝났다"고 오판하게 된다(실측: 이 방식으로는
 // 3회 연속 실행 후 자손 컨테이너가 orphan으로 남았다). 그래서 항상 살아있는 CSE_BASE를
 // discovery 대상으로 삼고, 응답을 클라이언트 쪽에서 sid 접두어로 걸러 판단한다.
