@@ -1,4 +1,5 @@
-// mobius 4 version number: 0.1.0
+// mobius 4 — 버전의 정본은 package.json이다. 여기 하드코딩하면 갈라진다(오래도록
+// 0.1.0으로 남아 package.json의 4.x와 어긋나 있었다).
 
 // load environment variables from .env
 require('dotenv').config();
@@ -12,7 +13,8 @@ const config = require('config');
 let cleanupIntervalId;
 
 async function main() {
-    logger.info('mobius4 starting up');
+    const { version } = require('./package.json');
+    logger.info({ version }, 'mobius4 starting up');
 
     // db connect
     try {

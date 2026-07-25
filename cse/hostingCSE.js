@@ -54,6 +54,14 @@ const dsp = require("./resources/dsp"); // <datasetPolicy>
 const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
 
+// SQL LIKE에서 '%'와 '_'는 와일드카드다. 리소스 이름에는 밑줄이 흔하므로(예: 3부 표준의
+// '{modelId}_{version}_{instanceId}', 기본 ACP의 cb_default_acp) 이스케이프하지 않으면
+// 형제 리소스까지 매칭된다 — 디스커버리에서는 결과 오염, 삭제에서는 남의 리소스 삭제다.
+// PostgreSQL LIKE의 기본 이스케이프 문자가 백슬래시라 별도 ESCAPE 절이 필요 없다.
+function escape_like(s) {
+	return String(s).replace(/([\\%_])/g, '\\$1');
+}
+
 const virtual_res_names = ["fopt", "la", "ol"]; // fopt shall come first in the list
 
 // [C6] LRU cache for Lookup table: key = 'to' path, value = { ri, sid, to_ty }
@@ -596,7 +604,7 @@ async function delete_a_res(req_prim, resp_prim) {
 
 	// child_res_list is a list of resource where 'sid' in all records in 'lookup' table starts with 'sid' variable here
 	const child_res_list = await Lookup.findAll({
-		where: { sid: { [Op.like]: `${req_prim.sid}/%` } },
+		where: { sid: { [Op.like]: `${escape_like(req_prim.sid)}/%` } },
 		attributes: ['ri', 'ty'],
 	});
 
@@ -643,7 +651,14 @@ async function discovery_core(req_prim) {
 	let ids_list = []; // this is for discovery response
 	let ids_list_per_ty = {}; // this is for rcn = 4 or rcn = 8 response
 
-	const { where, has_geo_query } = set_where_clause(req_prim);
+	const { where, has_geo_query, unsupported_geo } = set_where_clause(req_prim);
+	if (unsupported_geo) {
+		// 규격상 유효하나 미구현인 지오메트리 타입 — TS-0004:7.3.2.1의 "지원하지 않으면
+		// 거부한다"에 따라 조용히 무시하지 않는다.
+		const err = new Error('unsupported geometry type');
+		err.rsc_hint = 'NOT_IMPLEMENTED';
+		throw err;
+	}
 
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
 	const ofst = req_prim.fc.ofst || 0;
@@ -768,7 +783,41 @@ function set_where_clause(req_prim) {
 	const where = {};
 
 	// basically, target resources are all children of the discovery target
-	where.sid = { [Op.like]: `${req_prim.sid}/%` };
+	where.sid = { [Op.like]: `${escape_like(req_prim.sid)}/%` };
+
+	// lvl(level)은 '대상으로부터의 상대 깊이' 상한이다(TS-0001:8.1.2 — 대상 자신이 0,
+	// 직속 자식이 1). 반면 sid.split("/").length로 셀 수 있는 절대 깊이는 Mobius=1부터
+	// 시작한다. 그래서 대상의 절대 깊이(target_lvl)를 더해 상한으로 환산한다 — 이 환산을
+	// 빠뜨리면 트리 최상위에서만 우연히 맞고 하위 노드에서 틀린다.
+	//
+	// lookup 테이블에는 이 절대 깊이가 lvl 컬럼으로 미리 채워져 있지만(Mobius=1),
+	// 디스커버리는 lookup이 아니라 타입별 테이블(cnt/cin/acp/...)을 각각 조회하며
+	// 그 테이블들에는 lvl 컬럼이 없다(실측 2026-07-26: `SELECT ... FROM cnt WHERE
+	// lvl <= 3` → "column lvl does not exist", where.lvl을 그대로 쓰면 타입별 질의가
+	// 전부 에러로 죽어 디스커버리가 빈 결과를 반환한다). 그래서 모든 타입 테이블에
+	// 공통으로 있는 sid 컬럼으로부터 SQL에서 직접 깊이(슬래시 개수+1)를 셈해 비교한다.
+	//
+	// 애플리케이션에서 사후 필터링하지 않고 WHERE에 넣는 이유(DEC-040): 디스커버리는
+	// lim(기본 200)으로 결과를 자르므로, 나중에 거르면 깊은 노드가 정원을 먼저 채워
+	// 정작 원하는 얕은 결과가 잘려나간다.
+	if (lvl !== undefined) {
+		const target_lvl = req_prim.sid.split("/").length;
+		const sid_depth = Sequelize.fn(
+			'array_length',
+			Sequelize.fn('string_to_array', Sequelize.col('sid'), '/'),
+			1
+		);
+		// 바인딩마다 lvl 타입 강제가 다르다 — HTTP는 parseInt를 거치지만 MQTT는 JSON.parse된
+		// fc를 그대로 넘기고 Joi도 coerced 값을 되쓰지 않는다. 문자열이면 target_lvl + lvl이
+		// 산술이 아니라 연결이 되어(예: 2 + "2" → "22") 상한이 사실상 무제한이 되므로 여기서
+		// 명시적으로 숫자로 강제한다.
+		const lvl_condition = Sequelize.where(sid_depth, { [Op.lte]: target_lvl + Number(lvl) });
+		if (where[Op.and] && Array.isArray(where[Op.and])) {
+			where[Op.and].push(lvl_condition);
+		} else {
+			where[Op.and] = [lvl_condition];
+		}
+	}
 
 	// bigger than or smaller than
 	if (cra || crb) {
@@ -840,8 +889,11 @@ function set_where_clause(req_prim) {
 					postgis_geometry_type = 'Polygon';
 					break;
 				default:
+					// 스키마가 1..6만 통과시키므로 여기 오는 값은 규격상 유효하지만
+					// mobius4가 구현하지 않은 타입(4..6)이다. 조용히 무시하면 lvl에서
+					// 겪은 것과 같은 사고가 난다 — 호출부가 5001을 낼 수 있게 표시한다.
 					logger.warn({ geometry_type }, 'unsupported geometry type');
-					return where;
+					return { where, has_geo_query, unsupported_geo: true };
 			}
 
 			// create geometry object in GeoJSON format
@@ -863,8 +915,13 @@ function set_where_clause(req_prim) {
 					postgis_function = 'ST_Intersects';
 					break;
 				default:
+					// 이 함수의 계약은 { where, has_geo_query }다. where만 반환하면
+					// 호출부의 구조분해에서 where가 undefined가 되고, findAll({ where:
+					// undefined })는 조건 없이 테이블 전체를 돌려준다 — 대상 서브트리로
+					// 좁히는 sid 조건까지 함께 사라진다. gsf는 스키마가 1..3으로 막고
+					// 있어 도달 불가지만, 계약을 geometry_type 분기와 일관되게 유지한다.
 					logger.warn({ geo_function }, 'unsupported geo function');
-					return where;
+					return { where, has_geo_query, unsupported_geo: true };
 			}
 
 			// add PostGIS spatial query condition (parameterized to prevent SQL injection)
