@@ -134,3 +134,18 @@ test("디스커버리 실패는 2000으로 둔갑하지 않는다", async () => 
     assert.notEqual(res.rsc, "2000", "실패가 성공으로 둔갑했다");
     assert.equal(res.rsc, "5001");
 });
+
+test("이름의 밑줄이 형제 리소스를 끌어들이지 않는다 (디스커버리)", async () => {
+    // LIKE에서 '_'는 임의의 한 문자다. 이스케이프하지 않으면 'a_c'로 조회할 때
+    // 'abc'의 자손까지 매칭된다. 3부 표준의 엔티티 인스턴스 컨테이너 이름이
+    // '{modelId}_{version}_{instanceId}' 형식이라 실전에서 밑줄이 흔하다.
+    const tag = uniqueRn("t").slice(-6);          // 두 이름에 공통으로 붙일 꼬리
+    const under = `a_c-${tag}`;                    // 밑줄 포함
+    const other = `abc-${tag}`;                    // 같은 길이, 밑줄 자리에 'b'
+    await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: under } });
+    await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: other } });
+    await create(srv.baseUrl, `${root.sid}/${other}`, 4, { "m2m:cin": { con: { v: "형제것" } } });
+
+    const list = urils(await discover(srv.baseUrl, `${root.sid}/${under}`));
+    assert.deepEqual(list, [], `밑줄 이름 조회에 형제 자손이 섞였다: ${JSON.stringify(list)}`);
+});

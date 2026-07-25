@@ -90,3 +90,22 @@ test("fanout 응답은 m2m:agr 봉투로 감싸인다", async () => {
     await waitForSubtreeGone(srv.baseUrl, gsid);
   }
 });
+
+test("이름의 밑줄이 형제 리소스를 끌어들이지 않는다 (삭제)", async () => {
+  // delete_a_res의 자손 수집 LIKE 조건도 디스커버리와 같은 이스케이프 결함을 공유한다.
+  // 'a_c-…'를 지울 때 '_' 자리가 어떤 문자든 매칭돼 'abc-…'의 자손까지 함께 지워지면
+  // 남의 리소스가 삭제되는 사고다. 같은 이름 규칙(밑줄 위치가 형제와 정확히 겹치게)으로
+  // 재현한다 — uniqueRn의 난수 접미어에 의존하면 우연히 안 겹쳐 결함을 놓친다.
+  const tag = uniqueRn("t").slice(-6);
+  const under = `a_c-${tag}`;
+  const other = `abc-${tag}`;
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: under } });
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: other } });
+  const cin = await create(srv.baseUrl, `${root.sid}/${other}`, 4, { "m2m:cin": { con: { v: "형제것" } } });
+
+  const d = await remove(srv.baseUrl, `${root.sid}/${under}`);
+  assert.equal(d.rsc, "2002");
+
+  const stillThere = await retrieve(srv.baseUrl, `${root.sid}/${other}/${cin.body["m2m:cin"].rn}`);
+  assert.equal(stillThere.rsc, "2000", "형제 자손이 함께 삭제됐다");
+});
