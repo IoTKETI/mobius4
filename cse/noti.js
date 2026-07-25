@@ -17,20 +17,30 @@ const Lookup = require('../models/lookup-model');
 // }
 
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
+    const sub_res_pi = req_prim.ri;
+
+    // 이 SELECT를 먼저 '발사'해 둔다(await는 아래에서). hostingCSE.delete_a_res가 통지와
+    // 캐스케이드 삭제를 동시에 굴리므로, 자기 구독 조회가 net=4 조회 뒤로 밀려 늦게 나가면
+    // delete_resources의 SUB.destroy가 먼저 도착해 이 리소스의 net=2 통지가 조용히
+    // 사라진다. net=4 await 이전에 같은 tick에서 SELECT를 던져 그 경합을 없앤다.
+    const sub_res_p = SUB.findAll({ where: { pi: sub_res_pi } });
+
     // net=4는 삭제된 리소스의 **부모** 아래 구독을 봐야 하므로, 아래의 자기 자신 기준
     // 조회와 "구독 0건이면 조기 반환"보다 **먼저** 처리한다. CIN처럼 자기 아래에 구독이
     // 없는 리소스가 삭제될 때 조기 반환에 걸려 net=4를 통째로 놓치는 것을 막는다.
     //
     // int_cr_req는 eviction 등 내부 요청 표시다. indirect deletion이 통지를 발생시키는지는
     // 규격 확인 대기 중이므로(SQ-001, DEC-039) 지금은 발화시키지 않는다.
+    //
+    // .catch로 실패를 격리한다: 부모의 net=4 구독(예: 잘못된 nu)이 던지면, 그 예외가
+    // 이 함수 밖으로 전파되어 아래 net=1/2/3 처리 전체를 막아버린다 — 삭제된 리소스 '자신'의
+    // 통지가 부모 쪽 고장 때문에 사라지는 것은 이 함수의 책임 범위를 벗어난 부수피해다.
     if (event_type === 'delete' && req_prim.int_cr_req !== true) {
-        await notify_parent_of_child_deletion(resp_prim.pc, req_prim.to_ty);
+        await notify_parent_of_child_deletion(resp_prim.pc, req_prim.to_ty)
+            .catch((err) => logger.warn({ err }, 'net=4 parent notification failed'));
     }
 
-    const sub_res_pi = req_prim.ri;
-
-    const sub_res = (await SUB.findAll({ where: { pi: sub_res_pi } }))
-        .map(sub => sub.toJSON());
+    const sub_res = (await sub_res_p).map(sub => sub.toJSON());
 
     if (sub_res.length === 0) return;
 

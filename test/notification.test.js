@@ -168,6 +168,26 @@ test("캐스케이드 자손 삭제는 통지를 발생시키지 않는다 (indi
   assert.deepEqual(notis.map(netOf), [], "캐스케이드 자손 삭제는 통지하지 않아야 한다");
 });
 
+test("net=4 — enc.chty가 일치하는 자식 타입(컨테이너) 삭제는 통지한다", async () => {
+  // 회귀 방지(Finding 3): "net=4 — enc.chty가 자식 타입을 걸러낸다" 테스트는 chty에
+  // 없는 타입(CIN)만 삭제해봤기 때문에, "chty가 있으면 무조건 발화하지 않는다"는
+  // 틀린 구현도 그 테스트는 통과시킨다. 여기서는 chty에 실제로 포함된 타입(컨테이너,
+  // ty=3)의 자식을 삭제해 "chty와 일치하면 발화한다" 쪽을 고정한다.
+  const { cntSid, subSid } = await cntWithSub({ net: [4], chty: [3] });
+  const child = uniqueRn("child");
+  await create(srv.baseUrl, cntSid, 3, { "m2m:cnt": { rn: child } });
+  const del = await remove(srv.baseUrl, `${cntSid}/${child}`);
+  assert.equal(del.rsc, "2002", "삭제가 성공해야 이 테스트가 의미를 갖는다");
+
+  const got = await sink.waitFor((i) => netOf(i) === 4 && i.body["m2m:sgn"].sur === subSid);
+  const mine = sink.received.filter((i) => i.body?.["m2m:sgn"]?.sur === subSid);
+  assert.equal(mine.length, 1, `이 구독의 net=4 통지는 1건이어야 한다. 실제 ${mine.length}`);
+  assert.ok(
+    got.body["m2m:sgn"].nev.rep["m2m:cnt"],
+    `삭제된 컨테이너의 표현(m2m:cnt)이 담겨야 한다: ${JSON.stringify(got.body["m2m:sgn"].nev.rep)}`
+  );
+});
+
 test("net=4 — mni 초과 eviction에서도 통지한다", { todo: true }, async () => {
   // 미구현이 아니라 규격 확인 대기(SQ-001): eviction(int_cr_req:true)이 indirect
   // deletion으로서 통지를 발생시켜야 하는지 oneM2M 규격상 확정되지 않았다(DEC-039).
