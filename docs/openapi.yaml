@@ -3,45 +3,51 @@ info:
   title: mobius4 oneM2M CSE API
   version: 4.4.0
   description: |-
-    이 문서는 mobius4 oneM2M CSE의 실제 동작을 라이브 프로브로 관찰한 결과(features/mobius4-capabilities.yaml)에
-    근거해 생성되었다. 여기 실린 오퍼레이션은 전부 실측으로 지원이 확인된 것만이며, 미지원이거나
-    결함(defect)이 관찰된 조합은 싣지 않는다.
+    This document was generated from an observation of mobius4 oneM2M CSE's actual behavior
+    via live probing (features/mobius4-capabilities.yaml). Every operation listed here has been
+    empirically confirmed as supported; combinations that are unsupported, or for which a defect
+    was observed, are not included.
 
-    **경로는 합성형(synthesized)이다.** mobius4의 실제 HTTP 라우트는 `POST|GET|PUT|DELETE /*`
-    네 개의 와일드카드뿐이고, 오퍼레이션은 `Content-Type`의 `ty` 파라미터와 쿼리 파라미터로
-    구분된다. 리소스 경로 자체도 사용자가 만드는 동적 트리라 고정된 구조가 없다. 이 문서가 보여주는
-    `/{parentPath}`, `/{resourcePath}` 같은 경로는 코딩 에이전트가 읽기 쉽도록 지어낸 것으로,
-    **mobius4의 실제 라우트와 1:1로 대응하지 않는다.** 이 사실을 감추면 나중에 실제 서버를 두고
-    디버깅하는 사람을 오도하게 된다.
+    **The paths are synthesized.** mobius4's actual HTTP routes are only the four wildcards
+    `POST|GET|PUT|DELETE /*`; the operation is distinguished by the `ty` parameter of the
+    `Content-Type` header and by query parameters. The resource path itself is a dynamic tree the
+    user builds, with no fixed structure. Paths shown in this document such as `/{parentPath}` and
+    `/{resourcePath}` were invented by the coding agent for readability, and **do not correspond
+    1:1 with mobius4's actual routes.** Hiding this fact would mislead anyone who later debugs
+    against the real server.
 paths:
   /{parentPath}:
     post:
       operationId: createResource
-      summary: 자식 리소스 생성 (CREATE)
-      description: 부모 리소스 경로 아래 새 리소스를 생성한다. 생성할 리소스 타입은 Content-Type의 ty 파라미터로 지정한다(TS-0009:6.4.3).
+      summary: Create a child resource (CREATE)
+      description: >-
+        Creates a new resource under the parent resource path. The resource type to create is
+        specified via the ty parameter of the Content-Type header (TS-0009:6.4.3).
       parameters:
         - name: parentPath
           in: path
           required: true
-          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          description: >-
+            Synthesized path segment — mobius4's actual routes (POST|GET|PUT|DELETE /*) have no
+            fixed path under this name.
           schema:
             type: string
         - name: X-M2M-Origin
           in: header
           required: true
-          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          description: Originator identifier of the request (TS-0009:6.4.7)
           schema:
             type: string
         - name: X-M2M-RI
           in: header
           required: true
-          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          description: Request Identifier — used to correlate a request with its response
           schema:
             type: string
         - name: X-M2M-RVI
           in: header
           required: true
-          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          description: Release Version Indicator (TS-0009:6.4.22)
           schema:
             type: string
       requestBody:
@@ -49,28 +55,30 @@ paths:
         content:
           application/vnd.onem2m-res+json;ty=1:
             schema:
-              $ref: '#/components/schemas/m2m.acp.create'
+              $ref: '#/components/schemas/m2m.acp.create.envelope'
           application/vnd.onem2m-res+json;ty=2:
             schema:
-              $ref: '#/components/schemas/m2m.ae.create'
+              $ref: '#/components/schemas/m2m.ae.create.envelope'
           application/vnd.onem2m-res+json;ty=3:
             schema:
-              $ref: '#/components/schemas/m2m.cnt.create'
+              $ref: '#/components/schemas/m2m.cnt.create.envelope'
           application/vnd.onem2m-res+json;ty=4:
             schema:
-              $ref: '#/components/schemas/m2m.cin.create'
+              $ref: '#/components/schemas/m2m.cin.create.envelope'
           application/vnd.onem2m-res+json;ty=9:
             schema:
-              $ref: '#/components/schemas/m2m.grp.create'
+              $ref: '#/components/schemas/m2m.grp.create.envelope'
           application/vnd.onem2m-res+json;ty=23:
             schema:
-              $ref: '#/components/schemas/m2m.sub.create'
+              $ref: '#/components/schemas/m2m.sub.create.envelope'
       responses:
         '201':
-          description: 생성됨
+          description: Created
           headers:
             X-M2M-RSC:
-              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              description: >-
+                Observed oneM2M Response Status Code (TS-0004) — examples are actual values from
+                live probing.
               schema:
                 type: integer
               examples:
@@ -90,47 +98,51 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: '#/components/schemas/m2m.acp'
-                  - $ref: '#/components/schemas/m2m.ae'
-                  - $ref: '#/components/schemas/m2m.cnt'
-                  - $ref: '#/components/schemas/m2m.cin'
-                  - $ref: '#/components/schemas/m2m.grp'
-                  - $ref: '#/components/schemas/m2m.sub'
+                  - $ref: '#/components/schemas/m2m.acp.envelope'
+                  - $ref: '#/components/schemas/m2m.ae.envelope'
+                  - $ref: '#/components/schemas/m2m.cnt.envelope'
+                  - $ref: '#/components/schemas/m2m.cin.envelope'
+                  - $ref: '#/components/schemas/m2m.grp.envelope'
+                  - $ref: '#/components/schemas/m2m.sub.envelope'
   /{resourcePath}:
     get:
       operationId: retrieveResource
-      summary: 리소스 조회 (RETRIEVE)
+      summary: Retrieve a resource (RETRIEVE)
       parameters:
         - name: resourcePath
           in: path
           required: true
-          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          description: >-
+            Synthesized path segment — mobius4's actual routes (POST|GET|PUT|DELETE /*) have no
+            fixed path under this name.
           schema:
             type: string
         - name: X-M2M-Origin
           in: header
           required: true
-          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          description: Originator identifier of the request (TS-0009:6.4.7)
           schema:
             type: string
         - name: X-M2M-RI
           in: header
           required: true
-          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          description: Request Identifier — used to correlate a request with its response
           schema:
             type: string
         - name: X-M2M-RVI
           in: header
           required: true
-          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          description: Release Version Indicator (TS-0009:6.4.22)
           schema:
             type: string
       responses:
         '200':
-          description: 조회 성공
+          description: Retrieved successfully
           headers:
             X-M2M-RSC:
-              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              description: >-
+                Observed oneM2M Response Status Code (TS-0004) — examples are actual values from
+                live probing.
               schema:
                 type: integer
               examples:
@@ -152,40 +164,44 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: '#/components/schemas/m2m.acp'
-                  - $ref: '#/components/schemas/m2m.ae'
-                  - $ref: '#/components/schemas/m2m.cnt'
-                  - $ref: '#/components/schemas/m2m.cin'
-                  - $ref: '#/components/schemas/m2m.cb'
-                  - $ref: '#/components/schemas/m2m.grp'
-                  - $ref: '#/components/schemas/m2m.sub'
+                  - $ref: '#/components/schemas/m2m.acp.envelope'
+                  - $ref: '#/components/schemas/m2m.ae.envelope'
+                  - $ref: '#/components/schemas/m2m.cnt.envelope'
+                  - $ref: '#/components/schemas/m2m.cin.envelope'
+                  - $ref: '#/components/schemas/m2m.cb.envelope'
+                  - $ref: '#/components/schemas/m2m.grp.envelope'
+                  - $ref: '#/components/schemas/m2m.sub.envelope'
     put:
       operationId: updateResource
-      summary: 리소스 갱신 (UPDATE)
-      description: TS-0009:6.4.3 — Resource Type(ty) 파라미터는 CREATE 요청에만 있다. UPDATE에는 ty가 없다.
+      summary: Update a resource (UPDATE)
+      description: >-
+        TS-0009:6.4.3 — the Resource Type (ty) parameter exists only on CREATE requests. UPDATE has
+        no ty.
       parameters:
         - name: resourcePath
           in: path
           required: true
-          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          description: >-
+            Synthesized path segment — mobius4's actual routes (POST|GET|PUT|DELETE /*) have no
+            fixed path under this name.
           schema:
             type: string
         - name: X-M2M-Origin
           in: header
           required: true
-          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          description: Originator identifier of the request (TS-0009:6.4.7)
           schema:
             type: string
         - name: X-M2M-RI
           in: header
           required: true
-          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          description: Request Identifier — used to correlate a request with its response
           schema:
             type: string
         - name: X-M2M-RVI
           in: header
           required: true
-          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          description: Release Version Indicator (TS-0009:6.4.22)
           schema:
             type: string
       requestBody:
@@ -194,17 +210,19 @@ paths:
           application/vnd.onem2m-res+json:
             schema:
               oneOf:
-                - $ref: '#/components/schemas/m2m.acp'
-                - $ref: '#/components/schemas/m2m.ae'
-                - $ref: '#/components/schemas/m2m.cnt'
-                - $ref: '#/components/schemas/m2m.grp'
-                - $ref: '#/components/schemas/m2m.sub'
+                - $ref: '#/components/schemas/m2m.acp.envelope'
+                - $ref: '#/components/schemas/m2m.ae.envelope'
+                - $ref: '#/components/schemas/m2m.cnt.envelope'
+                - $ref: '#/components/schemas/m2m.grp.envelope'
+                - $ref: '#/components/schemas/m2m.sub.envelope'
       responses:
         '200':
-          description: 갱신 성공
+          description: Updated successfully
           headers:
             X-M2M-RSC:
-              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              description: >-
+                Observed oneM2M Response Status Code (TS-0004) — examples are actual values from
+                live probing.
               schema:
                 type: integer
               examples:
@@ -222,45 +240,49 @@ paths:
             application/json:
               schema:
                 oneOf:
-                  - $ref: '#/components/schemas/m2m.acp'
-                  - $ref: '#/components/schemas/m2m.ae'
-                  - $ref: '#/components/schemas/m2m.cnt'
-                  - $ref: '#/components/schemas/m2m.grp'
-                  - $ref: '#/components/schemas/m2m.sub'
+                  - $ref: '#/components/schemas/m2m.acp.envelope'
+                  - $ref: '#/components/schemas/m2m.ae.envelope'
+                  - $ref: '#/components/schemas/m2m.cnt.envelope'
+                  - $ref: '#/components/schemas/m2m.grp.envelope'
+                  - $ref: '#/components/schemas/m2m.sub.envelope'
     delete:
       operationId: deleteResource
-      summary: 리소스 삭제 (DELETE)
+      summary: Delete a resource (DELETE)
       parameters:
         - name: resourcePath
           in: path
           required: true
-          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          description: >-
+            Synthesized path segment — mobius4's actual routes (POST|GET|PUT|DELETE /*) have no
+            fixed path under this name.
           schema:
             type: string
         - name: X-M2M-Origin
           in: header
           required: true
-          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          description: Originator identifier of the request (TS-0009:6.4.7)
           schema:
             type: string
         - name: X-M2M-RI
           in: header
           required: true
-          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          description: Request Identifier — used to correlate a request with its response
           schema:
             type: string
         - name: X-M2M-RVI
           in: header
           required: true
-          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          description: Release Version Indicator (TS-0009:6.4.22)
           schema:
             type: string
       responses:
         '200':
-          description: 삭제 성공
+          description: Deleted successfully
           headers:
             X-M2M-RSC:
-              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              description: >-
+                Observed oneM2M Response Status Code (TS-0004) — examples are actual values from
+                live probing.
               schema:
                 type: integer
               examples:
@@ -281,7 +303,7 @@ components:
     m2m.acp:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -384,59 +406,59 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        privileges:
+        pv:
           type: object
           properties:
-            accessControlRule:
+            acr:
               type: array
               items:
                 type: object
                 properties:
-                  accessControlOriginators:
+                  acor:
                     type: array
                     items:
                       type: string
                       format: uri
                     minItems: 1
-                  accessControlOperations:
+                  acop:
                     type: integer
                     enum:
                       - 1
@@ -502,18 +524,18 @@ components:
                       - 61
                       - 62
                       - 63
-                  accessControlContexts:
+                  acco:
                     type: array
                     items:
                       type: object
                       properties:
-                        accessControlWindow:
+                        actw:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
-                        accessControlIpAddresses:
+                        acip:
                           type: object
                           properties:
                             ipv4Addresses:
@@ -522,34 +544,36 @@ components:
                                 type: string
                                 pattern: undefined
                               minItems: 1
+                              x-unresolved-long-name: true
                             ipv6Addresses:
                               type: array
                               items:
                                 type: string
                                 pattern: undefined
                               minItems: 1
-                        accessControlLocationRegion:
+                              x-unresolved-long-name: true
+                        aclr:
                           type: object
                           properties:
-                            countryCode:
+                            accc:
                               type: array
                               items:
                                 type: string
                                 pattern: '[A-Z]{2}'
                               minItems: 1
-                            circRegion:
+                            accr:
                               type: array
                               items:
                                 type: number
-                        accessControlUserIDs:
+                        acui:
                           type: array
                           items:
                             type: string
                           minItems: 1
-                        accessControlEvalCriteria:
+                        acec:
                           type: object
                           properties:
-                            operator:
+                            optr:
                               type: integer
                               enum:
                                 - 1
@@ -558,23 +582,23 @@ components:
                                 - 4
                                 - 5
                                 - 6
-                            subject:
+                            sbjt:
                               type: string
-                            threshold: {}
+                            thld: {}
                           required:
-                            - operator
-                            - subject
-                            - threshold
-                        accessControlLimit:
+                            - optr
+                            - sbjt
+                            - thld
+                        acl:
                           type: integer
-                  accessControlAuthenticationFlag:
+                  acaf:
                     type: boolean
-                  accessControlObjectDetails:
+                  acod:
                     type: array
                     items:
                       type: object
                       properties:
-                        resourceType:
+                        ty:
                           type: integer
                           enum:
                             - 1
@@ -680,10 +704,10 @@ components:
                         specializationID:
                           type: object
                           properties:
-                            containerDefinition:
+                            cnd:
                               type: string
                               format: uri
-                            mgmtDefinition:
+                            mgd:
                               type: integer
                               enum:
                                 - 0
@@ -715,7 +739,8 @@ components:
                                 - 1026
                                 - 1027
                                 - 1028
-                        childResourceType:
+                          x-unresolved-long-name: true
+                        chty:
                           type: array
                           items:
                             type: integer
@@ -822,30 +847,30 @@ components:
                               - 10068
                           minItems: 1
                       required:
-                        - childResourceType
-                  accessControlAttributes:
+                        - chty
+                  aca:
                     type: array
                     items:
                       type: string
                     minItems: 1
                 required:
-                  - accessControlOriginators
-                  - accessControlOperations
-        selfPrivileges:
+                  - acor
+                  - acop
+        pvs:
           type: object
           properties:
-            accessControlRule:
+            acr:
               type: array
               items:
                 type: object
                 properties:
-                  accessControlOriginators:
+                  acor:
                     type: array
                     items:
                       type: string
                       format: uri
                     minItems: 1
-                  accessControlOperations:
+                  acop:
                     type: integer
                     enum:
                       - 1
@@ -911,18 +936,18 @@ components:
                       - 61
                       - 62
                       - 63
-                  accessControlContexts:
+                  acco:
                     type: array
                     items:
                       type: object
                       properties:
-                        accessControlWindow:
+                        actw:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
-                        accessControlIpAddresses:
+                        acip:
                           type: object
                           properties:
                             ipv4Addresses:
@@ -931,34 +956,36 @@ components:
                                 type: string
                                 pattern: undefined
                               minItems: 1
+                              x-unresolved-long-name: true
                             ipv6Addresses:
                               type: array
                               items:
                                 type: string
                                 pattern: undefined
                               minItems: 1
-                        accessControlLocationRegion:
+                              x-unresolved-long-name: true
+                        aclr:
                           type: object
                           properties:
-                            countryCode:
+                            accc:
                               type: array
                               items:
                                 type: string
                                 pattern: '[A-Z]{2}'
                               minItems: 1
-                            circRegion:
+                            accr:
                               type: array
                               items:
                                 type: number
-                        accessControlUserIDs:
+                        acui:
                           type: array
                           items:
                             type: string
                           minItems: 1
-                        accessControlEvalCriteria:
+                        acec:
                           type: object
                           properties:
-                            operator:
+                            optr:
                               type: integer
                               enum:
                                 - 1
@@ -967,23 +994,23 @@ components:
                                 - 4
                                 - 5
                                 - 6
-                            subject:
+                            sbjt:
                               type: string
-                            threshold: {}
+                            thld: {}
                           required:
-                            - operator
-                            - subject
-                            - threshold
-                        accessControlLimit:
+                            - optr
+                            - sbjt
+                            - thld
+                        acl:
                           type: integer
-                  accessControlAuthenticationFlag:
+                  acaf:
                     type: boolean
-                  accessControlObjectDetails:
+                  acod:
                     type: array
                     items:
                       type: object
                       properties:
-                        resourceType:
+                        ty:
                           type: integer
                           enum:
                             - 1
@@ -1089,10 +1116,10 @@ components:
                         specializationID:
                           type: object
                           properties:
-                            containerDefinition:
+                            cnd:
                               type: string
                               format: uri
-                            mgmtDefinition:
+                            mgd:
                               type: integer
                               enum:
                                 - 0
@@ -1124,7 +1151,8 @@ components:
                                 - 1026
                                 - 1027
                                 - 1028
-                        childResourceType:
+                          x-unresolved-long-name: true
+                        chty:
                           type: array
                           items:
                             type: integer
@@ -1231,34 +1259,34 @@ components:
                               - 10068
                           minItems: 1
                       required:
-                        - childResourceType
-                  accessControlAttributes:
+                        - chty
+                  aca:
                     type: array
                     items:
                       type: string
                     minItems: 1
                 required:
-                  - accessControlOriginators
-                  - accessControlOperations
-        authorizationDecisionResourceIDs:
+                  - acor
+                  - acop
+        adri:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        authorizationPolicyResourceIDs:
+        apri:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        authorizationInformationResourceIDs:
+        airi:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -1266,10 +1294,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -1375,27 +1403,35 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - privileges
-        - selfPrivileges
-        - authorizationDecisionResourceIDs
-        - authorizationPolicyResourceIDs
-        - authorizationInformationResourceIDs
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - pv
+        - pvs
+        - adri
+        - apri
+        - airi
+    m2m.acp.envelope:
+      type: object
+      required:
+        - m2m:acp
+      properties:
+        m2m:acp:
+          $ref: '#/components/schemas/m2m.acp'
     m2m.acp.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -1498,59 +1534,59 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        privileges:
+        pv:
           type: object
           properties:
-            accessControlRule:
+            acr:
               type: array
               items:
                 type: object
                 properties:
-                  accessControlOriginators:
+                  acor:
                     type: array
                     items:
                       type: string
                       format: uri
                     minItems: 1
-                  accessControlOperations:
+                  acop:
                     type: integer
                     enum:
                       - 1
@@ -1616,18 +1652,18 @@ components:
                       - 61
                       - 62
                       - 63
-                  accessControlContexts:
+                  acco:
                     type: array
                     items:
                       type: object
                       properties:
-                        accessControlWindow:
+                        actw:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
-                        accessControlIpAddresses:
+                        acip:
                           type: object
                           properties:
                             ipv4Addresses:
@@ -1636,34 +1672,36 @@ components:
                                 type: string
                                 pattern: undefined
                               minItems: 1
+                              x-unresolved-long-name: true
                             ipv6Addresses:
                               type: array
                               items:
                                 type: string
                                 pattern: undefined
                               minItems: 1
-                        accessControlLocationRegion:
+                              x-unresolved-long-name: true
+                        aclr:
                           type: object
                           properties:
-                            countryCode:
+                            accc:
                               type: array
                               items:
                                 type: string
                                 pattern: '[A-Z]{2}'
                               minItems: 1
-                            circRegion:
+                            accr:
                               type: array
                               items:
                                 type: number
-                        accessControlUserIDs:
+                        acui:
                           type: array
                           items:
                             type: string
                           minItems: 1
-                        accessControlEvalCriteria:
+                        acec:
                           type: object
                           properties:
-                            operator:
+                            optr:
                               type: integer
                               enum:
                                 - 1
@@ -1672,23 +1710,23 @@ components:
                                 - 4
                                 - 5
                                 - 6
-                            subject:
+                            sbjt:
                               type: string
-                            threshold: {}
+                            thld: {}
                           required:
-                            - operator
-                            - subject
-                            - threshold
-                        accessControlLimit:
+                            - optr
+                            - sbjt
+                            - thld
+                        acl:
                           type: integer
-                  accessControlAuthenticationFlag:
+                  acaf:
                     type: boolean
-                  accessControlObjectDetails:
+                  acod:
                     type: array
                     items:
                       type: object
                       properties:
-                        resourceType:
+                        ty:
                           type: integer
                           enum:
                             - 1
@@ -1794,10 +1832,10 @@ components:
                         specializationID:
                           type: object
                           properties:
-                            containerDefinition:
+                            cnd:
                               type: string
                               format: uri
-                            mgmtDefinition:
+                            mgd:
                               type: integer
                               enum:
                                 - 0
@@ -1829,7 +1867,8 @@ components:
                                 - 1026
                                 - 1027
                                 - 1028
-                        childResourceType:
+                          x-unresolved-long-name: true
+                        chty:
                           type: array
                           items:
                             type: integer
@@ -1936,30 +1975,30 @@ components:
                               - 10068
                           minItems: 1
                       required:
-                        - childResourceType
-                  accessControlAttributes:
+                        - chty
+                  aca:
                     type: array
                     items:
                       type: string
                     minItems: 1
                 required:
-                  - accessControlOriginators
-                  - accessControlOperations
-        selfPrivileges:
+                  - acor
+                  - acop
+        pvs:
           type: object
           properties:
-            accessControlRule:
+            acr:
               type: array
               items:
                 type: object
                 properties:
-                  accessControlOriginators:
+                  acor:
                     type: array
                     items:
                       type: string
                       format: uri
                     minItems: 1
-                  accessControlOperations:
+                  acop:
                     type: integer
                     enum:
                       - 1
@@ -2025,18 +2064,18 @@ components:
                       - 61
                       - 62
                       - 63
-                  accessControlContexts:
+                  acco:
                     type: array
                     items:
                       type: object
                       properties:
-                        accessControlWindow:
+                        actw:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
-                        accessControlIpAddresses:
+                        acip:
                           type: object
                           properties:
                             ipv4Addresses:
@@ -2045,34 +2084,36 @@ components:
                                 type: string
                                 pattern: undefined
                               minItems: 1
+                              x-unresolved-long-name: true
                             ipv6Addresses:
                               type: array
                               items:
                                 type: string
                                 pattern: undefined
                               minItems: 1
-                        accessControlLocationRegion:
+                              x-unresolved-long-name: true
+                        aclr:
                           type: object
                           properties:
-                            countryCode:
+                            accc:
                               type: array
                               items:
                                 type: string
                                 pattern: '[A-Z]{2}'
                               minItems: 1
-                            circRegion:
+                            accr:
                               type: array
                               items:
                                 type: number
-                        accessControlUserIDs:
+                        acui:
                           type: array
                           items:
                             type: string
                           minItems: 1
-                        accessControlEvalCriteria:
+                        acec:
                           type: object
                           properties:
-                            operator:
+                            optr:
                               type: integer
                               enum:
                                 - 1
@@ -2081,23 +2122,23 @@ components:
                                 - 4
                                 - 5
                                 - 6
-                            subject:
+                            sbjt:
                               type: string
-                            threshold: {}
+                            thld: {}
                           required:
-                            - operator
-                            - subject
-                            - threshold
-                        accessControlLimit:
+                            - optr
+                            - sbjt
+                            - thld
+                        acl:
                           type: integer
-                  accessControlAuthenticationFlag:
+                  acaf:
                     type: boolean
-                  accessControlObjectDetails:
+                  acod:
                     type: array
                     items:
                       type: object
                       properties:
-                        resourceType:
+                        ty:
                           type: integer
                           enum:
                             - 1
@@ -2203,10 +2244,10 @@ components:
                         specializationID:
                           type: object
                           properties:
-                            containerDefinition:
+                            cnd:
                               type: string
                               format: uri
-                            mgmtDefinition:
+                            mgd:
                               type: integer
                               enum:
                                 - 0
@@ -2238,7 +2279,8 @@ components:
                                 - 1026
                                 - 1027
                                 - 1028
-                        childResourceType:
+                          x-unresolved-long-name: true
+                        chty:
                           type: array
                           items:
                             type: integer
@@ -2345,50 +2387,57 @@ components:
                               - 10068
                           minItems: 1
                       required:
-                        - childResourceType
-                  accessControlAttributes:
+                        - chty
+                  aca:
                     type: array
                     items:
                       type: string
                     minItems: 1
                 required:
-                  - accessControlOriginators
-                  - accessControlOperations
-        authorizationDecisionResourceIDs:
+                  - acor
+                  - acop
+        adri:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        authorizationPolicyResourceIDs:
+        apri:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        authorizationInformationResourceIDs:
+        airi:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - privileges
-        - selfPrivileges
-        - authorizationDecisionResourceIDs
-        - authorizationPolicyResourceIDs
-        - authorizationInformationResourceIDs
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - pv
+        - pvs
+        - adri
+        - apri
+        - airi
+    m2m.acp.create.envelope:
+      type: object
+      required:
+        - m2m:acp
+      properties:
+        m2m:acp:
+          $ref: '#/components/schemas/m2m.acp.create'
     m2m.ae:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -2491,61 +2540,61 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        location:
+        loc:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -2554,35 +2603,35 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        appName:
+            - typ
+            - crd
+        apn:
           type: string
-        App-ID:
+        api:
           type: string
-        AE-ID:
+        aei:
           type: string
-        pointOfAccess:
+        poa:
           type: array
           items:
             type: string
             format: uri
             pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
           minItems: 1
-        ontologyRef:
+        or:
           type: string
           format: uri
-        nodeLink:
+        nl:
           type: string
           format: uri
-        requestReachability:
+        rr:
           type: boolean
-        contentSerialization:
+        csz:
           type: array
           items:
             type: string
@@ -2592,7 +2641,7 @@ components:
               - json
               - cbor
           minItems: 1
-        e2eSecInfo:
+        esi:
           type: object
           properties:
             supportedE2ESecFeatures:
@@ -2622,33 +2671,34 @@ components:
                   - 44
                   - 45
               minItems: 1
-            certificates:
+              x-unresolved-long-name: true
+            escert:
               type: array
               items:
                 type: string
                 format: byte
               minItems: 1
-            sharedReceiverESPrimRandObject:
+            esro:
               type: object
               properties:
-                esprimRandID:
+                esri:
                   type: string
-                esprimRandValue:
+                esrv:
                   type: string
-                esprimRandExpiry:
+                esrx:
                   anyOf:
                     - type: string
                       pattern: >-
                         \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
                     - type: integer
-                esprimKeyGenAlgIDs:
+                esks:
                   type: array
                   items:
                     type: integer
                     enum:
                       - 1
                   minItems: 1
-                esprimProtocolAndAlgIDs:
+                espa:
                   type: array
                   items:
                     type: integer
@@ -2658,40 +2708,40 @@ components:
                       - 12
                   minItems: 1
               required:
-                - esprimRandID
-                - esprimRandValue
-                - esprimRandExpiry
-                - esprimKeyGenAlgIDs
-                - esprimProtocolAndAlgIDs
+                - esri
+                - esrv
+                - esrx
+                - esks
+                - espa
           required:
             - supportedE2ESecFeatures
-        M2M-Ext-ID:
+        mei:
           type: string
-        supportedReleaseVersions:
+        srv:
           type: array
           items:
             type: string
             pattern: undefined
           minItems: 1
-        registrationStatus:
+        regs:
           type: integer
           enum:
             - 1
             - 2
-        trackRegistrationPoints:
+        trps:
           type: boolean
-        sessionCapabilities:
+        scp:
           type: array
           items:
             type: string
             pattern: '[\w/!#$^_\.+&\-;=]+'
           minItems: 1
-        triggerEnable:
+        tren:
           type: boolean
-        activityPatternElements:
+        ape:
           type: object
           properties:
-            activityPatternElements:
+            ape:
               type: array
               items:
                 type: object
@@ -2701,37 +2751,38 @@ components:
                     items:
                       type: object
                       properties:
-                        scheduleEntry:
+                        sce:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
                       required:
-                        - scheduleEntry
-                  stationaryIndication:
+                        - sce
+                    x-unresolved-long-name: true
+                  sti:
                     type: integer
                     enum:
                       - 1
                       - 2
-                  dataSizeIndicator:
+                  dsi:
                     type: integer
                 required:
                   - scheduleElement
           required:
-            - activityPatternElements
-        enableTimeCompensation:
+            - ape
+        etc:
           type: boolean
-        Trigger-Recipient-ID:
+        tri:
           type: integer
           minimum: 0
           maximum: 65535
-        triggerReferenceNumber:
+        trn:
           type: integer
           minimum: 0
-        externalGroupID:
+        egid:
           type: string
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -2739,10 +2790,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -2848,26 +2899,34 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - App-ID
-        - AE-ID
-        - requestReachability
-        - supportedReleaseVersions
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - api
+        - aei
+        - rr
+        - srv
+    m2m.ae.envelope:
+      type: object
+      required:
+        - m2m:ae
+      properties:
+        m2m:ae:
+          $ref: '#/components/schemas/m2m.ae'
     m2m.ae.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -2970,61 +3029,61 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        location:
+        loc:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -3033,35 +3092,35 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        appName:
+            - typ
+            - crd
+        apn:
           type: string
-        App-ID:
+        api:
           type: string
-        AE-ID:
+        aei:
           type: string
-        pointOfAccess:
+        poa:
           type: array
           items:
             type: string
             format: uri
             pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
           minItems: 1
-        ontologyRef:
+        or:
           type: string
           format: uri
-        nodeLink:
+        nl:
           type: string
           format: uri
-        requestReachability:
+        rr:
           type: boolean
-        contentSerialization:
+        csz:
           type: array
           items:
             type: string
@@ -3071,7 +3130,7 @@ components:
               - json
               - cbor
           minItems: 1
-        e2eSecInfo:
+        esi:
           type: object
           properties:
             supportedE2ESecFeatures:
@@ -3101,33 +3160,34 @@ components:
                   - 44
                   - 45
               minItems: 1
-            certificates:
+              x-unresolved-long-name: true
+            escert:
               type: array
               items:
                 type: string
                 format: byte
               minItems: 1
-            sharedReceiverESPrimRandObject:
+            esro:
               type: object
               properties:
-                esprimRandID:
+                esri:
                   type: string
-                esprimRandValue:
+                esrv:
                   type: string
-                esprimRandExpiry:
+                esrx:
                   anyOf:
                     - type: string
                       pattern: >-
                         \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
                     - type: integer
-                esprimKeyGenAlgIDs:
+                esks:
                   type: array
                   items:
                     type: integer
                     enum:
                       - 1
                   minItems: 1
-                esprimProtocolAndAlgIDs:
+                espa:
                   type: array
                   items:
                     type: integer
@@ -3137,40 +3197,40 @@ components:
                       - 12
                   minItems: 1
               required:
-                - esprimRandID
-                - esprimRandValue
-                - esprimRandExpiry
-                - esprimKeyGenAlgIDs
-                - esprimProtocolAndAlgIDs
+                - esri
+                - esrv
+                - esrx
+                - esks
+                - espa
           required:
             - supportedE2ESecFeatures
-        M2M-Ext-ID:
+        mei:
           type: string
-        supportedReleaseVersions:
+        srv:
           type: array
           items:
             type: string
             pattern: undefined
           minItems: 1
-        registrationStatus:
+        regs:
           type: integer
           enum:
             - 1
             - 2
-        trackRegistrationPoints:
+        trps:
           type: boolean
-        sessionCapabilities:
+        scp:
           type: array
           items:
             type: string
             pattern: '[\w/!#$^_\.+&\-;=]+'
           minItems: 1
-        triggerEnable:
+        tren:
           type: boolean
-        activityPatternElements:
+        ape:
           type: object
           properties:
-            activityPatternElements:
+            ape:
               type: array
               items:
                 type: object
@@ -3180,52 +3240,60 @@ components:
                     items:
                       type: object
                       properties:
-                        scheduleEntry:
+                        sce:
                           type: array
                           items:
                             type: string
                             pattern: >-
                               (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
                       required:
-                        - scheduleEntry
-                  stationaryIndication:
+                        - sce
+                    x-unresolved-long-name: true
+                  sti:
                     type: integer
                     enum:
                       - 1
                       - 2
-                  dataSizeIndicator:
+                  dsi:
                     type: integer
                 required:
                   - scheduleElement
           required:
-            - activityPatternElements
-        enableTimeCompensation:
+            - ape
+        etc:
           type: boolean
-        Trigger-Recipient-ID:
+        tri:
           type: integer
           minimum: 0
           maximum: 65535
-        triggerReferenceNumber:
+        trn:
           type: integer
           minimum: 0
-        externalGroupID:
+        egid:
           type: string
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - App-ID
-        - AE-ID
-        - requestReachability
-        - supportedReleaseVersions
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - api
+        - aei
+        - rr
+        - srv
+    m2m.ae.create.envelope:
+      type: object
+      required:
+        - m2m:ae
+      properties:
+        m2m:ae:
+          $ref: '#/components/schemas/m2m.ae.create'
     m2m.cnt:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -3328,65 +3396,65 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        stateTag:
+        st:
           type: integer
-        creator:
+        cr:
           type: string
-        location:
+        loc:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -3395,32 +3463,32 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        maxNrOfInstances:
+            - typ
+            - crd
+        mni:
           type: integer
-        maxByteSize:
+        mbs:
           type: integer
-        maxInstanceAge:
+        mia:
           type: integer
-        currentNrOfInstances:
+        cni:
           type: integer
-        currentByteSize:
+        cbs:
           type: integer
-        locationID:
+        li:
           type: string
           format: uri
-        ontologyRef:
+        or:
           type: string
           format: uri
-        disableRetrieval:
+        disr:
           type: boolean
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -3428,10 +3496,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -3537,25 +3605,33 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - stateTag
-        - currentNrOfInstances
-        - currentByteSize
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - st
+        - cni
+        - cbs
+    m2m.cnt.envelope:
+      type: object
+      required:
+        - m2m:cnt
+      properties:
+        m2m:cnt:
+          $ref: '#/components/schemas/m2m.cnt'
     m2m.cnt.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -3658,65 +3734,65 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        stateTag:
+        st:
           type: integer
-        creator:
+        cr:
           type: string
-        location:
+        loc:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -3725,46 +3801,53 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        maxNrOfInstances:
+            - typ
+            - crd
+        mni:
           type: integer
-        maxByteSize:
+        mbs:
           type: integer
-        maxInstanceAge:
+        mia:
           type: integer
-        currentNrOfInstances:
+        cni:
           type: integer
-        currentByteSize:
+        cbs:
           type: integer
-        locationID:
+        li:
           type: string
           format: uri
-        ontologyRef:
+        or:
           type: string
           format: uri
-        disableRetrieval:
+        disr:
           type: boolean
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - stateTag
-        - currentNrOfInstances
-        - currentByteSize
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - st
+        - cni
+        - cbs
+    m2m.cnt.create.envelope:
+      type: object
+      required:
+        - m2m:cnt
+      properties:
+        m2m:cnt:
+          $ref: '#/components/schemas/m2m.cnt.create'
     m2m.cin:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -3867,52 +3950,53 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
         expirationTime:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        announceTo:
+          x-unresolved-long-name: true
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        stateTag:
+        st:
           type: integer
-        creator:
+        cr:
           type: string
         location:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -3921,43 +4005,45 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        contentInfo:
+            - typ
+            - crd
+          x-unresolved-long-name: true
+        cnf:
           type: string
           pattern: undefined
-        contentSize:
+        cs:
           type: integer
-        contentRef:
+        conr:
           type: object
           properties:
-            URIReference:
+            urir:
               type: array
               items:
                 type: object
                 properties:
-                  name:
+                  nm:
                     type: string
                   URI:
                     type: string
                     format: uri
+                    x-unresolved-long-name: true
                 required:
-                  - name
+                  - nm
                   - URI
           required:
-            - URIReference
-        ontologyRef:
+            - urir
+        or:
           type: string
           format: uri
-        content: {}
-        deletionCnt:
+        con: {}
+        dcnt:
           type: integer
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -3965,10 +4051,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -4074,25 +4160,33 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
         - expirationTime
-        - stateTag
-        - contentSize
-        - content
+        - st
+        - cs
+        - con
+    m2m.cin.envelope:
+      type: object
+      required:
+        - m2m:cin
+      properties:
+        m2m:cin:
+          $ref: '#/components/schemas/m2m.cin'
     m2m.cin.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -4195,52 +4289,53 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
         expirationTime:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        announceTo:
+          x-unresolved-long-name: true
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        stateTag:
+        st:
           type: integer
-        creator:
+        cr:
           type: string
         location:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -4249,57 +4344,66 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
-        contentInfo:
+            - typ
+            - crd
+          x-unresolved-long-name: true
+        cnf:
           type: string
           pattern: undefined
-        contentSize:
+        cs:
           type: integer
-        contentRef:
+        conr:
           type: object
           properties:
-            URIReference:
+            urir:
               type: array
               items:
                 type: object
                 properties:
-                  name:
+                  nm:
                     type: string
                   URI:
                     type: string
                     format: uri
+                    x-unresolved-long-name: true
                 required:
-                  - name
+                  - nm
                   - URI
           required:
-            - URIReference
-        ontologyRef:
+            - urir
+        or:
           type: string
           format: uri
-        content: {}
-        deletionCnt:
+        con: {}
+        dcnt:
           type: integer
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
         - expirationTime
-        - stateTag
-        - contentSize
-        - content
+        - st
+        - cs
+        - con
+    m2m.cin.create.envelope:
+      type: object
+      required:
+        - m2m:cin
+      properties:
+        m2m:cin:
+          $ref: '#/components/schemas/m2m.cin.create'
     m2m.cb:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -4402,39 +4506,39 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        cseType:
+        cst:
           type: integer
           enum:
             - 1
             - 2
             - 3
-        CSE-ID:
+        csi:
           type: string
-        supportedResourceType:
+        srt:
           type: array
           items:
             type: integer
@@ -4539,26 +4643,26 @@ components:
               - 10065
               - 10066
               - 10068
-        pointOfAccess:
+        poa:
           type: array
           items:
             type: string
             format: uri
             pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
           minItems: 1
-        nodeLink:
+        nl:
           type: string
           format: uri
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        location:
+        loc:
           type: object
           properties:
-            type:
+            typ:
               type: integer
               enum:
                 - 1
@@ -4567,13 +4671,13 @@ components:
                 - 4
                 - 5
                 - 6
-            coordinates:
+            crd:
               type: string
               pattern: >-
                 (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
           required:
-            - type
-            - coordinates
+            - typ
+            - crd
         contentSerialization:
           type: array
           items:
@@ -4584,7 +4688,8 @@ components:
               - json
               - cbor
           minItems: 1
-        e2eSecInfo:
+          x-unresolved-long-name: true
+        esi:
           type: object
           properties:
             supportedE2ESecFeatures:
@@ -4614,33 +4719,34 @@ components:
                   - 44
                   - 45
               minItems: 1
-            certificates:
+              x-unresolved-long-name: true
+            escert:
               type: array
               items:
                 type: string
                 format: byte
               minItems: 1
-            sharedReceiverESPrimRandObject:
+            esro:
               type: object
               properties:
-                esprimRandID:
+                esri:
                   type: string
-                esprimRandValue:
+                esrv:
                   type: string
-                esprimRandExpiry:
+                esrx:
                   anyOf:
                     - type: string
                       pattern: >-
                         \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
                     - type: integer
-                esprimKeyGenAlgIDs:
+                esks:
                   type: array
                   items:
                     type: integer
                     enum:
                       - 1
                   minItems: 1
-                esprimProtocolAndAlgIDs:
+                espa:
                   type: array
                   items:
                     type: integer
@@ -4650,23 +4756,23 @@ components:
                       - 12
                   minItems: 1
               required:
-                - esprimRandID
-                - esprimRandValue
-                - esprimRandExpiry
-                - esprimKeyGenAlgIDs
-                - esprimProtocolAndAlgIDs
+                - esri
+                - esrv
+                - esrx
+                - esks
+                - espa
           required:
             - supportedE2ESecFeatures
-        supportedReleaseVersions:
+        srv:
           type: array
           items:
             type: string
             pattern: undefined
           minItems: 1
-        currentTime:
+        ctm:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -4674,10 +4780,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -4783,26 +4889,34 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - CSE-ID
-        - supportedResourceType
-        - pointOfAccess
-        - supportedReleaseVersions
-        - currentTime
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - csi
+        - srt
+        - poa
+        - srv
+        - ctm
+    m2m.cb.envelope:
+      type: object
+      required:
+        - m2m:cb
+      properties:
+        m2m:cb:
+          $ref: '#/components/schemas/m2m.cb'
     m2m.grp:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -4905,60 +5019,60 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        creator:
+        cr:
           type: string
-        memberType:
+        mt:
           type: integer
           enum:
             - 0
@@ -5064,13 +5178,13 @@ components:
             - 20001
             - 20002
             - 20003
-        specializationType:
+        spty:
           type: object
           properties:
-            containerDefinition:
+            cnd:
               type: string
               format: uri
-            mgmtDefinition:
+            mgd:
               type: integer
               enum:
                 - 0
@@ -5102,51 +5216,51 @@ components:
                 - 1026
                 - 1027
                 - 1028
-        currentNrOfMembers:
+        cnm:
           type: integer
-        maxNrOfMembers:
+        mnm:
           type: integer
-        memberIDs:
+        mid:
           type: array
           items:
             type: string
             format: uri
-        membersAccessControlPolicyIDs:
+        macp:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        memberTypeValidated:
+        mtv:
           type: boolean
-        consistencyStrategy:
+        csy:
           type: integer
           enum:
             - 1
             - 2
             - 3
-        groupName:
+        gn:
           type: string
-        semanticSupportIndicator:
+        ssi:
           type: boolean
-        notifyAggregation:
+        nar:
           type: object
           properties:
-            number:
+            num:
               type: integer
-            duration:
+            dur:
               type: string
               format: duration
-        somecastEnable:
+        scen:
           type: boolean
-        somecastAlgorithm:
+        scal:
           type: integer
           enum:
             - 1
             - 2
             - 3
             - 4
-        childResource:
+        ch:
           type: array
           items:
             type: object
@@ -5154,10 +5268,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -5263,27 +5377,35 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - memberType
-        - currentNrOfMembers
-        - maxNrOfMembers
-        - memberIDs
-        - somecastEnable
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - mt
+        - cnm
+        - mnm
+        - mid
+        - scen
+    m2m.grp.envelope:
+      type: object
+      required:
+        - m2m:grp
+      properties:
+        m2m:grp:
+          $ref: '#/components/schemas/m2m.grp'
     m2m.grp.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -5386,60 +5508,60 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        announceTo:
+        at:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        announcedAttribute:
+        aa:
           type: array
           items:
             type: string
           minItems: 1
-        announceSyncType:
+        ast:
           type: integer
           enum:
             - 1
             - 2
-        creator:
+        cr:
           type: string
-        memberType:
+        mt:
           type: integer
           enum:
             - 0
@@ -5545,13 +5667,13 @@ components:
             - 20001
             - 20002
             - 20003
-        specializationType:
+        spty:
           type: object
           properties:
-            containerDefinition:
+            cnd:
               type: string
               format: uri
-            mgmtDefinition:
+            mgd:
               type: integer
               enum:
                 - 0
@@ -5583,44 +5705,44 @@ components:
                 - 1026
                 - 1027
                 - 1028
-        currentNrOfMembers:
+        cnm:
           type: integer
-        maxNrOfMembers:
+        mnm:
           type: integer
-        memberIDs:
+        mid:
           type: array
           items:
             type: string
             format: uri
-        membersAccessControlPolicyIDs:
+        macp:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        memberTypeValidated:
+        mtv:
           type: boolean
-        consistencyStrategy:
+        csy:
           type: integer
           enum:
             - 1
             - 2
             - 3
-        groupName:
+        gn:
           type: string
-        semanticSupportIndicator:
+        ssi:
           type: boolean
-        notifyAggregation:
+        nar:
           type: object
           properties:
-            number:
+            num:
               type: integer
-            duration:
+            dur:
               type: string
               format: duration
-        somecastEnable:
+        scen:
           type: boolean
-        somecastAlgorithm:
+        scal:
           type: integer
           enum:
             - 1
@@ -5628,22 +5750,29 @@ components:
             - 3
             - 4
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - memberType
-        - currentNrOfMembers
-        - maxNrOfMembers
-        - memberIDs
-        - somecastEnable
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - mt
+        - cnm
+        - mnm
+        - mid
+        - scen
+    m2m.grp.create.envelope:
+      type: object
+      required:
+        - m2m:grp
+      properties:
+        m2m:grp:
+          $ref: '#/components/schemas/m2m.grp.create'
     m2m.sub:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -5746,78 +5875,78 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        creator:
+        cr:
           type: string
-        eventNotificationCriteria:
+        enc:
           type: object
           properties:
-            createdBefore:
+            crb:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            createdAfter:
+            cra:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            modifiedSince:
+            ms:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            unmodifiedSince:
+            us:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            stateTagSmaller:
+            sts:
               type: integer
-            stateTagBigger:
+            stb:
               type: integer
-            expireBefore:
+            exb:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            expireAfter:
+            exa:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            sizeAbove:
+            sza:
               type: integer
-            sizeBelow:
+            szb:
               type: integer
-            operationMonitor:
+            om:
               type: array
               items:
                 type: object
                 properties:
-                  operations:
+                  ops:
                     type: integer
                     enum:
                       - 1
@@ -5883,14 +6012,14 @@ components:
                       - 61
                       - 62
                       - 63
-                  originator:
+                  or:
                     type: string
-            attribute:
+            atr:
               type: array
               items:
                 type: string
               minItems: 1
-            notificationEventType:
+            net:
               type: array
               items:
                 type: integer
@@ -5903,7 +6032,7 @@ components:
                   - 6
                   - 7
                   - 8
-            childResourceType:
+            chty:
               type: array
               items:
                 type: integer
@@ -6009,68 +6138,68 @@ components:
                   - 10066
                   - 10068
               minItems: 1
-            missingData:
+            md:
               type: object
               properties:
-                number:
+                num:
                   type: integer
-                duration:
+                dur:
                   type: string
                   format: duration
               required:
-                - number
-                - duration
-            filterOperation:
+                - num
+                - dur
+            fo:
               type: integer
               enum:
                 - 1
                 - 2
                 - 3
-        expirationCounter:
+        exc:
           type: integer
-        notificationURI:
+        nu:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        groupID:
+        gpi:
           type: string
           format: uri
-        notificationForwardingURI:
+        nfu:
           type: string
           format: uri
-        batchNotify:
+        bn:
           type: object
           properties:
-            number:
+            num:
               type: integer
-            duration:
+            dur:
               type: string
               format: duration
-        rateLimit:
+        rl:
           type: object
           properties:
-            maxNrOfNotify:
+            mnn:
               type: integer
-            timeWindow:
+            tww:
               type: string
               format: duration
           required:
-            - maxNrOfNotify
-            - timeWindow
-        preSubscriptionNotify:
+            - mnn
+            - tww
+        psn:
           type: integer
-        pendingNotification:
+        pn:
           type: integer
           enum:
             - 1
             - 2
-        notificationStoragePriority:
+        nsp:
           type: integer
-        latestNotify:
+        ln:
           type: boolean
-        notificationContentType:
+        nct:
           type: integer
           enum:
             - 1
@@ -6078,20 +6207,20 @@ components:
             - 3
             - 4
             - 5
-        notificationEventCat:
+        nec:
           type: string
-        subscriberURI:
+        su:
           type: string
           format: uri
-        associatedCrossResourceSub:
+        acrs:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        notificationStatsEnable:
+        nse:
           type: boolean
-        notificationStatsInfo:
+        nsi:
           type: object
           properties:
             notificationStats:
@@ -6099,26 +6228,28 @@ components:
               items:
                 type: object
                 properties:
-                  target:
+                  tg:
                     type: string
                     format: uri
-                  requestsSent:
+                  rqs:
                     type: integer
-                  responsesReceived:
+                  rsr:
                     type: integer
-                  notificationEventCount:
+                  noec:
                     type: integer
                 required:
-                  - target
-                  - requestsSent
-                  - responsesReceived
-                  - notificationEventCount
+                  - tg
+                  - rqs
+                  - rsr
+                  - noec
+              x-unresolved-long-name: true
           required:
             - notificationStats
         primitiveProfileID:
           type: string
           format: uri
-        childResource:
+          x-unresolved-long-name: true
+        ch:
           type: array
           items:
             type: object
@@ -6126,10 +6257,10 @@ components:
               val:
                 type: string
                 format: uri
-              name:
+              nm:
                 type: string
                 pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-              type:
+              typ:
                 type: integer
                 enum:
                   - 1
@@ -6235,24 +6366,32 @@ components:
               specializationID:
                 type: string
                 format: uri
+                x-unresolved-long-name: true
             required:
               - val
-              - name
-              - type
+              - nm
+              - typ
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - notificationURI
-        - notificationContentType
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - nu
+        - nct
+    m2m.sub.envelope:
+      type: object
+      required:
+        - m2m:sub
+      properties:
+        m2m:sub:
+          $ref: '#/components/schemas/m2m.sub'
     m2m.sub.create:
       type: object
       properties:
-        resourceType:
+        ty:
           type: integer
           enum:
             - 1
@@ -6355,78 +6494,78 @@ components:
             - 10065
             - 10066
             - 10068
-        resourceID:
+        ri:
           type: string
-        parentID:
+        pi:
           type: string
           format: uri
-        creationTime:
+        ct:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        lastModifiedTime:
+        lt:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        labels:
+        lbl:
           type: array
           items:
             type: string
           minItems: 1
-        resourceName:
+        rn:
           type: string
           pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
-        accessControlPolicyIDs:
+        acpi:
           type: array
           items:
             type: string
           minItems: 1
-        expirationTime:
+        et:
           type: string
           pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-        dynamicAuthorizationConsultationIDs:
+        daci:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        custodian:
+        cstn:
           type: string
-        creator:
+        cr:
           type: string
-        eventNotificationCriteria:
+        enc:
           type: object
           properties:
-            createdBefore:
+            crb:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            createdAfter:
+            cra:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            modifiedSince:
+            ms:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            unmodifiedSince:
+            us:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            stateTagSmaller:
+            sts:
               type: integer
-            stateTagBigger:
+            stb:
               type: integer
-            expireBefore:
+            exb:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            expireAfter:
+            exa:
               type: string
               pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
-            sizeAbove:
+            sza:
               type: integer
-            sizeBelow:
+            szb:
               type: integer
-            operationMonitor:
+            om:
               type: array
               items:
                 type: object
                 properties:
-                  operations:
+                  ops:
                     type: integer
                     enum:
                       - 1
@@ -6492,14 +6631,14 @@ components:
                       - 61
                       - 62
                       - 63
-                  originator:
+                  or:
                     type: string
-            attribute:
+            atr:
               type: array
               items:
                 type: string
               minItems: 1
-            notificationEventType:
+            net:
               type: array
               items:
                 type: integer
@@ -6512,7 +6651,7 @@ components:
                   - 6
                   - 7
                   - 8
-            childResourceType:
+            chty:
               type: array
               items:
                 type: integer
@@ -6618,68 +6757,68 @@ components:
                   - 10066
                   - 10068
               minItems: 1
-            missingData:
+            md:
               type: object
               properties:
-                number:
+                num:
                   type: integer
-                duration:
+                dur:
                   type: string
                   format: duration
               required:
-                - number
-                - duration
-            filterOperation:
+                - num
+                - dur
+            fo:
               type: integer
               enum:
                 - 1
                 - 2
                 - 3
-        expirationCounter:
+        exc:
           type: integer
-        notificationURI:
+        nu:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        groupID:
+        gpi:
           type: string
           format: uri
-        notificationForwardingURI:
+        nfu:
           type: string
           format: uri
-        batchNotify:
+        bn:
           type: object
           properties:
-            number:
+            num:
               type: integer
-            duration:
+            dur:
               type: string
               format: duration
-        rateLimit:
+        rl:
           type: object
           properties:
-            maxNrOfNotify:
+            mnn:
               type: integer
-            timeWindow:
+            tww:
               type: string
               format: duration
           required:
-            - maxNrOfNotify
-            - timeWindow
-        preSubscriptionNotify:
+            - mnn
+            - tww
+        psn:
           type: integer
-        pendingNotification:
+        pn:
           type: integer
           enum:
             - 1
             - 2
-        notificationStoragePriority:
+        nsp:
           type: integer
-        latestNotify:
+        ln:
           type: boolean
-        notificationContentType:
+        nct:
           type: integer
           enum:
             - 1
@@ -6687,20 +6826,20 @@ components:
             - 3
             - 4
             - 5
-        notificationEventCat:
+        nec:
           type: string
-        subscriberURI:
+        su:
           type: string
           format: uri
-        associatedCrossResourceSub:
+        acrs:
           type: array
           items:
             type: string
             format: uri
           minItems: 1
-        notificationStatsEnable:
+        nse:
           type: boolean
-        notificationStatsInfo:
+        nsi:
           type: object
           properties:
             notificationStats:
@@ -6708,32 +6847,41 @@ components:
               items:
                 type: object
                 properties:
-                  target:
+                  tg:
                     type: string
                     format: uri
-                  requestsSent:
+                  rqs:
                     type: integer
-                  responsesReceived:
+                  rsr:
                     type: integer
-                  notificationEventCount:
+                  noec:
                     type: integer
                 required:
-                  - target
-                  - requestsSent
-                  - responsesReceived
-                  - notificationEventCount
+                  - tg
+                  - rqs
+                  - rsr
+                  - noec
+              x-unresolved-long-name: true
           required:
             - notificationStats
         primitiveProfileID:
           type: string
           format: uri
+          x-unresolved-long-name: true
       required:
-        - resourceType
-        - resourceID
-        - parentID
-        - creationTime
-        - lastModifiedTime
-        - resourceName
-        - expirationTime
-        - notificationURI
-        - notificationContentType
+        - ty
+        - ri
+        - pi
+        - ct
+        - lt
+        - rn
+        - et
+        - nu
+        - nct
+    m2m.sub.create.envelope:
+      type: object
+      required:
+        - m2m:sub
+      properties:
+        m2m:sub:
+          $ref: '#/components/schemas/m2m.sub.create'
