@@ -1,0 +1,6739 @@
+openapi: 3.1.0
+info:
+  title: mobius4 oneM2M CSE API
+  version: 4.4.0
+  description: |-
+    이 문서는 mobius4 oneM2M CSE의 실제 동작을 라이브 프로브로 관찰한 결과(features/mobius4-capabilities.yaml)에
+    근거해 생성되었다. 여기 실린 오퍼레이션은 전부 실측으로 지원이 확인된 것만이며, 미지원이거나
+    결함(defect)이 관찰된 조합은 싣지 않는다.
+
+    **경로는 합성형(synthesized)이다.** mobius4의 실제 HTTP 라우트는 `POST|GET|PUT|DELETE /*`
+    네 개의 와일드카드뿐이고, 오퍼레이션은 `Content-Type`의 `ty` 파라미터와 쿼리 파라미터로
+    구분된다. 리소스 경로 자체도 사용자가 만드는 동적 트리라 고정된 구조가 없다. 이 문서가 보여주는
+    `/{parentPath}`, `/{resourcePath}` 같은 경로는 코딩 에이전트가 읽기 쉽도록 지어낸 것으로,
+    **mobius4의 실제 라우트와 1:1로 대응하지 않는다.** 이 사실을 감추면 나중에 실제 서버를 두고
+    디버깅하는 사람을 오도하게 된다.
+paths:
+  /{parentPath}:
+    post:
+      operationId: createResource
+      summary: 자식 리소스 생성 (CREATE)
+      description: 부모 리소스 경로 아래 새 리소스를 생성한다. 생성할 리소스 타입은 Content-Type의 ty 파라미터로 지정한다(TS-0009:6.4.3).
+      parameters:
+        - name: parentPath
+          in: path
+          required: true
+          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          schema:
+            type: string
+        - name: X-M2M-Origin
+          in: header
+          required: true
+          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          schema:
+            type: string
+        - name: X-M2M-RI
+          in: header
+          required: true
+          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          schema:
+            type: string
+        - name: X-M2M-RVI
+          in: header
+          required: true
+          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/vnd.onem2m-res+json;ty=1:
+            schema:
+              $ref: '#/components/schemas/m2m.acp.create'
+          application/vnd.onem2m-res+json;ty=2:
+            schema:
+              $ref: '#/components/schemas/m2m.ae.create'
+          application/vnd.onem2m-res+json;ty=3:
+            schema:
+              $ref: '#/components/schemas/m2m.cnt.create'
+          application/vnd.onem2m-res+json;ty=4:
+            schema:
+              $ref: '#/components/schemas/m2m.cin.create'
+          application/vnd.onem2m-res+json;ty=9:
+            schema:
+              $ref: '#/components/schemas/m2m.grp.create'
+          application/vnd.onem2m-res+json;ty=23:
+            schema:
+              $ref: '#/components/schemas/m2m.sub.create'
+      responses:
+        '201':
+          description: 생성됨
+          headers:
+            X-M2M-RSC:
+              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              schema:
+                type: integer
+              examples:
+                acp:
+                  value: 2001
+                ae:
+                  value: 2001
+                cnt:
+                  value: 2001
+                cin:
+                  value: 2001
+                grp:
+                  value: 2001
+                sub:
+                  value: 2001
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/m2m.acp'
+                  - $ref: '#/components/schemas/m2m.ae'
+                  - $ref: '#/components/schemas/m2m.cnt'
+                  - $ref: '#/components/schemas/m2m.cin'
+                  - $ref: '#/components/schemas/m2m.grp'
+                  - $ref: '#/components/schemas/m2m.sub'
+  /{resourcePath}:
+    get:
+      operationId: retrieveResource
+      summary: 리소스 조회 (RETRIEVE)
+      parameters:
+        - name: resourcePath
+          in: path
+          required: true
+          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          schema:
+            type: string
+        - name: X-M2M-Origin
+          in: header
+          required: true
+          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          schema:
+            type: string
+        - name: X-M2M-RI
+          in: header
+          required: true
+          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          schema:
+            type: string
+        - name: X-M2M-RVI
+          in: header
+          required: true
+          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 조회 성공
+          headers:
+            X-M2M-RSC:
+              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              schema:
+                type: integer
+              examples:
+                acp:
+                  value: 2000
+                ae:
+                  value: 2000
+                cnt:
+                  value: 2000
+                cin:
+                  value: 2000
+                cb:
+                  value: 2000
+                grp:
+                  value: 2000
+                sub:
+                  value: 2000
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/m2m.acp'
+                  - $ref: '#/components/schemas/m2m.ae'
+                  - $ref: '#/components/schemas/m2m.cnt'
+                  - $ref: '#/components/schemas/m2m.cin'
+                  - $ref: '#/components/schemas/m2m.cb'
+                  - $ref: '#/components/schemas/m2m.grp'
+                  - $ref: '#/components/schemas/m2m.sub'
+    put:
+      operationId: updateResource
+      summary: 리소스 갱신 (UPDATE)
+      description: TS-0009:6.4.3 — Resource Type(ty) 파라미터는 CREATE 요청에만 있다. UPDATE에는 ty가 없다.
+      parameters:
+        - name: resourcePath
+          in: path
+          required: true
+          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          schema:
+            type: string
+        - name: X-M2M-Origin
+          in: header
+          required: true
+          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          schema:
+            type: string
+        - name: X-M2M-RI
+          in: header
+          required: true
+          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          schema:
+            type: string
+        - name: X-M2M-RVI
+          in: header
+          required: true
+          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/vnd.onem2m-res+json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/m2m.acp'
+                - $ref: '#/components/schemas/m2m.ae'
+                - $ref: '#/components/schemas/m2m.cnt'
+                - $ref: '#/components/schemas/m2m.grp'
+                - $ref: '#/components/schemas/m2m.sub'
+      responses:
+        '200':
+          description: 갱신 성공
+          headers:
+            X-M2M-RSC:
+              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              schema:
+                type: integer
+              examples:
+                acp:
+                  value: 2004
+                ae:
+                  value: 2004
+                cnt:
+                  value: 2004
+                grp:
+                  value: 2004
+                sub:
+                  value: 2004
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/m2m.acp'
+                  - $ref: '#/components/schemas/m2m.ae'
+                  - $ref: '#/components/schemas/m2m.cnt'
+                  - $ref: '#/components/schemas/m2m.grp'
+                  - $ref: '#/components/schemas/m2m.sub'
+    delete:
+      operationId: deleteResource
+      summary: 리소스 삭제 (DELETE)
+      parameters:
+        - name: resourcePath
+          in: path
+          required: true
+          description: 합성 경로 세그먼트 — mobius4의 실제 라우트(POST|GET|PUT|DELETE /*)에는 이 이름의 고정 경로가 없다.
+          schema:
+            type: string
+        - name: X-M2M-Origin
+          in: header
+          required: true
+          description: 요청 오리지네이터(Originator) 식별자 (TS-0009:6.4.7)
+          schema:
+            type: string
+        - name: X-M2M-RI
+          in: header
+          required: true
+          description: 요청 식별자(Request Identifier) — 요청-응답 짝을 맞추는 데 쓰인다
+          schema:
+            type: string
+        - name: X-M2M-RVI
+          in: header
+          required: true
+          description: 릴리즈 버전 지시자(Release Version Indicator, TS-0009:6.4.22)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 삭제 성공
+          headers:
+            X-M2M-RSC:
+              description: 관찰된 oneM2M Response Status Code (TS-0004) — 예시는 라이브 프로브 실측값이다.
+              schema:
+                type: integer
+              examples:
+                acp:
+                  value: 2002
+                ae:
+                  value: 2002
+                cnt:
+                  value: 2002
+                cin:
+                  value: 2002
+                grp:
+                  value: 2002
+                sub:
+                  value: 2002
+components:
+  schemas:
+    m2m.acp:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        privileges:
+          type: object
+          properties:
+            accessControlRule:
+              type: array
+              items:
+                type: object
+                properties:
+                  accessControlOriginators:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                    minItems: 1
+                  accessControlOperations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  accessControlContexts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accessControlWindow:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                        accessControlIpAddresses:
+                          type: object
+                          properties:
+                            ipv4Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                            ipv6Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                        accessControlLocationRegion:
+                          type: object
+                          properties:
+                            countryCode:
+                              type: array
+                              items:
+                                type: string
+                                pattern: '[A-Z]{2}'
+                              minItems: 1
+                            circRegion:
+                              type: array
+                              items:
+                                type: number
+                        accessControlUserIDs:
+                          type: array
+                          items:
+                            type: string
+                          minItems: 1
+                        accessControlEvalCriteria:
+                          type: object
+                          properties:
+                            operator:
+                              type: integer
+                              enum:
+                                - 1
+                                - 2
+                                - 3
+                                - 4
+                                - 5
+                                - 6
+                            subject:
+                              type: string
+                            threshold: {}
+                          required:
+                            - operator
+                            - subject
+                            - threshold
+                        accessControlLimit:
+                          type: integer
+                  accessControlAuthenticationFlag:
+                    type: boolean
+                  accessControlObjectDetails:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resourceType:
+                          type: integer
+                          enum:
+                            - 1
+                            - 2
+                            - 3
+                            - 4
+                            - 5
+                            - 6
+                            - 7
+                            - 8
+                            - 9
+                            - 10
+                            - 11
+                            - 12
+                            - 13
+                            - 14
+                            - 15
+                            - 16
+                            - 17
+                            - 18
+                            - 19
+                            - 20
+                            - 21
+                            - 22
+                            - 23
+                            - 24
+                            - 25
+                            - 26
+                            - 27
+                            - 28
+                            - 29
+                            - 30
+                            - 31
+                            - 32
+                            - 34
+                            - 35
+                            - 36
+                            - 37
+                            - 38
+                            - 39
+                            - 40
+                            - 41
+                            - 42
+                            - 43
+                            - 44
+                            - 45
+                            - 46
+                            - 47
+                            - 48
+                            - 49
+                            - 50
+                            - 51
+                            - 52
+                            - 53
+                            - 54
+                            - 55
+                            - 56
+                            - 57
+                            - 58
+                            - 59
+                            - 60
+                            - 61
+                            - 62
+                            - 63
+                            - 64
+                            - 65
+                            - 66
+                            - 67
+                            - 68
+                            - 10001
+                            - 10002
+                            - 10003
+                            - 10004
+                            - 10005
+                            - 10009
+                            - 10010
+                            - 10013
+                            - 10014
+                            - 10016
+                            - 10018
+                            - 10024
+                            - 10028
+                            - 10029
+                            - 10030
+                            - 10038
+                            - 10039
+                            - 10040
+                            - 10041
+                            - 10042
+                            - 10052
+                            - 10053
+                            - 10054
+                            - 10055
+                            - 10056
+                            - 10057
+                            - 10060
+                            - 10062
+                            - 10063
+                            - 10064
+                            - 10065
+                            - 10066
+                            - 10068
+                        specializationID:
+                          type: object
+                          properties:
+                            containerDefinition:
+                              type: string
+                              format: uri
+                            mgmtDefinition:
+                              type: integer
+                              enum:
+                                - 0
+                                - 1001
+                                - 1002
+                                - 1003
+                                - 1004
+                                - 1005
+                                - 1006
+                                - 1007
+                                - 1008
+                                - 1009
+                                - 1010
+                                - 1011
+                                - 1012
+                                - 1013
+                                - 1014
+                                - 1015
+                                - 1016
+                                - 1017
+                                - 1018
+                                - 1019
+                                - 1020
+                                - 1021
+                                - 1022
+                                - 1023
+                                - 1024
+                                - 1025
+                                - 1026
+                                - 1027
+                                - 1028
+                        childResourceType:
+                          type: array
+                          items:
+                            type: integer
+                            enum:
+                              - 1
+                              - 2
+                              - 3
+                              - 4
+                              - 5
+                              - 6
+                              - 7
+                              - 8
+                              - 9
+                              - 10
+                              - 11
+                              - 12
+                              - 13
+                              - 14
+                              - 15
+                              - 16
+                              - 17
+                              - 18
+                              - 19
+                              - 20
+                              - 21
+                              - 22
+                              - 23
+                              - 24
+                              - 25
+                              - 26
+                              - 27
+                              - 28
+                              - 29
+                              - 30
+                              - 31
+                              - 32
+                              - 34
+                              - 35
+                              - 36
+                              - 37
+                              - 38
+                              - 39
+                              - 40
+                              - 41
+                              - 42
+                              - 43
+                              - 44
+                              - 45
+                              - 46
+                              - 47
+                              - 48
+                              - 49
+                              - 50
+                              - 51
+                              - 52
+                              - 53
+                              - 54
+                              - 55
+                              - 56
+                              - 57
+                              - 58
+                              - 59
+                              - 60
+                              - 61
+                              - 62
+                              - 63
+                              - 64
+                              - 65
+                              - 66
+                              - 67
+                              - 68
+                              - 10001
+                              - 10002
+                              - 10003
+                              - 10004
+                              - 10005
+                              - 10009
+                              - 10010
+                              - 10013
+                              - 10014
+                              - 10016
+                              - 10018
+                              - 10024
+                              - 10028
+                              - 10029
+                              - 10030
+                              - 10038
+                              - 10039
+                              - 10040
+                              - 10041
+                              - 10042
+                              - 10052
+                              - 10053
+                              - 10054
+                              - 10055
+                              - 10056
+                              - 10057
+                              - 10060
+                              - 10062
+                              - 10063
+                              - 10064
+                              - 10065
+                              - 10066
+                              - 10068
+                          minItems: 1
+                      required:
+                        - childResourceType
+                  accessControlAttributes:
+                    type: array
+                    items:
+                      type: string
+                    minItems: 1
+                required:
+                  - accessControlOriginators
+                  - accessControlOperations
+        selfPrivileges:
+          type: object
+          properties:
+            accessControlRule:
+              type: array
+              items:
+                type: object
+                properties:
+                  accessControlOriginators:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                    minItems: 1
+                  accessControlOperations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  accessControlContexts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accessControlWindow:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                        accessControlIpAddresses:
+                          type: object
+                          properties:
+                            ipv4Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                            ipv6Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                        accessControlLocationRegion:
+                          type: object
+                          properties:
+                            countryCode:
+                              type: array
+                              items:
+                                type: string
+                                pattern: '[A-Z]{2}'
+                              minItems: 1
+                            circRegion:
+                              type: array
+                              items:
+                                type: number
+                        accessControlUserIDs:
+                          type: array
+                          items:
+                            type: string
+                          minItems: 1
+                        accessControlEvalCriteria:
+                          type: object
+                          properties:
+                            operator:
+                              type: integer
+                              enum:
+                                - 1
+                                - 2
+                                - 3
+                                - 4
+                                - 5
+                                - 6
+                            subject:
+                              type: string
+                            threshold: {}
+                          required:
+                            - operator
+                            - subject
+                            - threshold
+                        accessControlLimit:
+                          type: integer
+                  accessControlAuthenticationFlag:
+                    type: boolean
+                  accessControlObjectDetails:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resourceType:
+                          type: integer
+                          enum:
+                            - 1
+                            - 2
+                            - 3
+                            - 4
+                            - 5
+                            - 6
+                            - 7
+                            - 8
+                            - 9
+                            - 10
+                            - 11
+                            - 12
+                            - 13
+                            - 14
+                            - 15
+                            - 16
+                            - 17
+                            - 18
+                            - 19
+                            - 20
+                            - 21
+                            - 22
+                            - 23
+                            - 24
+                            - 25
+                            - 26
+                            - 27
+                            - 28
+                            - 29
+                            - 30
+                            - 31
+                            - 32
+                            - 34
+                            - 35
+                            - 36
+                            - 37
+                            - 38
+                            - 39
+                            - 40
+                            - 41
+                            - 42
+                            - 43
+                            - 44
+                            - 45
+                            - 46
+                            - 47
+                            - 48
+                            - 49
+                            - 50
+                            - 51
+                            - 52
+                            - 53
+                            - 54
+                            - 55
+                            - 56
+                            - 57
+                            - 58
+                            - 59
+                            - 60
+                            - 61
+                            - 62
+                            - 63
+                            - 64
+                            - 65
+                            - 66
+                            - 67
+                            - 68
+                            - 10001
+                            - 10002
+                            - 10003
+                            - 10004
+                            - 10005
+                            - 10009
+                            - 10010
+                            - 10013
+                            - 10014
+                            - 10016
+                            - 10018
+                            - 10024
+                            - 10028
+                            - 10029
+                            - 10030
+                            - 10038
+                            - 10039
+                            - 10040
+                            - 10041
+                            - 10042
+                            - 10052
+                            - 10053
+                            - 10054
+                            - 10055
+                            - 10056
+                            - 10057
+                            - 10060
+                            - 10062
+                            - 10063
+                            - 10064
+                            - 10065
+                            - 10066
+                            - 10068
+                        specializationID:
+                          type: object
+                          properties:
+                            containerDefinition:
+                              type: string
+                              format: uri
+                            mgmtDefinition:
+                              type: integer
+                              enum:
+                                - 0
+                                - 1001
+                                - 1002
+                                - 1003
+                                - 1004
+                                - 1005
+                                - 1006
+                                - 1007
+                                - 1008
+                                - 1009
+                                - 1010
+                                - 1011
+                                - 1012
+                                - 1013
+                                - 1014
+                                - 1015
+                                - 1016
+                                - 1017
+                                - 1018
+                                - 1019
+                                - 1020
+                                - 1021
+                                - 1022
+                                - 1023
+                                - 1024
+                                - 1025
+                                - 1026
+                                - 1027
+                                - 1028
+                        childResourceType:
+                          type: array
+                          items:
+                            type: integer
+                            enum:
+                              - 1
+                              - 2
+                              - 3
+                              - 4
+                              - 5
+                              - 6
+                              - 7
+                              - 8
+                              - 9
+                              - 10
+                              - 11
+                              - 12
+                              - 13
+                              - 14
+                              - 15
+                              - 16
+                              - 17
+                              - 18
+                              - 19
+                              - 20
+                              - 21
+                              - 22
+                              - 23
+                              - 24
+                              - 25
+                              - 26
+                              - 27
+                              - 28
+                              - 29
+                              - 30
+                              - 31
+                              - 32
+                              - 34
+                              - 35
+                              - 36
+                              - 37
+                              - 38
+                              - 39
+                              - 40
+                              - 41
+                              - 42
+                              - 43
+                              - 44
+                              - 45
+                              - 46
+                              - 47
+                              - 48
+                              - 49
+                              - 50
+                              - 51
+                              - 52
+                              - 53
+                              - 54
+                              - 55
+                              - 56
+                              - 57
+                              - 58
+                              - 59
+                              - 60
+                              - 61
+                              - 62
+                              - 63
+                              - 64
+                              - 65
+                              - 66
+                              - 67
+                              - 68
+                              - 10001
+                              - 10002
+                              - 10003
+                              - 10004
+                              - 10005
+                              - 10009
+                              - 10010
+                              - 10013
+                              - 10014
+                              - 10016
+                              - 10018
+                              - 10024
+                              - 10028
+                              - 10029
+                              - 10030
+                              - 10038
+                              - 10039
+                              - 10040
+                              - 10041
+                              - 10042
+                              - 10052
+                              - 10053
+                              - 10054
+                              - 10055
+                              - 10056
+                              - 10057
+                              - 10060
+                              - 10062
+                              - 10063
+                              - 10064
+                              - 10065
+                              - 10066
+                              - 10068
+                          minItems: 1
+                      required:
+                        - childResourceType
+                  accessControlAttributes:
+                    type: array
+                    items:
+                      type: string
+                    minItems: 1
+                required:
+                  - accessControlOriginators
+                  - accessControlOperations
+        authorizationDecisionResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        authorizationPolicyResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        authorizationInformationResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - privileges
+        - selfPrivileges
+        - authorizationDecisionResourceIDs
+        - authorizationPolicyResourceIDs
+        - authorizationInformationResourceIDs
+    m2m.acp.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        privileges:
+          type: object
+          properties:
+            accessControlRule:
+              type: array
+              items:
+                type: object
+                properties:
+                  accessControlOriginators:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                    minItems: 1
+                  accessControlOperations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  accessControlContexts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accessControlWindow:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                        accessControlIpAddresses:
+                          type: object
+                          properties:
+                            ipv4Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                            ipv6Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                        accessControlLocationRegion:
+                          type: object
+                          properties:
+                            countryCode:
+                              type: array
+                              items:
+                                type: string
+                                pattern: '[A-Z]{2}'
+                              minItems: 1
+                            circRegion:
+                              type: array
+                              items:
+                                type: number
+                        accessControlUserIDs:
+                          type: array
+                          items:
+                            type: string
+                          minItems: 1
+                        accessControlEvalCriteria:
+                          type: object
+                          properties:
+                            operator:
+                              type: integer
+                              enum:
+                                - 1
+                                - 2
+                                - 3
+                                - 4
+                                - 5
+                                - 6
+                            subject:
+                              type: string
+                            threshold: {}
+                          required:
+                            - operator
+                            - subject
+                            - threshold
+                        accessControlLimit:
+                          type: integer
+                  accessControlAuthenticationFlag:
+                    type: boolean
+                  accessControlObjectDetails:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resourceType:
+                          type: integer
+                          enum:
+                            - 1
+                            - 2
+                            - 3
+                            - 4
+                            - 5
+                            - 6
+                            - 7
+                            - 8
+                            - 9
+                            - 10
+                            - 11
+                            - 12
+                            - 13
+                            - 14
+                            - 15
+                            - 16
+                            - 17
+                            - 18
+                            - 19
+                            - 20
+                            - 21
+                            - 22
+                            - 23
+                            - 24
+                            - 25
+                            - 26
+                            - 27
+                            - 28
+                            - 29
+                            - 30
+                            - 31
+                            - 32
+                            - 34
+                            - 35
+                            - 36
+                            - 37
+                            - 38
+                            - 39
+                            - 40
+                            - 41
+                            - 42
+                            - 43
+                            - 44
+                            - 45
+                            - 46
+                            - 47
+                            - 48
+                            - 49
+                            - 50
+                            - 51
+                            - 52
+                            - 53
+                            - 54
+                            - 55
+                            - 56
+                            - 57
+                            - 58
+                            - 59
+                            - 60
+                            - 61
+                            - 62
+                            - 63
+                            - 64
+                            - 65
+                            - 66
+                            - 67
+                            - 68
+                            - 10001
+                            - 10002
+                            - 10003
+                            - 10004
+                            - 10005
+                            - 10009
+                            - 10010
+                            - 10013
+                            - 10014
+                            - 10016
+                            - 10018
+                            - 10024
+                            - 10028
+                            - 10029
+                            - 10030
+                            - 10038
+                            - 10039
+                            - 10040
+                            - 10041
+                            - 10042
+                            - 10052
+                            - 10053
+                            - 10054
+                            - 10055
+                            - 10056
+                            - 10057
+                            - 10060
+                            - 10062
+                            - 10063
+                            - 10064
+                            - 10065
+                            - 10066
+                            - 10068
+                        specializationID:
+                          type: object
+                          properties:
+                            containerDefinition:
+                              type: string
+                              format: uri
+                            mgmtDefinition:
+                              type: integer
+                              enum:
+                                - 0
+                                - 1001
+                                - 1002
+                                - 1003
+                                - 1004
+                                - 1005
+                                - 1006
+                                - 1007
+                                - 1008
+                                - 1009
+                                - 1010
+                                - 1011
+                                - 1012
+                                - 1013
+                                - 1014
+                                - 1015
+                                - 1016
+                                - 1017
+                                - 1018
+                                - 1019
+                                - 1020
+                                - 1021
+                                - 1022
+                                - 1023
+                                - 1024
+                                - 1025
+                                - 1026
+                                - 1027
+                                - 1028
+                        childResourceType:
+                          type: array
+                          items:
+                            type: integer
+                            enum:
+                              - 1
+                              - 2
+                              - 3
+                              - 4
+                              - 5
+                              - 6
+                              - 7
+                              - 8
+                              - 9
+                              - 10
+                              - 11
+                              - 12
+                              - 13
+                              - 14
+                              - 15
+                              - 16
+                              - 17
+                              - 18
+                              - 19
+                              - 20
+                              - 21
+                              - 22
+                              - 23
+                              - 24
+                              - 25
+                              - 26
+                              - 27
+                              - 28
+                              - 29
+                              - 30
+                              - 31
+                              - 32
+                              - 34
+                              - 35
+                              - 36
+                              - 37
+                              - 38
+                              - 39
+                              - 40
+                              - 41
+                              - 42
+                              - 43
+                              - 44
+                              - 45
+                              - 46
+                              - 47
+                              - 48
+                              - 49
+                              - 50
+                              - 51
+                              - 52
+                              - 53
+                              - 54
+                              - 55
+                              - 56
+                              - 57
+                              - 58
+                              - 59
+                              - 60
+                              - 61
+                              - 62
+                              - 63
+                              - 64
+                              - 65
+                              - 66
+                              - 67
+                              - 68
+                              - 10001
+                              - 10002
+                              - 10003
+                              - 10004
+                              - 10005
+                              - 10009
+                              - 10010
+                              - 10013
+                              - 10014
+                              - 10016
+                              - 10018
+                              - 10024
+                              - 10028
+                              - 10029
+                              - 10030
+                              - 10038
+                              - 10039
+                              - 10040
+                              - 10041
+                              - 10042
+                              - 10052
+                              - 10053
+                              - 10054
+                              - 10055
+                              - 10056
+                              - 10057
+                              - 10060
+                              - 10062
+                              - 10063
+                              - 10064
+                              - 10065
+                              - 10066
+                              - 10068
+                          minItems: 1
+                      required:
+                        - childResourceType
+                  accessControlAttributes:
+                    type: array
+                    items:
+                      type: string
+                    minItems: 1
+                required:
+                  - accessControlOriginators
+                  - accessControlOperations
+        selfPrivileges:
+          type: object
+          properties:
+            accessControlRule:
+              type: array
+              items:
+                type: object
+                properties:
+                  accessControlOriginators:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                    minItems: 1
+                  accessControlOperations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  accessControlContexts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        accessControlWindow:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                        accessControlIpAddresses:
+                          type: object
+                          properties:
+                            ipv4Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                            ipv6Addresses:
+                              type: array
+                              items:
+                                type: string
+                                pattern: undefined
+                              minItems: 1
+                        accessControlLocationRegion:
+                          type: object
+                          properties:
+                            countryCode:
+                              type: array
+                              items:
+                                type: string
+                                pattern: '[A-Z]{2}'
+                              minItems: 1
+                            circRegion:
+                              type: array
+                              items:
+                                type: number
+                        accessControlUserIDs:
+                          type: array
+                          items:
+                            type: string
+                          minItems: 1
+                        accessControlEvalCriteria:
+                          type: object
+                          properties:
+                            operator:
+                              type: integer
+                              enum:
+                                - 1
+                                - 2
+                                - 3
+                                - 4
+                                - 5
+                                - 6
+                            subject:
+                              type: string
+                            threshold: {}
+                          required:
+                            - operator
+                            - subject
+                            - threshold
+                        accessControlLimit:
+                          type: integer
+                  accessControlAuthenticationFlag:
+                    type: boolean
+                  accessControlObjectDetails:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        resourceType:
+                          type: integer
+                          enum:
+                            - 1
+                            - 2
+                            - 3
+                            - 4
+                            - 5
+                            - 6
+                            - 7
+                            - 8
+                            - 9
+                            - 10
+                            - 11
+                            - 12
+                            - 13
+                            - 14
+                            - 15
+                            - 16
+                            - 17
+                            - 18
+                            - 19
+                            - 20
+                            - 21
+                            - 22
+                            - 23
+                            - 24
+                            - 25
+                            - 26
+                            - 27
+                            - 28
+                            - 29
+                            - 30
+                            - 31
+                            - 32
+                            - 34
+                            - 35
+                            - 36
+                            - 37
+                            - 38
+                            - 39
+                            - 40
+                            - 41
+                            - 42
+                            - 43
+                            - 44
+                            - 45
+                            - 46
+                            - 47
+                            - 48
+                            - 49
+                            - 50
+                            - 51
+                            - 52
+                            - 53
+                            - 54
+                            - 55
+                            - 56
+                            - 57
+                            - 58
+                            - 59
+                            - 60
+                            - 61
+                            - 62
+                            - 63
+                            - 64
+                            - 65
+                            - 66
+                            - 67
+                            - 68
+                            - 10001
+                            - 10002
+                            - 10003
+                            - 10004
+                            - 10005
+                            - 10009
+                            - 10010
+                            - 10013
+                            - 10014
+                            - 10016
+                            - 10018
+                            - 10024
+                            - 10028
+                            - 10029
+                            - 10030
+                            - 10038
+                            - 10039
+                            - 10040
+                            - 10041
+                            - 10042
+                            - 10052
+                            - 10053
+                            - 10054
+                            - 10055
+                            - 10056
+                            - 10057
+                            - 10060
+                            - 10062
+                            - 10063
+                            - 10064
+                            - 10065
+                            - 10066
+                            - 10068
+                        specializationID:
+                          type: object
+                          properties:
+                            containerDefinition:
+                              type: string
+                              format: uri
+                            mgmtDefinition:
+                              type: integer
+                              enum:
+                                - 0
+                                - 1001
+                                - 1002
+                                - 1003
+                                - 1004
+                                - 1005
+                                - 1006
+                                - 1007
+                                - 1008
+                                - 1009
+                                - 1010
+                                - 1011
+                                - 1012
+                                - 1013
+                                - 1014
+                                - 1015
+                                - 1016
+                                - 1017
+                                - 1018
+                                - 1019
+                                - 1020
+                                - 1021
+                                - 1022
+                                - 1023
+                                - 1024
+                                - 1025
+                                - 1026
+                                - 1027
+                                - 1028
+                        childResourceType:
+                          type: array
+                          items:
+                            type: integer
+                            enum:
+                              - 1
+                              - 2
+                              - 3
+                              - 4
+                              - 5
+                              - 6
+                              - 7
+                              - 8
+                              - 9
+                              - 10
+                              - 11
+                              - 12
+                              - 13
+                              - 14
+                              - 15
+                              - 16
+                              - 17
+                              - 18
+                              - 19
+                              - 20
+                              - 21
+                              - 22
+                              - 23
+                              - 24
+                              - 25
+                              - 26
+                              - 27
+                              - 28
+                              - 29
+                              - 30
+                              - 31
+                              - 32
+                              - 34
+                              - 35
+                              - 36
+                              - 37
+                              - 38
+                              - 39
+                              - 40
+                              - 41
+                              - 42
+                              - 43
+                              - 44
+                              - 45
+                              - 46
+                              - 47
+                              - 48
+                              - 49
+                              - 50
+                              - 51
+                              - 52
+                              - 53
+                              - 54
+                              - 55
+                              - 56
+                              - 57
+                              - 58
+                              - 59
+                              - 60
+                              - 61
+                              - 62
+                              - 63
+                              - 64
+                              - 65
+                              - 66
+                              - 67
+                              - 68
+                              - 10001
+                              - 10002
+                              - 10003
+                              - 10004
+                              - 10005
+                              - 10009
+                              - 10010
+                              - 10013
+                              - 10014
+                              - 10016
+                              - 10018
+                              - 10024
+                              - 10028
+                              - 10029
+                              - 10030
+                              - 10038
+                              - 10039
+                              - 10040
+                              - 10041
+                              - 10042
+                              - 10052
+                              - 10053
+                              - 10054
+                              - 10055
+                              - 10056
+                              - 10057
+                              - 10060
+                              - 10062
+                              - 10063
+                              - 10064
+                              - 10065
+                              - 10066
+                              - 10068
+                          minItems: 1
+                      required:
+                        - childResourceType
+                  accessControlAttributes:
+                    type: array
+                    items:
+                      type: string
+                    minItems: 1
+                required:
+                  - accessControlOriginators
+                  - accessControlOperations
+        authorizationDecisionResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        authorizationPolicyResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        authorizationInformationResourceIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - privileges
+        - selfPrivileges
+        - authorizationDecisionResourceIDs
+        - authorizationPolicyResourceIDs
+        - authorizationInformationResourceIDs
+    m2m.ae:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        appName:
+          type: string
+        App-ID:
+          type: string
+        AE-ID:
+          type: string
+        pointOfAccess:
+          type: array
+          items:
+            type: string
+            format: uri
+            pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
+          minItems: 1
+        ontologyRef:
+          type: string
+          format: uri
+        nodeLink:
+          type: string
+          format: uri
+        requestReachability:
+          type: boolean
+        contentSerialization:
+          type: array
+          items:
+            type: string
+            pattern: '[\w/!#$^_.+&\-]+'
+            enum:
+              - xml
+              - json
+              - cbor
+          minItems: 1
+        e2eSecInfo:
+          type: object
+          properties:
+            supportedE2ESecFeatures:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 32
+                  - 33
+                  - 34
+                  - 35
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+              minItems: 1
+            certificates:
+              type: array
+              items:
+                type: string
+                format: byte
+              minItems: 1
+            sharedReceiverESPrimRandObject:
+              type: object
+              properties:
+                esprimRandID:
+                  type: string
+                esprimRandValue:
+                  type: string
+                esprimRandExpiry:
+                  anyOf:
+                    - type: string
+                      pattern: >-
+                        \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+                    - type: integer
+                esprimKeyGenAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 1
+                  minItems: 1
+                esprimProtocolAndAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 10
+                      - 11
+                      - 12
+                  minItems: 1
+              required:
+                - esprimRandID
+                - esprimRandValue
+                - esprimRandExpiry
+                - esprimKeyGenAlgIDs
+                - esprimProtocolAndAlgIDs
+          required:
+            - supportedE2ESecFeatures
+        M2M-Ext-ID:
+          type: string
+        supportedReleaseVersions:
+          type: array
+          items:
+            type: string
+            pattern: undefined
+          minItems: 1
+        registrationStatus:
+          type: integer
+          enum:
+            - 1
+            - 2
+        trackRegistrationPoints:
+          type: boolean
+        sessionCapabilities:
+          type: array
+          items:
+            type: string
+            pattern: '[\w/!#$^_\.+&\-;=]+'
+          minItems: 1
+        triggerEnable:
+          type: boolean
+        activityPatternElements:
+          type: object
+          properties:
+            activityPatternElements:
+              type: array
+              items:
+                type: object
+                properties:
+                  scheduleElement:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        scheduleEntry:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                      required:
+                        - scheduleEntry
+                  stationaryIndication:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                  dataSizeIndicator:
+                    type: integer
+                required:
+                  - scheduleElement
+          required:
+            - activityPatternElements
+        enableTimeCompensation:
+          type: boolean
+        Trigger-Recipient-ID:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        triggerReferenceNumber:
+          type: integer
+          minimum: 0
+        externalGroupID:
+          type: string
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - App-ID
+        - AE-ID
+        - requestReachability
+        - supportedReleaseVersions
+    m2m.ae.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        appName:
+          type: string
+        App-ID:
+          type: string
+        AE-ID:
+          type: string
+        pointOfAccess:
+          type: array
+          items:
+            type: string
+            format: uri
+            pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
+          minItems: 1
+        ontologyRef:
+          type: string
+          format: uri
+        nodeLink:
+          type: string
+          format: uri
+        requestReachability:
+          type: boolean
+        contentSerialization:
+          type: array
+          items:
+            type: string
+            pattern: '[\w/!#$^_.+&\-]+'
+            enum:
+              - xml
+              - json
+              - cbor
+          minItems: 1
+        e2eSecInfo:
+          type: object
+          properties:
+            supportedE2ESecFeatures:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 32
+                  - 33
+                  - 34
+                  - 35
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+              minItems: 1
+            certificates:
+              type: array
+              items:
+                type: string
+                format: byte
+              minItems: 1
+            sharedReceiverESPrimRandObject:
+              type: object
+              properties:
+                esprimRandID:
+                  type: string
+                esprimRandValue:
+                  type: string
+                esprimRandExpiry:
+                  anyOf:
+                    - type: string
+                      pattern: >-
+                        \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+                    - type: integer
+                esprimKeyGenAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 1
+                  minItems: 1
+                esprimProtocolAndAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 10
+                      - 11
+                      - 12
+                  minItems: 1
+              required:
+                - esprimRandID
+                - esprimRandValue
+                - esprimRandExpiry
+                - esprimKeyGenAlgIDs
+                - esprimProtocolAndAlgIDs
+          required:
+            - supportedE2ESecFeatures
+        M2M-Ext-ID:
+          type: string
+        supportedReleaseVersions:
+          type: array
+          items:
+            type: string
+            pattern: undefined
+          minItems: 1
+        registrationStatus:
+          type: integer
+          enum:
+            - 1
+            - 2
+        trackRegistrationPoints:
+          type: boolean
+        sessionCapabilities:
+          type: array
+          items:
+            type: string
+            pattern: '[\w/!#$^_\.+&\-;=]+'
+          minItems: 1
+        triggerEnable:
+          type: boolean
+        activityPatternElements:
+          type: object
+          properties:
+            activityPatternElements:
+              type: array
+              items:
+                type: object
+                properties:
+                  scheduleElement:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        scheduleEntry:
+                          type: array
+                          items:
+                            type: string
+                            pattern: >-
+                              (((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?|([1-5]?\d)),)*((([*]|(([1-5]?\d)-([1-5]?\d)))(/([1-5]?\d))?)|([1-5]?\d))\s+){2}(((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?|(1?\d|2[0-3])),)*((([*]|((1?\d|2[0-3])-(1?\d|2[0-3])))(/1?\d|2[0-3])?)|(1?\d|2[0-3]))\s+)(((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?|([1-9]|1\d|2\d|3[01])),)*((([*]|(([1-9]|1\d|2\d|3[01])-([1-9]|1\d|2\d|3[01])))(/[1-9]|1\d|2\d|3[01])?)|([1-9]|1\d|2\d|3[01]))\s+)(((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?|([1-9]|1[0-2])),)*((([*]|(([1-9]|1[0-2])-([1-9]|1[0-2])))(/[1-9]|1[0-2])?)|([1-9]|1[0-2]))\s+)(((([*]|(([0-6])-([0-6])))(/[0-6])?|([0-6])),)*((([*]|(([0-6])-([0-6])))(/[0-6])?)|([0-6]))\s+)(((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?|([2-9]\d\d\d)),)*((([*]|(([2-9]\d\d\d)-([2-9]\d\d\d)))(/\d?\d?\d?\d)?)|([2-9]\d\d\d)))
+                      required:
+                        - scheduleEntry
+                  stationaryIndication:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                  dataSizeIndicator:
+                    type: integer
+                required:
+                  - scheduleElement
+          required:
+            - activityPatternElements
+        enableTimeCompensation:
+          type: boolean
+        Trigger-Recipient-ID:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        triggerReferenceNumber:
+          type: integer
+          minimum: 0
+        externalGroupID:
+          type: string
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - App-ID
+        - AE-ID
+        - requestReachability
+        - supportedReleaseVersions
+    m2m.cnt:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        stateTag:
+          type: integer
+        creator:
+          type: string
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        maxNrOfInstances:
+          type: integer
+        maxByteSize:
+          type: integer
+        maxInstanceAge:
+          type: integer
+        currentNrOfInstances:
+          type: integer
+        currentByteSize:
+          type: integer
+        locationID:
+          type: string
+          format: uri
+        ontologyRef:
+          type: string
+          format: uri
+        disableRetrieval:
+          type: boolean
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - stateTag
+        - currentNrOfInstances
+        - currentByteSize
+    m2m.cnt.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        stateTag:
+          type: integer
+        creator:
+          type: string
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        maxNrOfInstances:
+          type: integer
+        maxByteSize:
+          type: integer
+        maxInstanceAge:
+          type: integer
+        currentNrOfInstances:
+          type: integer
+        currentByteSize:
+          type: integer
+        locationID:
+          type: string
+          format: uri
+        ontologyRef:
+          type: string
+          format: uri
+        disableRetrieval:
+          type: boolean
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - stateTag
+        - currentNrOfInstances
+        - currentByteSize
+    m2m.cin:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        stateTag:
+          type: integer
+        creator:
+          type: string
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        contentInfo:
+          type: string
+          pattern: undefined
+        contentSize:
+          type: integer
+        contentRef:
+          type: object
+          properties:
+            URIReference:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  URI:
+                    type: string
+                    format: uri
+                required:
+                  - name
+                  - URI
+          required:
+            - URIReference
+        ontologyRef:
+          type: string
+          format: uri
+        content: {}
+        deletionCnt:
+          type: integer
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - stateTag
+        - contentSize
+        - content
+    m2m.cin.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        stateTag:
+          type: integer
+        creator:
+          type: string
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        contentInfo:
+          type: string
+          pattern: undefined
+        contentSize:
+          type: integer
+        contentRef:
+          type: object
+          properties:
+            URIReference:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  URI:
+                    type: string
+                    format: uri
+                required:
+                  - name
+                  - URI
+          required:
+            - URIReference
+        ontologyRef:
+          type: string
+          format: uri
+        content: {}
+        deletionCnt:
+          type: integer
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - stateTag
+        - contentSize
+        - content
+    m2m.cb:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        cseType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+        CSE-ID:
+          type: string
+        supportedResourceType:
+          type: array
+          items:
+            type: integer
+            enum:
+              - 1
+              - 2
+              - 3
+              - 4
+              - 5
+              - 6
+              - 7
+              - 8
+              - 9
+              - 10
+              - 11
+              - 12
+              - 13
+              - 14
+              - 15
+              - 16
+              - 17
+              - 18
+              - 19
+              - 20
+              - 21
+              - 22
+              - 23
+              - 24
+              - 25
+              - 26
+              - 27
+              - 28
+              - 29
+              - 30
+              - 31
+              - 32
+              - 34
+              - 35
+              - 36
+              - 37
+              - 38
+              - 39
+              - 40
+              - 41
+              - 42
+              - 43
+              - 44
+              - 45
+              - 46
+              - 47
+              - 48
+              - 49
+              - 50
+              - 51
+              - 52
+              - 53
+              - 54
+              - 55
+              - 56
+              - 57
+              - 58
+              - 59
+              - 60
+              - 61
+              - 62
+              - 63
+              - 64
+              - 65
+              - 66
+              - 67
+              - 68
+              - 10001
+              - 10002
+              - 10003
+              - 10004
+              - 10005
+              - 10009
+              - 10010
+              - 10013
+              - 10014
+              - 10016
+              - 10018
+              - 10024
+              - 10028
+              - 10029
+              - 10030
+              - 10038
+              - 10039
+              - 10040
+              - 10041
+              - 10042
+              - 10052
+              - 10053
+              - 10054
+              - 10055
+              - 10056
+              - 10057
+              - 10060
+              - 10062
+              - 10063
+              - 10064
+              - 10065
+              - 10066
+              - 10068
+        pointOfAccess:
+          type: array
+          items:
+            type: string
+            format: uri
+            pattern: (http|HTTP|coap|COAP|mqtt|MQTT|ws|WS)(s|S)?://[\w/!#$^_\.+&\-:;=]+
+          minItems: 1
+        nodeLink:
+          type: string
+          format: uri
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        location:
+          type: object
+          properties:
+            type:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+                - 6
+            coordinates:
+              type: string
+              pattern: >-
+                (?'MultiPolygon'^\[(?&Polygon)(,\s*(?&Polygon)){0,}\]$)|(?'Polygon'\[{2}(?P<FirstPoint>(?&Point))(,\s*(?&Point)){2,}(,\s*(?P=FirstPoint)\]{2}))|(?'MultiLineString'^\[(?&LineStringOrMultipoint)(,\s*(?&LineStringOrMultipoint)){0,}\]$)|(?'LineStringOrMultipoint'\[(?&Point)(,\s*(?&Point)){1,}\])|(?'Multipoint'^\[(?&Point)(,\s*(?&Point)){0,}\]$)|(?'Point'\[[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?),\s*[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?)(,\d+)?\])
+          required:
+            - type
+            - coordinates
+        contentSerialization:
+          type: array
+          items:
+            type: string
+            pattern: '[\w/!#$^_.+&\-]+'
+            enum:
+              - xml
+              - json
+              - cbor
+          minItems: 1
+        e2eSecInfo:
+          type: object
+          properties:
+            supportedE2ESecFeatures:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 32
+                  - 33
+                  - 34
+                  - 35
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+              minItems: 1
+            certificates:
+              type: array
+              items:
+                type: string
+                format: byte
+              minItems: 1
+            sharedReceiverESPrimRandObject:
+              type: object
+              properties:
+                esprimRandID:
+                  type: string
+                esprimRandValue:
+                  type: string
+                esprimRandExpiry:
+                  anyOf:
+                    - type: string
+                      pattern: >-
+                        \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+                    - type: integer
+                esprimKeyGenAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 1
+                  minItems: 1
+                esprimProtocolAndAlgIDs:
+                  type: array
+                  items:
+                    type: integer
+                    enum:
+                      - 10
+                      - 11
+                      - 12
+                  minItems: 1
+              required:
+                - esprimRandID
+                - esprimRandValue
+                - esprimRandExpiry
+                - esprimKeyGenAlgIDs
+                - esprimProtocolAndAlgIDs
+          required:
+            - supportedE2ESecFeatures
+        supportedReleaseVersions:
+          type: array
+          items:
+            type: string
+            pattern: undefined
+          minItems: 1
+        currentTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - CSE-ID
+        - supportedResourceType
+        - pointOfAccess
+        - supportedReleaseVersions
+        - currentTime
+    m2m.grp:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        creator:
+          type: string
+        memberType:
+          type: integer
+          enum:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10046
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+            - 20001
+            - 20002
+            - 20003
+        specializationType:
+          type: object
+          properties:
+            containerDefinition:
+              type: string
+              format: uri
+            mgmtDefinition:
+              type: integer
+              enum:
+                - 0
+                - 1001
+                - 1002
+                - 1003
+                - 1004
+                - 1005
+                - 1006
+                - 1007
+                - 1008
+                - 1009
+                - 1010
+                - 1011
+                - 1012
+                - 1013
+                - 1014
+                - 1015
+                - 1016
+                - 1017
+                - 1018
+                - 1019
+                - 1020
+                - 1021
+                - 1022
+                - 1023
+                - 1024
+                - 1025
+                - 1026
+                - 1027
+                - 1028
+        currentNrOfMembers:
+          type: integer
+        maxNrOfMembers:
+          type: integer
+        memberIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+        membersAccessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        memberTypeValidated:
+          type: boolean
+        consistencyStrategy:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+        groupName:
+          type: string
+        semanticSupportIndicator:
+          type: boolean
+        notifyAggregation:
+          type: object
+          properties:
+            number:
+              type: integer
+            duration:
+              type: string
+              format: duration
+        somecastEnable:
+          type: boolean
+        somecastAlgorithm:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - memberType
+        - currentNrOfMembers
+        - maxNrOfMembers
+        - memberIDs
+        - somecastEnable
+    m2m.grp.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        announceTo:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        announcedAttribute:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        announceSyncType:
+          type: integer
+          enum:
+            - 1
+            - 2
+        creator:
+          type: string
+        memberType:
+          type: integer
+          enum:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10046
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+            - 20001
+            - 20002
+            - 20003
+        specializationType:
+          type: object
+          properties:
+            containerDefinition:
+              type: string
+              format: uri
+            mgmtDefinition:
+              type: integer
+              enum:
+                - 0
+                - 1001
+                - 1002
+                - 1003
+                - 1004
+                - 1005
+                - 1006
+                - 1007
+                - 1008
+                - 1009
+                - 1010
+                - 1011
+                - 1012
+                - 1013
+                - 1014
+                - 1015
+                - 1016
+                - 1017
+                - 1018
+                - 1019
+                - 1020
+                - 1021
+                - 1022
+                - 1023
+                - 1024
+                - 1025
+                - 1026
+                - 1027
+                - 1028
+        currentNrOfMembers:
+          type: integer
+        maxNrOfMembers:
+          type: integer
+        memberIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+        membersAccessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        memberTypeValidated:
+          type: boolean
+        consistencyStrategy:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+        groupName:
+          type: string
+        semanticSupportIndicator:
+          type: boolean
+        notifyAggregation:
+          type: object
+          properties:
+            number:
+              type: integer
+            duration:
+              type: string
+              format: duration
+        somecastEnable:
+          type: boolean
+        somecastAlgorithm:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - memberType
+        - currentNrOfMembers
+        - maxNrOfMembers
+        - memberIDs
+        - somecastEnable
+    m2m.sub:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        creator:
+          type: string
+        eventNotificationCriteria:
+          type: object
+          properties:
+            createdBefore:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            createdAfter:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            modifiedSince:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            unmodifiedSince:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            stateTagSmaller:
+              type: integer
+            stateTagBigger:
+              type: integer
+            expireBefore:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            expireAfter:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            sizeAbove:
+              type: integer
+            sizeBelow:
+              type: integer
+            operationMonitor:
+              type: array
+              items:
+                type: object
+                properties:
+                  operations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  originator:
+                    type: string
+            attribute:
+              type: array
+              items:
+                type: string
+              minItems: 1
+            notificationEventType:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+            childResourceType:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              minItems: 1
+            missingData:
+              type: object
+              properties:
+                number:
+                  type: integer
+                duration:
+                  type: string
+                  format: duration
+              required:
+                - number
+                - duration
+            filterOperation:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+        expirationCounter:
+          type: integer
+        notificationURI:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        groupID:
+          type: string
+          format: uri
+        notificationForwardingURI:
+          type: string
+          format: uri
+        batchNotify:
+          type: object
+          properties:
+            number:
+              type: integer
+            duration:
+              type: string
+              format: duration
+        rateLimit:
+          type: object
+          properties:
+            maxNrOfNotify:
+              type: integer
+            timeWindow:
+              type: string
+              format: duration
+          required:
+            - maxNrOfNotify
+            - timeWindow
+        preSubscriptionNotify:
+          type: integer
+        pendingNotification:
+          type: integer
+          enum:
+            - 1
+            - 2
+        notificationStoragePriority:
+          type: integer
+        latestNotify:
+          type: boolean
+        notificationContentType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+        notificationEventCat:
+          type: string
+        subscriberURI:
+          type: string
+          format: uri
+        associatedCrossResourceSub:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        notificationStatsEnable:
+          type: boolean
+        notificationStatsInfo:
+          type: object
+          properties:
+            notificationStats:
+              type: array
+              items:
+                type: object
+                properties:
+                  target:
+                    type: string
+                    format: uri
+                  requestsSent:
+                    type: integer
+                  responsesReceived:
+                    type: integer
+                  notificationEventCount:
+                    type: integer
+                required:
+                  - target
+                  - requestsSent
+                  - responsesReceived
+                  - notificationEventCount
+          required:
+            - notificationStats
+        primitiveProfileID:
+          type: string
+          format: uri
+        childResource:
+          type: array
+          items:
+            type: object
+            properties:
+              val:
+                type: string
+                format: uri
+              name:
+                type: string
+                pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+              type:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              specializationID:
+                type: string
+                format: uri
+            required:
+              - val
+              - name
+              - type
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - notificationURI
+        - notificationContentType
+    m2m.sub.create:
+      type: object
+      properties:
+        resourceType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+            - 6
+            - 7
+            - 8
+            - 9
+            - 10
+            - 11
+            - 12
+            - 13
+            - 14
+            - 15
+            - 16
+            - 17
+            - 18
+            - 19
+            - 20
+            - 21
+            - 22
+            - 23
+            - 24
+            - 25
+            - 26
+            - 27
+            - 28
+            - 29
+            - 30
+            - 31
+            - 32
+            - 34
+            - 35
+            - 36
+            - 37
+            - 38
+            - 39
+            - 40
+            - 41
+            - 42
+            - 43
+            - 44
+            - 45
+            - 46
+            - 47
+            - 48
+            - 49
+            - 50
+            - 51
+            - 52
+            - 53
+            - 54
+            - 55
+            - 56
+            - 57
+            - 58
+            - 59
+            - 60
+            - 61
+            - 62
+            - 63
+            - 64
+            - 65
+            - 66
+            - 67
+            - 68
+            - 10001
+            - 10002
+            - 10003
+            - 10004
+            - 10005
+            - 10009
+            - 10010
+            - 10013
+            - 10014
+            - 10016
+            - 10018
+            - 10024
+            - 10028
+            - 10029
+            - 10030
+            - 10038
+            - 10039
+            - 10040
+            - 10041
+            - 10042
+            - 10052
+            - 10053
+            - 10054
+            - 10055
+            - 10056
+            - 10057
+            - 10060
+            - 10062
+            - 10063
+            - 10064
+            - 10065
+            - 10066
+            - 10068
+        resourceID:
+          type: string
+        parentID:
+          type: string
+          format: uri
+        creationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        lastModifiedTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        labels:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        resourceName:
+          type: string
+          pattern: '[a-zA-Z0-9]([a-zA-Z0-9\.\-,_]*)'
+        accessControlPolicyIDs:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        expirationTime:
+          type: string
+          pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+        dynamicAuthorizationConsultationIDs:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        custodian:
+          type: string
+        creator:
+          type: string
+        eventNotificationCriteria:
+          type: object
+          properties:
+            createdBefore:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            createdAfter:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            modifiedSince:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            unmodifiedSince:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            stateTagSmaller:
+              type: integer
+            stateTagBigger:
+              type: integer
+            expireBefore:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            expireAfter:
+              type: string
+              pattern: \d{4}(0[1-9]|1[0-2])(0[1-9]|[1-2]\d|30|31)T([01]\d|2[0-3])[0-5]\d[0-5]\d(,\d{1,6})?
+            sizeAbove:
+              type: integer
+            sizeBelow:
+              type: integer
+            operationMonitor:
+              type: array
+              items:
+                type: object
+                properties:
+                  operations:
+                    type: integer
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                      - 4
+                      - 5
+                      - 6
+                      - 7
+                      - 8
+                      - 9
+                      - 10
+                      - 11
+                      - 12
+                      - 13
+                      - 14
+                      - 15
+                      - 16
+                      - 17
+                      - 18
+                      - 19
+                      - 20
+                      - 21
+                      - 22
+                      - 23
+                      - 24
+                      - 25
+                      - 26
+                      - 27
+                      - 28
+                      - 29
+                      - 30
+                      - 31
+                      - 32
+                      - 33
+                      - 34
+                      - 35
+                      - 36
+                      - 37
+                      - 38
+                      - 39
+                      - 40
+                      - 41
+                      - 42
+                      - 43
+                      - 44
+                      - 45
+                      - 46
+                      - 47
+                      - 48
+                      - 49
+                      - 50
+                      - 51
+                      - 52
+                      - 53
+                      - 54
+                      - 55
+                      - 56
+                      - 57
+                      - 58
+                      - 59
+                      - 60
+                      - 61
+                      - 62
+                      - 63
+                  originator:
+                    type: string
+            attribute:
+              type: array
+              items:
+                type: string
+              minItems: 1
+            notificationEventType:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+            childResourceType:
+              type: array
+              items:
+                type: integer
+                enum:
+                  - 1
+                  - 2
+                  - 3
+                  - 4
+                  - 5
+                  - 6
+                  - 7
+                  - 8
+                  - 9
+                  - 10
+                  - 11
+                  - 12
+                  - 13
+                  - 14
+                  - 15
+                  - 16
+                  - 17
+                  - 18
+                  - 19
+                  - 20
+                  - 21
+                  - 22
+                  - 23
+                  - 24
+                  - 25
+                  - 26
+                  - 27
+                  - 28
+                  - 29
+                  - 30
+                  - 31
+                  - 32
+                  - 34
+                  - 35
+                  - 36
+                  - 37
+                  - 38
+                  - 39
+                  - 40
+                  - 41
+                  - 42
+                  - 43
+                  - 44
+                  - 45
+                  - 46
+                  - 47
+                  - 48
+                  - 49
+                  - 50
+                  - 51
+                  - 52
+                  - 53
+                  - 54
+                  - 55
+                  - 56
+                  - 57
+                  - 58
+                  - 59
+                  - 60
+                  - 61
+                  - 62
+                  - 63
+                  - 64
+                  - 65
+                  - 66
+                  - 67
+                  - 68
+                  - 10001
+                  - 10002
+                  - 10003
+                  - 10004
+                  - 10005
+                  - 10009
+                  - 10010
+                  - 10013
+                  - 10014
+                  - 10016
+                  - 10018
+                  - 10024
+                  - 10028
+                  - 10029
+                  - 10030
+                  - 10038
+                  - 10039
+                  - 10040
+                  - 10041
+                  - 10042
+                  - 10052
+                  - 10053
+                  - 10054
+                  - 10055
+                  - 10056
+                  - 10057
+                  - 10060
+                  - 10062
+                  - 10063
+                  - 10064
+                  - 10065
+                  - 10066
+                  - 10068
+              minItems: 1
+            missingData:
+              type: object
+              properties:
+                number:
+                  type: integer
+                duration:
+                  type: string
+                  format: duration
+              required:
+                - number
+                - duration
+            filterOperation:
+              type: integer
+              enum:
+                - 1
+                - 2
+                - 3
+        expirationCounter:
+          type: integer
+        notificationURI:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        groupID:
+          type: string
+          format: uri
+        notificationForwardingURI:
+          type: string
+          format: uri
+        batchNotify:
+          type: object
+          properties:
+            number:
+              type: integer
+            duration:
+              type: string
+              format: duration
+        rateLimit:
+          type: object
+          properties:
+            maxNrOfNotify:
+              type: integer
+            timeWindow:
+              type: string
+              format: duration
+          required:
+            - maxNrOfNotify
+            - timeWindow
+        preSubscriptionNotify:
+          type: integer
+        pendingNotification:
+          type: integer
+          enum:
+            - 1
+            - 2
+        notificationStoragePriority:
+          type: integer
+        latestNotify:
+          type: boolean
+        notificationContentType:
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 3
+            - 4
+            - 5
+        notificationEventCat:
+          type: string
+        subscriberURI:
+          type: string
+          format: uri
+        associatedCrossResourceSub:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        notificationStatsEnable:
+          type: boolean
+        notificationStatsInfo:
+          type: object
+          properties:
+            notificationStats:
+              type: array
+              items:
+                type: object
+                properties:
+                  target:
+                    type: string
+                    format: uri
+                  requestsSent:
+                    type: integer
+                  responsesReceived:
+                    type: integer
+                  notificationEventCount:
+                    type: integer
+                required:
+                  - target
+                  - requestsSent
+                  - responsesReceived
+                  - notificationEventCount
+          required:
+            - notificationStats
+        primitiveProfileID:
+          type: string
+          format: uri
+      required:
+        - resourceType
+        - resourceID
+        - parentID
+        - creationTime
+        - lastModifiedTime
+        - resourceName
+        - expirationTime
+        - notificationURI
+        - notificationContentType
