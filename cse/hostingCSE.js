@@ -1,11 +1,9 @@
 const { JSONPath } = require("jsonpath-plus");
-const axios = require("axios");
 const LRU = require("lru-cache");
 const config = require("config");
 const enums = require("../config/enums");
 const logger = require("../logger").forFile(__filename);
 const randomstring = require("randomstring");
-const jose = require("jose");
 const pool = require('../db/connection');
 const moment = require('moment');
 
@@ -1296,44 +1294,6 @@ async function access_decision(req_prim, resp_prim) {
 	}
 
 	return access_grant;
-}
-
-async function parse_dynamic_auth_resp(dap, req_seci) {
-	const resp = await axios.post(dap, req_seci, {
-		headers: {
-			Accept: "application/json",
-			"X-M2M-RI": 12345,
-			"X-M2M-Origin": config.cse.cse_id,
-			"Content-Type": "application/json",
-		},
-		timeout: 5000,
-	});
-
-	logger.debug({ body: resp.data }, 'dynamic auth response');
-	const seci = resp.data["m2m:seci"];
-
-	let dai = null,
-		tokens = null;
-	if (seci) {
-		if (seci.dres.dai) {
-			dai = seci.dres.dai;
-			logger.debug({ dai }, 'dynamicACPInfo from DAS');
-		}
-		if (seci.dres.tkns) {
-			tokens = seci.dres.tkns;
-			// for now, supports JWE only
-			tokens = tokens.map((token) => {
-				return JSON.parse(
-					jose.JWE.decrypt(token, config.das.private_key, {
-						complete: true,
-					}).cleartext.toString()
-				);
-			});
-			logger.debug({ tokenCount: tokens.length }, 'decrypted tokens from DAS');
-		}
-	}
-
-	return { dai, tokens };
 }
 
 function access_decision_acr_list(acr_list, originator, operation) {
