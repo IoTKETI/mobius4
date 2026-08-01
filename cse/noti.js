@@ -230,7 +230,7 @@ async function http_noti(noti_target, sgn) {
                 "X-M2M-RI": 'http-noti-' + generate_ri(),
                 "Content-Type": "application/json",
             },
-            data: JSON.stringify(sgn),
+            data: sgn,
             timeout: 3000,
         })
         .then((resp) => {
