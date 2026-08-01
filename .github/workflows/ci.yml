@@ -108,6 +108,16 @@ jobs:
             exit 1
           fi
 
+          # `[ ... -lt ... ]`는 피연산자가 정수가 아니거나 bash의 부호 있는 64비트 범위를
+          # 초과하면 거짓이 아니라 오류(종료 코드 2)를 낸다. 이 오류는 if 조건문 안에
+          # 있으므로 set -e가 잡지 못하고, 실패 분기를 건너뛰어 게이트가 열린 채로
+          # 통과해버린다. 따라서 비교 직전에 두 가지를 직접 검증한다: (1) 자릿수만
+          # 포함(개행·CR 제외), (2) 아홉 자리 이하로 제한(bash 범위 내 안전성 보장).
+          if ! [[ "$TEST_COUNT" =~ ^[0-9]{1,9}$ ]]; then
+            echo "::error::test-output.txt의 '# tests' 값이 정수가 아니다: '${TEST_COUNT}'"
+            exit 1
+          fi
+
           if [ "$TEST_COUNT" -lt "$BASELINE" ]; then
             echo "::error::테스트 개수가 ${TEST_COUNT}개로 기준선(${BASELINE}개) 미만이다 — test/ 이동·삭제나 package.json의 glob 변경으로 테스트 일부가 실행되지 않았을 수 있다."
             exit 1
