@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # 한 버전이 깨져도 나머지 버전의 결과를 끝까지 본다.
+      fail-fast: false
+      matrix:
+        node: ['22']
+
+    services:
+      postgres:
+        # PostGIS 확장이 필요하므로 공식 postgres 이미지는 쓸 수 없다.
+        # 태그는 개발 환경(PostgreSQL 17.4 / PostGIS 3.6.4)에 맞춘다.
+        # PG 17과 PostGIS 3.6 조합은 alpine으로만 발행된다. 베이스 배포판은
+        # 테스트에 영향 없음 — TCP로 DB에 질의할 뿐, PostgreSQL 메이저/PostGIS 마이너만 중요.
+        image: postgis/postgis:17-3.6-alpine
+        env:
+          POSTGRES_USER: mobius
+          POSTGRES_PASSWORD: mobius
+          # 이미지의 initdb 스크립트가 이 DB에 PostGIS 확장을 미리 활성화한다.
+          # test/helpers/server.js:14의 TEST_DB 상수와 이름이 일치해야 한다.
+          POSTGRES_DB: mobius4_test
+        ports:
+          - 5432:5432
+        # 헬스체크 없이는 DB가 뜨기 전에 다음 스텝이 실행되는 경쟁 조건이 생긴다.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # cache: npm 명시 필요 — setup-node v5부터 package.json에 packageManager 필드가
+      # 있을 때만 자동 캐싱을 켠다. 이 프로젝트에는 그 필드가 없으므로 수동 지정이 필수다.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # config/local*.json은 .gitignore 대상이라 러너에 존재하지 않는다.
+      # config/default.json의 db.user·db.pw는 빈 문자열이므로 여기서 채워야 한다.
+      #
+      # NODE_CONFIG 환경변수로 주입할 수 없는 이유:
+      # test/helpers/server.js가 자식 프로세스를 띄울 때 NODE_CONFIG를 자기 값으로
+      # 통째로 덮어쓴다(http·https·db.name·mqtt·logging). 바깥에서 설정한 NODE_CONFIG는
+      # 자식에게 전달되지 않는다. 반면 node-config는 파일 설정 위에 NODE_CONFIG를
+      # 깊은 병합하므로, local.json의 db.user·db.pw는 살아남고 db.name만 덮인다.
+      - name: Write CI database credentials
+        run: |
+          cat > config/local.json <<'JSON'
+          {
+            "db": {
+              "user": "mobius",
+              "pw": "mobius",
+              "host": "localhost",
+              "port": 5432
+            }
+          }
+          JSON
+
+      # npm install이 아니라 npm ci다. 락파일에 고정된 버전만 설치하므로 재현 가능하고,
+      # package.json과 package-lock.json이 어긋나면 즉시 실패한다.
+      - name: Install dependencies
+        run: npm ci
+
+      # shell: bash를 명시하는 이유 — GitHub Actions의 기본 셸은 pipefail을 켜지 않는다.
+      # 그 상태로 `npm test | tee`를 쓰면 npm test가 실패해도 tee의 종료 코드(0)가
+      # 스텝의 결과가 되어 실패가 은폐된다.
+      - name: Run tests
+        shell: bash
+        run: npm test 2>&1 | tee test-output.txt
+
+      # todo로 표시된 알려진 미수정 결함은 실패해도 종료 코드가 0이다.
+      # 초록불이 잔존 결함을 은폐하지 않도록 현황을 항상 로그에 남긴다.
+      # 잡을 실패시키지는 않는다. `ok … # TODO`가 보이면 그 결함이 해소된 것이므로
+      # 해당 테스트의 { todo: true } 플래그를 떼어 정식 회귀 테스트로 승격시킨다.
+      - name: Known defects (# TODO)
+        if: always()
+        shell: bash
+        run: |
+          echo "── 알려진 미수정 결함 현황 ──"
+          grep -E '# TODO' test-output.txt || echo "(TODO 표시 테스트 없음)"
