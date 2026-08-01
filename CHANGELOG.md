@@ -20,7 +20,21 @@ SemVer를 이 프로젝트 문맥으로 구체화하면:
 
 ## [Unreleased]
 
-_(다음 릴리스로 갈 항목을 여기 쌓는다.)_
+_(Accumulate items here for the next release.)_
+
+### Unresolved — pending spec clarification
+
+- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
+  standardization discussion, **indirect deletion** (a deletion that happens as a
+  side effect of deleting a different resource) is treated as not firing a
+  notification. Whether eviction falls under this needs confirmation — what
+  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
+  confirmation; the regression test is left as `todo` to keep the question visible.
+  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
+  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
+  must be stripped from the notification).
+
+## v4.4.1 (2026-08-01)
 
 **PATCH인 근거**: 아래 전부가 oneM2M 능력을 더하지 않는다 — CI 인프라, 의존성 정리,
 Node 24 호환이다.
@@ -48,16 +62,20 @@ Node 24 호환이다.
   기본 리포터를 tap에서 spec으로 바꿔, `test/README.md`가 안내하는
   `not ok … # TODO` / `ok … # TODO` 판독 절차가 Node 24에서 깨졌다.
 - 추적되던 `.DS_Store` 3개 제거 + `.gitignore` 등재.
-
-### 미해결 — 규격 확인 대기
-
-- **CIN eviction(`mni`/`mbs` 초과) 시 `net=4` 통지 여부.** oneM2M 표준화 논의의
-  **indirect deletion**(다른 리소스를 삭제하면서 부수적으로 발생하는 삭제)은 통지를
-  발생시키지 않는 것으로 다뤄졌다. eviction이 여기 해당하는지 확인이 필요하다 —
-  eviction을 유발하는 것은 DELETE가 아니라 CREATE이기 때문이다. 확인 전까지 보수적으로
-  제외했고, 회귀 테스트를 `todo`로 남겨 질문이 살아 있음을 표시했다.
-  답이 "통지한다"이면 `cse/noti.js`의 `int_cr_req !== true` 조건을 지우면 켜진다
-  (그때 `retrieve_a_cin`이 실어 주는 `int_cr`을 통지에서 제거해야 한다).
+- **Removed the unreachable DAS/`jose` dead code.** `parse_dynamic_auth_resp`
+  (`cse/hostingCSE.js`) read `config.das.private_key`, but `das` was never
+  defined anywhere in `config/default.json` or `config/local.json`
+  (`config.has('das') === false`), so the call threw `TypeError` before
+  `jose.JWE.decrypt` was ever reached — on both Node 22 and Node 24. The
+  function was called from nowhere and exported nowhere; the DAS (Dynamic
+  Authorization Server) integration never had a working path. Removed the
+  function, the `jose` dependency (its only call site), and the file-local
+  `axios` `require` (its only use in this file — the `axios` package itself
+  is still used by `noti.js`, `reqPrim.js`, and `registree.js`). Dropped
+  rather than upgraded a 5-major-version-behind dependency for code that
+  never worked. (PR #14)
+- **Updated README.md and docs/installation.md** (Windows/macOS/Linux) to
+  reflect that both Node 22 and 24 are supported. (PR #15)
 
 ## v4.4.0 (2026-07-26)
 
