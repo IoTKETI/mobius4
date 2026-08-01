@@ -22,6 +22,31 @@ SemVer를 이 프로젝트 문맥으로 구체화하면:
 
 _(Accumulate items here for the next release.)_
 
+**Why PATCH**: none of the below adds oneM2M capability — it's a bug fix and a
+dependency upgrade.
+
+- **Fixed outbound notifications double-encoding their payload, and upgraded
+  `axios` 0.19.0 → 1.19.0.** An external contributor's automated PR upgraded
+  `axios` to 0.21.2 to fix CVE-2021-3749 (ReDoS in axios's `trim` polyfill,
+  real vulnerability, fixed upstream in 0.21.1). That exact bump broke 8
+  notification tests. Root cause: `cse/noti.js`'s `http_noti` manually
+  `JSON.stringify`'d the payload *and* set `Content-Type: application/json`.
+  Axios's `transformRequest` changed between 0.19.2 and 0.21.2 — from 0.21.x
+  onward, that header alone is enough to trigger a second `JSON.stringify` on
+  data that's already a string, double-encoding the body. The receiver's
+  `JSON.parse` then returns a string, not an object, so every notification
+  field reads back `undefined`. Fixed by passing the plain object and letting
+  axios serialize it once (matching the pattern already used correctly in
+  `cse/reqPrim.js` and `cse/registree.js`), then upgraded all the way to the
+  current `1.19.0` rather than stopping at the CVE-fix minimum — this
+  repository's dependency-modernization plan already had that queued.
+  `follow-redirects` (axios's own HTTP dependency) moved 1.5.10 → 1.16.0 as
+  part of the same tree; `hasown` (pre-existing, shared via `get-intrinsic`)
+  and `debug` (pre-existing, shared via `mqtt`/`sequelize`/etc.) each picked
+  up a same-range patch bump as npm's resolver deduped them against axios's
+  new transitive dependencies — neither changed its own declared dependency
+  range.
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
