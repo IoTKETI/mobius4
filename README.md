@@ -78,7 +78,7 @@ For upgrading an existing deployment: [DB Migration Guide — v4.4.0](docs/migra
 ## Prerequisites
 
 Since Mobius4 is developed with Node.js and PostgreSQL, any operating system that supports them can run Mobius4.
-- Node.js v22
+- Node.js v22 or v24 — both are supported (CI runs both on every change; see [`engines`](package.json)). New installs should use v24, the current LTS and this repository's development default (see [.nvmrc](.nvmrc)); existing v22 deployments continue to work unchanged.
 - PostgreSQL v17
 - PostGIS
 - MQTT broker (e.g. Mosquitto)
@@ -100,6 +100,7 @@ For OS-specific installation instructions (Windows, macOS, Linux): [docs/install
     cd mobius4
     npm install
 ```
+   If you manage Node.js versions with [nvm](https://github.com/nvm-sh/nvm), run `nvm use` inside this folder first — it picks up the version pinned in [.nvmrc](.nvmrc) (v24) automatically.
 
 4. Set Mobius4 configuration file
 
