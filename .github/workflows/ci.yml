@@ -81,13 +81,42 @@ jobs:
         shell: bash
         run: npm test 2>&1 | tee test-output.txt
 
-      # todo로 표시된 알려진 미수정 결함은 실패해도 종료 코드가 0이다.
-      # 초록불이 잔존 결함을 은폐하지 않도록 현황을 항상 로그에 남긴다.
-      # 잡을 실패시키지는 않는다. `ok … # TODO`가 보이면 그 결함이 해소된 것이므로
-      # 해당 테스트의 { todo: true } 플래그를 떼어 정식 회귀 테스트로 승격시킨다.
-      - name: Known defects (# TODO)
+      # 이 스텝은 보고가 아니라 게이트다 — 아래 두 조건 중 하나라도 어기면 잡을
+      # 실패시킨다.
+      - name: Assert test baseline (# tests) + known defects
         if: always()
         shell: bash
         run: |
+          # test-output.txt가 없으면 이전 스텝(예: npm ci·npm test 자체)이 출력을
+          # 남기기도 전에 실패했다는 뜻이다. "TODO 표시 테스트 없음"으로 오인해
+          # 조용히 넘어가지 않도록 여기서 먼저 걸러낸다.
+          if [ ! -f test-output.txt ]; then
+            echo "::error::test-output.txt가 없다 — 테스트 스텝이 출력을 남기기 전에 실패한 것으로 보인다."
+            exit 1
+          fi
+
+          # 빈 glob로 매칭되는 테스트가 0개여도 `node --test`는 `# tests 0 / # fail 0`
+          # 으로 종료 코드 0을 낸다 — 즉 test/가 이동·삭제되거나 package.json의 glob이
+          # 잘못 바뀌어도 `Run tests` 스텝까지는 초록불이다. 그래서 실행된 개수를
+          # 직접 세어 이 저장소의 회귀 기준선(36, v4.4.0 기준)과 비교한다.
+          # grep -oP는 PCRE라 macOS 기본 grep(BSD)에 없으므로, awk로 이식성 있게 뽑는다.
+          TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
+          BASELINE=36
+
+          if [ -z "$TEST_COUNT" ]; then
+            echo "::error::test-output.txt에서 '# tests N' 줄을 찾지 못했다 — tap 리포터 출력이 아닌 것으로 보인다."
+            exit 1
+          fi
+
+          if [ "$TEST_COUNT" -lt "$BASELINE" ]; then
+            echo "::error::테스트 개수가 ${TEST_COUNT}개로 기준선(${BASELINE}개) 미만이다 — test/ 이동·삭제나 package.json의 glob 변경으로 테스트 일부가 실행되지 않았을 수 있다."
+            exit 1
+          fi
+          echo "테스트 개수 확인: ${TEST_COUNT}개 (기준선 ${BASELINE}개 이상)"
+
+          # todo로 표시된 알려진 미수정 결함은 실패해도 종료 코드가 0이다.
+          # 초록불이 잔존 결함을 은폐하지 않도록 현황을 항상 로그에 남긴다.
+          # 잡을 실패시키지는 않는다. `ok … # TODO`가 보이면 그 결함이 해소된 것이므로
+          # 해당 테스트의 { todo: true } 플래그를 떼어 정식 회귀 테스트로 승격시킨다.
           echo "── 알려진 미수정 결함 현황 ──"
           grep -E '# TODO' test-output.txt || echo "(TODO 표시 테스트 없음)"
