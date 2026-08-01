@@ -22,6 +22,33 @@ SemVer를 이 프로젝트 문맥으로 구체화하면:
 
 _(다음 릴리스로 갈 항목을 여기 쌓는다.)_
 
+**PATCH인 근거**: 아래 전부가 oneM2M 능력을 더하지 않는다 — CI 인프라, 의존성 정리,
+Node 24 호환이다.
+
+- **CI 도입** — `.github/workflows/ci.yml`. Node 22·24 매트릭스, PostgreSQL 17 +
+  PostGIS 3.6 서비스 컨테이너. (PR #9, #12)
+- **`engines: { node: ">=22" }`** 추가, `.nvmrc` = `24` 신설. 22 지원은 유지한다.
+- **`config` 1.31.0 → 3.3.12.** Node 24가 제거한 `util.isRegExp`를 `config` 1.x가
+  호출해 Node 24에서 **기동조차 하지 못했다**. 3.3.12가 그 호출을
+  `parent instanceof RegExp`로 바꾼 최초 버전이고, 2.x 라인은 2.0.2에서 끝나며
+  여전히 취약하므로 더 작은 단계는 없었다. 소스 수정은 필요 없었다 — 이 저장소의
+  config 사용은 `config.get(...)`과 속성 직접 읽기뿐이다.
+
+  **⚠️ 주의**: config 1.x는 중첩 속성을 비쓰기화해 잘못된 대입이 조용히 무시됐으나,
+  3.x는 배열을 `Object.freeze`하고 중첩 객체를 Proxy로 감싸 **대입 시 예외를
+  던진다.** 앞으로 `config.get()`이 돌려준 객체·배열을 라이브러리에 그대로 넘기면
+  안 된다 — 옵션 객체를 제자리에서 정규화하는 라이브러리를 만나면 런타임 예외가 난다.
+- **미사용 의존성 13개 제거** — `fast-xml-parser` `shortid` `sync-request`
+  `path-to-regexp` `query-string` `urlencode` `bson-objectid` `base-64` `debug`
+  `morgan` `rdfxml-streaming-parser` `fs` `https`. `fs`와 `https`는 Node 내장
+  모듈과 이름이 같은 껍데기 패키지로, 로드될 경로가 없었다. `pg-hstore`
+  (sequelize 런타임 로드)와 `pino-roll`(`logger.js:53` transport 타깃 문자열)은
+  `require`가 0건이지만 존치했다. (PR #10)
+- **테스트 리포터를 `--test-reporter=tap`으로 고정.** Node 24가 `node --test`의
+  기본 리포터를 tap에서 spec으로 바꿔, `test/README.md`가 안내하는
+  `not ok … # TODO` / `ok … # TODO` 판독 절차가 Node 24에서 깨졌다.
+- 추적되던 `.DS_Store` 3개 제거 + `.gitignore` 등재.
+
 ### 미해결 — 규격 확인 대기
 
 - **CIN eviction(`mni`/`mbs` 초과) 시 `net=4` 통지 여부.** oneM2M 표준화 논의의
