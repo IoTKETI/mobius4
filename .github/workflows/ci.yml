@@ -20,7 +20,9 @@ jobs:
       postgres:
         # PostGIS 확장이 필요하므로 공식 postgres 이미지는 쓸 수 없다.
         # 태그는 개발 환경(PostgreSQL 17.4 / PostGIS 3.6.4)에 맞춘다.
-        image: postgis/postgis:17-3.6
+        # PG 17과 PostGIS 3.6 조합은 alpine으로만 발행된다. 베이스 배포판은
+        # 테스트에 영향 없음 — TCP로 DB에 질의할 뿐, PostgreSQL 메이저/PostGIS 마이너만 중요.
+        image: postgis/postgis:17-3.6-alpine
         env:
           POSTGRES_USER: mobius
           POSTGRES_PASSWORD: mobius
