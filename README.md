@@ -136,3 +136,4 @@ iotketi@keti.re.kr
 | 4.2.0 | 2026-04-05 | logging module update |
 | 4.3.0 | 2026-04-09 | performance improvements |
 | 4.4.0 | 2026-04-19 | conformance updates for performance improvements (for earlier versions, DB migration is needed: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md)) |
+| 4.4.1 | 2026-08-01 | Node.js 22/24 CI, dead dependency cleanup, DAS/`jose` removal, installation docs update (see [CHANGELOG.md](CHANGELOG.md)) |
