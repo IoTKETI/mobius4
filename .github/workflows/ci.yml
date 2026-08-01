@@ -14,7 +14,7 @@ jobs:
       # 한 버전이 깨져도 나머지 버전의 결과를 끝까지 본다.
       fail-fast: false
       matrix:
-        node: ['22']
+        node: ['22', '24']
 
     services:
       postgres:
