@@ -3,3 +3,5 @@ CLAUDE.md
 .claude/
 config/local*.json
 logs/
+docs/superpowers/
+.DS_Store
