@@ -4,7 +4,7 @@ This guide covers installing all prerequisites for Mobius4 on each supported OS.
 
 | Software | Required version | Windows | macOS | Linux |
 | :--- | :---: | :---: | :---: | :---: |
-| Node.js | v22 | Official installer | Official installer | NodeSource |
+| Node.js | v22 or v24 | Official installer | Official installer | NodeSource |
 | PostgreSQL | v17 | EDB installer | Homebrew | PGDG apt repo |
 | PostGIS | 3.x | StackBuilder | Homebrew | PGDG apt repo |
 | Mosquitto | 2.x | Official installer | Homebrew | apt |
@@ -13,12 +13,14 @@ This guide covers installing all prerequisites for Mobius4 on each supported OS.
 
 ## Windows
 
-### Node.js v22
+### Node.js v22 or v24
 
-Download and run the official Node.js 22 Windows installer from:
+Mobius4 supports both v22 and v24 (`engines` in `package.json` requires `>=22`; CI runs both on every change). Use **v24** for new installs — it is the current LTS and this repository's development default (see [.nvmrc](../.nvmrc)). Use **v22** if you need to match an existing deployment; it continues to be fully supported.
+
+Download and run the official Node.js Windows installer from:
 https://nodejs.org/en/download/
 
-Select **LTS** and choose the Windows Installer (`.msi`) for x64. The installer adds `node` and `npm` to `PATH` automatically.
+Choose the Windows Installer (`.msi`) for x64, selecting either the **v24.x (LTS)** or **v22.x (LTS)** release line. The installer adds `node` and `npm` to `PATH` automatically.
 
 Verify:
 ```cmd
@@ -31,9 +33,11 @@ npm --version
 2. Download `nvm-setup.exe` from the releases page and run the installer.
 3. Open a new Administrator terminal (required for the first `nvm use` call, which creates a symlink in `Program Files`):
 ```cmd
+nvm install 24
 nvm install 22
-nvm use 22
+nvm use 24
 ```
+Inside the `mobius4` folder, plain `nvm use` (no version argument) picks up the version pinned in `.nvmrc` (v24) automatically. To switch to v22 for an existing deployment: `nvm use 22`.
 
 ---
 
@@ -104,12 +108,14 @@ mosquitto_pub -h localhost -t "test" -m "hello"
 
 ## macOS
 
-### Node.js v22
+### Node.js v22 or v24
 
-Download and run the official Node.js 22 macOS installer from:
+Mobius4 supports both v22 and v24 (`engines` in `package.json` requires `>=22`; CI runs both on every change). Use **v24** for new installs — it is the current LTS and this repository's development default (see [.nvmrc](../.nvmrc)). Use **v22** if you need to match an existing deployment; it continues to be fully supported.
+
+Download and run the official Node.js macOS installer from:
 https://nodejs.org/en/download/
 
-Select **LTS** and choose the macOS Installer (`.pkg`). The installer adds `node` and `npm` to `PATH` automatically.
+Choose the macOS Installer (`.pkg`), selecting either the **v24.x (LTS)** or **v22.x (LTS)** release line. The installer adds `node` and `npm` to `PATH` automatically.
 
 Verify:
 ```bash
@@ -121,10 +127,11 @@ npm --version
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 source ~/.zshrc
+nvm install 24
 nvm install 22
-nvm use 22
-nvm alias default 22
+nvm alias default 24
 ```
+Inside the `mobius4` folder, plain `nvm use` (no version argument) picks up the version pinned in `.nvmrc` (v24) automatically. To switch to v22 for an existing deployment: `nvm use 22`.
 
 ---
 
@@ -205,10 +212,17 @@ brew services restart mosquitto
 
 ## Linux (Ubuntu / Debian)
 
-### Node.js v22
+### Node.js v22 or v24
 
-Install Node.js 22 via the **NodeSource** repository (system-wide):
+Mobius4 supports both v22 and v24 (`engines` in `package.json` requires `>=22`; CI runs both on every change). Use **v24** for new installs — it is the current LTS and this repository's development default (see [.nvmrc](../.nvmrc)). Use **v22** if you need to match an existing deployment; it continues to be fully supported.
+
+Install Node.js via the **NodeSource** repository (system-wide):
 ```bash
+# v24 (recommended for new installs)
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs
+
+# or v22 (to match an existing deployment)
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 ```
@@ -224,10 +238,11 @@ npm --version
 sudo apt update && sudo apt install -y curl build-essential
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.4/install.sh | bash
 source ~/.bashrc
+nvm install 24
 nvm install 22
-nvm use 22
-nvm alias default 22
+nvm alias default 24
 ```
+Inside the `mobius4` folder, plain `nvm use` (no version argument) picks up the version pinned in `.nvmrc` (v24) automatically. To switch to v22 for an existing deployment: `nvm use 22`.
 
 ---
 
