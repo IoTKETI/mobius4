@@ -223,12 +223,18 @@ app.post('/*', async (req, resp) => {
       resp.status(500).end();
     }
   }
-  else if (resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"]) {
+  else if (
+    resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"] ||
+    // TS-0009:6.3.2 maps 4125 to 501, in the same group as 4001/5001/5206
+    resp_prim.rsc == enums.rsc_str["SPECIALIZATION_SCHEMA_NOT_FOUND"]) {
     if (resp_prim.pc) {
       resp.status(501).json(resp_prim.pc);
     } else {
       resp.status(501).end();
     }
+  }
+  else {
+    send_unmapped_rsc(resp_prim, resp, 'POST');
   }
 });
 
@@ -278,12 +284,17 @@ app.get('/*', async (req, resp) => {
       resp.status(500).end();
     }
   }
-  else if (resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"]) {
+  else if (
+    resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"] ||
+    resp_prim.rsc == enums.rsc_str["SPECIALIZATION_SCHEMA_NOT_FOUND"]) {
     if (resp_prim.pc) {
       resp.status(501).json(resp_prim.pc);
     } else {
       resp.status(501).end();
     }
+  }
+  else {
+    send_unmapped_rsc(resp_prim, resp, 'GET');
   }
 });
 
@@ -340,6 +351,18 @@ app.put('/*', async (req, resp) => {
   else if (resp_prim.rsc == enums.rsc_str["NOT_ACCEPTABLE"]) {
     resp.status(406).end();
   }
+  else if (
+    resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"] ||
+    resp_prim.rsc == enums.rsc_str["SPECIALIZATION_SCHEMA_NOT_FOUND"]) {
+    if (resp_prim.pc) {
+      resp.status(501).json(resp_prim.pc);
+    } else {
+      resp.status(501).end();
+    }
+  }
+  else {
+    send_unmapped_rsc(resp_prim, resp, 'PUT');
+  }
 });
 
 app.delete('/*', async (req, resp) => {
@@ -357,7 +380,9 @@ app.delete('/*', async (req, resp) => {
       resp.status(200).end();
     }
   }
-  if (resp_prim.rsc == enums.rsc_str["OK"]) {
+  // 'else if', not 'if': as a separate chain the trailing else below would fire again on a
+  // DELETED response and Express would throw on the second write.
+  else if (resp_prim.rsc == enums.rsc_str["OK"]) {
     if (resp_prim.pc) {
       resp.status(200).json(resp_prim.pc);
     } else {
@@ -384,7 +409,23 @@ app.delete('/*', async (req, resp) => {
   else if (resp_prim.rsc == enums.rsc_str["OPERATION_NOT_ALLOWED"]) {
     resp.status(405).end();
   }
+  else {
+    send_unmapped_rsc(resp_prim, resp, 'DELETE');
+  }
 });
+
+// Last-resort responder for an RSC no branch above matched.
+//
+// Each verb handler is an if/else-if chain over known response status codes. Without a final
+// else an unmapped RSC leaves the request with no response at all, so the client blocks until
+// its own timeout rather than seeing an error — the same failure mode as the unwired ty=24/34
+// dispatch entries. Answering 500 keeps a missing mapping to a visible bug in one request
+// instead of a hung connection.
+function send_unmapped_rsc(resp_prim, resp, method) {
+  if (resp.headersSent) return;
+  logger.error({ method, rsc: resp_prim.rsc }, 'no HTTP status mapping for response status code');
+  resp.status(500).json(resp_prim.pc || { "m2m:dbg": `no HTTP status mapping for rsc ${resp_prim.rsc}` });
+}
 
 // both used for request and response
 function httpToPrim(http_req) {

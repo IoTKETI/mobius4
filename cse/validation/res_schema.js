@@ -196,6 +196,53 @@ const cnt_update_schema = Joi.object().keys({
     mia: Joi.number().integer().min(0)
 });
 
+// <flexContainer> carries an open set of [customAttribute] members whose names are defined
+// by the document referenced by cnd (TS-0001:9.6.35), so unknown keys must pass Joi and be
+// checked against the specialization registry instead (cse/specialization.js).
+const flx_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    acpi: create_common_attr.acpi,
+    lbl: create_common_attr.lbl,
+    cr: create_common_attr.cr,
+    st: create_common_attr.st,
+    loc: create_common_attr.loc,
+
+    // resource specific attributes — TS-0004:7.4.37.1 table 7.4.37.1-2
+    cnd: Joi.string().required(), // M on Create
+    or: Joi.string().optional(),
+    nl: Joi.string().optional(),
+    cs: Joi.forbidden(), // NP — set by the hosting CSE
+    cni: Joi.forbidden(), // NP — no <flexContainerInstance> support
+    cbs: Joi.forbidden(), // NP — no <flexContainerInstance> support
+    mni: Joi.number().integer().min(0),
+    mbs: Joi.number().integer().min(0),
+    mia: Joi.number().integer().min(0),
+}).unknown(true);
+
+const flx_update_schema = Joi.object().keys({
+    ...update_universal_attr,
+
+    et: update_common_attr.et,
+    acpi: update_common_attr.acpi,
+    lbl: update_common_attr.lbl,
+    cr: update_common_attr.cr,
+    st: update_common_attr.st,
+    loc: update_common_attr.loc,
+
+    // resource specific attributes
+    cnd: Joi.forbidden(), // NP on Update — containerDefinition is write-once
+    or: Joi.string().optional().allow(null),
+    nl: Joi.string().optional().allow(null),
+    cs: Joi.forbidden(),
+    cni: Joi.forbidden(),
+    cbs: Joi.forbidden(),
+    mni: Joi.number().integer().min(0),
+    mbs: Joi.number().integer().min(0),
+    mia: Joi.number().integer().min(0),
+}).unknown(true);
+
 const cin_create_schema = Joi.object().keys({
     ...create_universal_attr,
 
@@ -330,6 +377,7 @@ module.exports = {
     csr_create_schema, csr_update_schema,
     cnt_create_schema, cnt_update_schema,
     cin_create_schema,
+    flx_create_schema, flx_update_schema,
     grp_create_schema, grp_update_schema,
     sub_create_schema, sub_update_schema,
     dsp_create_schema, dsp_update_schema

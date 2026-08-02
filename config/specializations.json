@@ -1,0 +1,26 @@
+{
+    "http://developers.iotocean.org/schema/parkingBlock.xsd": {
+        "typeName": "parkingBlock",
+        "namespacePrefix": "sc",
+        "attributes": {
+            "type": {
+                "type": "string"
+            },
+            "name": {
+                "type": "string"
+            },
+            "category": {
+                "type": "array"
+            },
+            "availableSpotNumber": {
+                "type": "integer"
+            },
+            "totalSpotNumber": {
+                "type": "integer"
+            },
+            "refParkingSpot": {
+                "type": "array"
+            }
+        }
+    }
+}

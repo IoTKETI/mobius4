@@ -219,6 +219,35 @@ async function create_tables(client) {
             );
         `);
 
+        // create flx table
+        // "or" (ontologyRef) is quoted because OR is a reserved SQL keyword.
+        // "custom" holds the [customAttribute] set, which is defined by the document
+        // referenced by cnd and so cannot be modelled as columns.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS flx (
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
+                ty INTEGER NOT NULL DEFAULT 28,
+                sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
+                cr VARCHAR(${len.str_token}),
+                int_cr VARCHAR(${len.str_token}),
+                rn VARCHAR(${len.str_token}) NOT NULL,
+                pi VARCHAR(${len.ri_max}),
+                et VARCHAR(${len.timestamp}) NOT NULL,
+                ct VARCHAR(${len.timestamp}) NOT NULL,
+                lt VARCHAR(${len.timestamp}) NOT NULL,
+                acpi VARCHAR(${len.structured_res_id})[],
+                lbl VARCHAR(${len.str_token})[],
+                st INTEGER DEFAULT 0,
+                loc GEOMETRY(GEOMETRY, 4326),
+                cnd VARCHAR(${len.structured_res_id}) NOT NULL,
+                cs INTEGER DEFAULT 0,
+                nl VARCHAR(${len.structured_res_id}),
+                "or" VARCHAR(${len.structured_res_id}),
+                ek VARCHAR(${len.str_token}) NOT NULL,
+                custom JSONB
+            );
+        `);
+
         // create grp table
         await client.query(`
             CREATE TABLE IF NOT EXISTS grp (
@@ -494,6 +523,14 @@ async function create_tables(client) {
         // ae: pi for child-resource queries
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_ae_pi ON ae (pi);
+        `);
+
+        // flx: pi for child-resource queries, cnd for the containerDefinition discovery
+        // filter, and a GIN index so custom attributes stay queryable as JSONB
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_flx_pi     ON flx (pi);
+            CREATE INDEX IF NOT EXISTS idx_flx_cnd    ON flx (cnd);
+            CREATE INDEX IF NOT EXISTS idx_flx_custom ON flx USING GIN (custom);
         `);
 
         await client.query('COMMIT');

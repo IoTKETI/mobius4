@@ -11,27 +11,27 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
-      # 한 버전이 깨져도 나머지 버전의 결과를 끝까지 본다.
+      # Even if one version breaks, we still want the full results for the others.
       fail-fast: false
       matrix:
         node: ['22', '24']
 
     services:
       postgres:
-        # PostGIS 확장이 필요하므로 공식 postgres 이미지는 쓸 수 없다.
-        # 태그는 개발 환경(PostgreSQL 17.4 / PostGIS 3.6.4)에 맞춘다.
-        # PG 17과 PostGIS 3.6 조합은 alpine으로만 발행된다. 베이스 배포판은
-        # 테스트에 영향 없음 — TCP로 DB에 질의할 뿐, PostgreSQL 메이저/PostGIS 마이너만 중요.
+        # The official postgres image can't be used because the PostGIS extension is required.
+        # The tag matches the development environment (PostgreSQL 17.4 / PostGIS 3.6.4).
+        # PG 17 with PostGIS 3.6 is only published for alpine. The base distro has no
+        # effect on the tests — they only query the DB over TCP; only the PostgreSQL major / PostGIS minor matter.
         image: postgis/postgis:17-3.6-alpine
         env:
           POSTGRES_USER: mobius
           POSTGRES_PASSWORD: mobius
-          # 이미지의 initdb 스크립트가 이 DB에 PostGIS 확장을 미리 활성화한다.
-          # test/helpers/server.js:14의 TEST_DB 상수와 이름이 일치해야 한다.
+          # The image's initdb script pre-enables the PostGIS extension on this DB.
+          # The name must match the TEST_DB constant at test/helpers/server.js:14.
           POSTGRES_DB: mobius4_test
         ports:
           - 5432:5432
-        # 헬스체크 없이는 DB가 뜨기 전에 다음 스텝이 실행되는 경쟁 조건이 생긴다.
+        # Without a health check there is a race where the next step runs before the DB is up.
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -41,21 +41,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # cache: npm 명시 필요 — setup-node v5부터 package.json에 packageManager 필드가
-      # 있을 때만 자동 캐싱을 켠다. 이 프로젝트에는 그 필드가 없으므로 수동 지정이 필수다.
+      # cache: npm must be spelled out — since setup-node v5, automatic caching is enabled only
+      # when package.json has a packageManager field. This project has none, so it is mandatory.
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
-      # config/local*.json은 .gitignore 대상이라 러너에 존재하지 않는다.
-      # config/default.json의 db.user·db.pw는 빈 문자열이므로 여기서 채워야 한다.
+      # config/local*.json is gitignored, so it does not exist on the runner.
+      # db.user and db.pw in config/default.json are empty strings, so they must be filled in here.
       #
-      # NODE_CONFIG 환경변수로 주입할 수 없는 이유:
-      # test/helpers/server.js가 자식 프로세스를 띄울 때 NODE_CONFIG를 자기 값으로
-      # 통째로 덮어쓴다(http·https·db.name·mqtt·logging). 바깥에서 설정한 NODE_CONFIG는
-      # 자식에게 전달되지 않는다. 반면 node-config는 파일 설정 위에 NODE_CONFIG를
-      # 깊은 병합하므로, local.json의 db.user·db.pw는 살아남고 db.name만 덮인다.
+      # Why this cannot be injected through the NODE_CONFIG environment variable:
+      # when test/helpers/server.js spawns a child process it overwrites NODE_CONFIG wholesale
+      # with its own value (http, https, db.name, mqtt, logging). A NODE_CONFIG set from the
+      # outside never reaches the child. node-config, by contrast, deep-merges NODE_CONFIG on
+      # top of the file config, so local.json's db.user/db.pw survive and only db.name is overridden.
       - name: Write CI database credentials
         run: |
           cat > config/local.json <<'JSON'
@@ -69,64 +69,65 @@ jobs:
           }
           JSON
 
-      # npm install이 아니라 npm ci다. 락파일에 고정된 버전만 설치하므로 재현 가능하고,
-      # package.json과 package-lock.json이 어긋나면 즉시 실패한다.
+      # npm ci, not npm install. It installs only the versions pinned in the lockfile, so it is
+      # reproducible, and it fails immediately if package.json and package-lock.json disagree.
       - name: Install dependencies
         run: npm ci
 
-      # shell: bash를 명시하는 이유 — GitHub Actions의 기본 셸은 pipefail을 켜지 않는다.
-      # 그 상태로 `npm test | tee`를 쓰면 npm test가 실패해도 tee의 종료 코드(0)가
-      # 스텝의 결과가 되어 실패가 은폐된다.
+      # Why shell: bash is spelled out — the default GitHub Actions shell does not set pipefail.
+      # Under that shell, `npm test | tee` lets tee's exit code (0) become the step's result
+      # even when npm test fails, which hides the failure.
       - name: Run tests
         shell: bash
         run: npm test 2>&1 | tee test-output.txt
 
-      # 이 스텝은 보고가 아니라 게이트다 — 아래 두 조건 중 하나라도 어기면 잡을
-      # 실패시킨다.
+      # This step is a gate, not a report — if either of the two conditions below is
+      # violated, it fails the job.
       - name: Assert test baseline (# tests) + known defects
         if: always()
         shell: bash
         run: |
-          # test-output.txt가 없으면 이전 스텝(예: npm ci·npm test 자체)이 출력을
-          # 남기기도 전에 실패했다는 뜻이다. "TODO 표시 테스트 없음"으로 오인해
-          # 조용히 넘어가지 않도록 여기서 먼저 걸러낸다.
+          # A missing test-output.txt means an earlier step (npm ci, or npm test itself) failed
+          # before it could leave any output. Screen for that here first, so it is not
+          # mistaken for "no TODO-marked tests" and waved through silently.
           if [ ! -f test-output.txt ]; then
-            echo "::error::test-output.txt가 없다 — 테스트 스텝이 출력을 남기기 전에 실패한 것으로 보인다."
+            echo "::error::test-output.txt is missing — the test step appears to have failed before leaving any output."
             exit 1
           fi
 
-          # 빈 glob로 매칭되는 테스트가 0개여도 `node --test`는 `# tests 0 / # fail 0`
-          # 으로 종료 코드 0을 낸다 — 즉 test/가 이동·삭제되거나 package.json의 glob이
-          # 잘못 바뀌어도 `Run tests` 스텝까지는 초록불이다. 그래서 실행된 개수를
-          # 직접 세어 이 저장소의 회귀 기준선(36, v4.4.0 기준)과 비교한다.
-          # grep -oP는 PCRE라 macOS 기본 grep(BSD)에 없으므로, awk로 이식성 있게 뽑는다.
+          # Even when an empty glob matches zero tests, `node --test` reports `# tests 0 / # fail 0`
+          # and exits 0 — so if test/ is moved or deleted, or package.json's glob is changed
+          # incorrectly, the `Run tests` step is still green. Hence we count the tests that actually
+          # ran and compare against this repo's regression baseline (55 = 36 from v4.4.0 + 19 for <flexContainer>).
+          # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=36
+          BASELINE=55
 
           if [ -z "$TEST_COUNT" ]; then
-            echo "::error::test-output.txt에서 '# tests N' 줄을 찾지 못했다 — tap 리포터 출력이 아닌 것으로 보인다."
+            echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."
             exit 1
           fi
 
-          # `[ ... -lt ... ]`는 피연산자가 정수가 아니거나 bash의 부호 있는 64비트 범위를
-          # 초과하면 거짓이 아니라 오류(종료 코드 2)를 낸다. 이 오류는 if 조건문 안에
-          # 있으므로 set -e가 잡지 못하고, 실패 분기를 건너뛰어 게이트가 열린 채로
-          # 통과해버린다. 따라서 비교 직전에 두 가지를 직접 검증한다: (1) 자릿수만
-          # 포함(개행·CR 제외), (2) 아홉 자리 이하로 제한(bash 범위 내 안전성 보장).
+          # `[ ... -lt ... ]` raises an error (exit code 2) rather than returning false when an
+          # operand is not an integer or exceeds bash's signed 64-bit range. That error occurs
+          # inside an if condition, so set -e does not catch it: the failure branch is skipped
+          # and the gate passes wide open. So we verify two things ourselves right before the
+          # comparison: (1) digits only (no newline or CR), (2) at most nine digits (guaranteeing
+          # safety within bash's range).
           if ! [[ "$TEST_COUNT" =~ ^[0-9]{1,9}$ ]]; then
-            echo "::error::test-output.txt의 '# tests' 값이 정수가 아니다: '${TEST_COUNT}'"
+            echo "::error::The '# tests' value in test-output.txt is not an integer: '${TEST_COUNT}'"
             exit 1
           fi
 
           if [ "$TEST_COUNT" -lt "$BASELINE" ]; then
-            echo "::error::테스트 개수가 ${TEST_COUNT}개로 기준선(${BASELINE}개) 미만이다 — test/ 이동·삭제나 package.json의 glob 변경으로 테스트 일부가 실행되지 않았을 수 있다."
+            echo "::error::Test count is ${TEST_COUNT}, below the baseline of ${BASELINE} — test/ may have been moved or deleted, or package.json's glob changed, leaving some tests unrun."
             exit 1
           fi
-          echo "테스트 개수 확인: ${TEST_COUNT}개 (기준선 ${BASELINE}개 이상)"
+          echo "Test count check: ${TEST_COUNT} (baseline is ${BASELINE} or more)"
 
-          # todo로 표시된 알려진 미수정 결함은 실패해도 종료 코드가 0이다.
-          # 초록불이 잔존 결함을 은폐하지 않도록 현황을 항상 로그에 남긴다.
-          # 잡을 실패시키지는 않는다. `ok … # TODO`가 보이면 그 결함이 해소된 것이므로
-          # 해당 테스트의 { todo: true } 플래그를 떼어 정식 회귀 테스트로 승격시킨다.
-          echo "── 알려진 미수정 결함 현황 ──"
-          grep -E '# TODO' test-output.txt || echo "(TODO 표시 테스트 없음)"
+          # Known unfixed defects marked as todo exit 0 even when they fail.
+          # Always log their current state so a green build does not hide the remaining defects.
+          # This does not fail the job. If `ok … # TODO` shows up, that defect has been resolved,
+          # so drop the { todo: true } flag from that test and promote it to a real regression test.
+          echo "── Known unfixed defects ──"
+          grep -E '# TODO' test-output.txt || echo "(no TODO-marked tests)"
