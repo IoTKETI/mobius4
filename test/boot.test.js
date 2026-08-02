@@ -7,7 +7,7 @@ let srv;
 before(async () => { srv = await startServer(); });
 after(async () => { if (srv) await srv.stop(); });
 
-test("테스트 전용 인스턴스가 뜨고 CSEBase를 응답한다", async () => {
+test("the test-only instance starts up and serves the <CSEBase>", async () => {
   const res = await fetch(`${srv.baseUrl}/Mobius`, {
     headers: { "X-M2M-Origin": "SM", "X-M2M-RI": "boot1", "X-M2M-RVI": "3", Accept: "application/json" },
   });
@@ -17,15 +17,16 @@ test("테스트 전용 인스턴스가 뜨고 CSEBase를 응답한다", async ()
   assert.equal(body["m2m:cb"].rn, "Mobius");
 });
 
-test("개발 포트(7599)가 아닌 동적 포트를 쓴다", () => {
-  // 개발 인스턴스와 절대 겹치지 않아야 한다 — 겹치면 개발 DB를 두드리게 된다.
+test("uses a dynamic port, not the development port (7599)", () => {
+  // It must never overlap with the development instance — an overlap means hitting the
+  // development DB.
   assert.notEqual(srv.port, 7599);
   assert.ok(srv.port > 1024);
 });
 
-test("HTTPS 리스너도 개발 포트(7580)와 겹치지 않는 동적 포트를 쓴다", () => {
-  // bindings/http.js는 https 리스너에 enabled 플래그가 없어 항상 뜬다 — 격리하지
-  // 않으면 개발 인스턴스가 물고 있는 7580과 충돌한다.
+test("the HTTPS listener also uses a dynamic port, clear of the development port (7580)", () => {
+  // bindings/http.js has no enabled flag for the https listener, so it always comes up —
+  // without isolation it collides with 7580, which the development instance holds.
   assert.notEqual(srv.httpsPort, 7580);
   assert.notEqual(srv.httpsPort, srv.port);
 });

@@ -1,9 +1,10 @@
 "use strict";
-// 구독의 nu가 가리킬 로컬 통지 수신기.
+// A local notification sink for a <subscription>'s nu to point at.
 //
-// "도착할 때까지 대기"(waitFor)와 "도착하지 않음을 확인"(expectNone)은 성격이 다르다.
-// 전자는 조건 충족 즉시 끝내야 빠르고, 후자는 고정 유예를 반드시 기다려야 정확하다.
-// 이 구분을 헬퍼에서 강제해 테스트가 무통지를 짧은 타임아웃으로 오판하지 않게 한다.
+// "wait until it arrives" (waitFor) and "confirm it never arrives" (expectNone) are
+// different in kind. The former has to finish the moment the condition holds, to stay fast;
+// the latter has to wait out a fixed grace period, to stay accurate. Enforcing that
+// distinction in the helper keeps a test from mistaking a short timeout for "no notification".
 
 const http = require("node:http");
 
@@ -35,7 +36,7 @@ async function startSink() {
           w.resolve(item);
         }
       }
-      // CSE가 통지 전송을 성공으로 판정하도록 oneM2M 응답 코드를 돌려준다.
+      // Return a oneM2M response code so the CSE judges the notification delivery a success.
       res.writeHead(200, { "X-M2M-RSC": "2000", "Content-Type": "application/json" });
       res.end("{}");
     });
@@ -54,7 +55,7 @@ async function startSink() {
         const i = waiters.indexOf(w);
         if (i >= 0) waiters.splice(i, 1);
         reject(new Error(
-          `통지 대기 타임아웃(${timeoutMs}ms). 수신 ${received.length}건, net=` +
+          `timed out waiting for a notification (${timeoutMs}ms). ${received.length} received, net=` +
           JSON.stringify(received.map(netOf))
         ));
       }, timeoutMs);

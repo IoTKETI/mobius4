@@ -17,7 +17,7 @@ function computeBackoffDelay() {
         cfg.initialDelayMs * Math.pow(cfg.multiplier, reconnectAttempts),
         cfg.maxDelayMs
     );
-    // ±jitter 랜덤 분산 적용
+    // apply ±jitter random spread
     return delay * (1 + (Math.random() * 2 - 1) * cfg.jitter);
 }
 
@@ -47,7 +47,7 @@ exports.init_client = async function () {
 
     const mqtt_endpoint = 'tcp://' + config.mqtt.ip + ':' + config.mqtt.port;
     mqtt_client = MQTT.connect(mqtt_endpoint, {
-        reconnectPeriod: 0,      // 자동 재연결 비활성화 — 수동 지수 백오프로 제어
+        reconnectPeriod: 0,      // disable auto-reconnect — controlled by manual exponential backoff
         connectTimeout: 30000
     });
 

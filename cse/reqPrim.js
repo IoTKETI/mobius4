@@ -265,9 +265,10 @@ async function prim_handling(req_prim) {
           try {
             await hostingCSE.fu1_discovery(req_prim, resp_prim);
           } catch (err) {
-            // 예외를 삼키고 로그만 남기면 클라이언트는 '빈 목록 + RSC 2000'을 받아
-            // "결과가 없다"로 오해한다. 실패는 실패로 알린다 — 이 결함 때문에 lvl 구현 중
-            // 잘못된 WHERE 조건이 에러가 아니라 빈 결과로 나타나 진단이 늦어졌다.
+            // Swallowing the exception and only logging it leaves the client with an empty
+            // list plus RSC 2000, which it misreads as "there are no results". Report a
+            // failure as a failure — because of this flaw, a bad WHERE condition during the
+            // lvl work surfaced as an empty result rather than an error and delayed diagnosis.
             logger.error({ err }, 'fu1 discovery failed');
             resp_prim.rsc = enums.rsc_str[err.rsc_hint || "INTERNAL_SERVER_ERROR"];
             resp_prim.pc = { "m2m:dbg": err.message || "discovery failed" };

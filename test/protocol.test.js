@@ -8,14 +8,14 @@ let srv, root;
 before(async () => { srv = await startServer(); root = await createRoot(srv.baseUrl); });
 after(async () => { if (root) await root.remove(); if (srv) await srv.stop(); });
 
-test("응답 코드는 X-M2M-RSC 헤더로 오고 바디에는 rsc가 없다", async () => {
+test("the response code arrives in the X-M2M-RSC header, and the body carries no rsc", async () => {
   const res = await retrieve(srv.baseUrl, root.sid);
   assert.equal(res.rsc, "2000");
   assert.equal(res.body.rsc, undefined);
-  assert.ok(res.body["m2m:cnt"], "바디는 리소스 표현이어야 한다");
+  assert.ok(res.body["m2m:cnt"], "the body should be a resource representation");
 });
 
-test("RSC 값: 생성 2001 / 조회 2000 / 삭제 2002", async () => {
+test("RSC values: create 2001 / retrieve 2000 / delete 2002", async () => {
   const rn = uniqueRn("rsc");
   const c = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn } });
   assert.equal(c.rsc, "2001");
@@ -28,7 +28,7 @@ test("RSC 값: 생성 2001 / 조회 2000 / 삭제 2002", async () => {
   assert.equal(d.rsc, "2002");
 });
 
-test("con 속성이 JSON 객체로 왕복한다", async () => {
+test("the con attribute round-trips as a JSON object", async () => {
   const rn = uniqueRn("con");
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn } });
   const payload = { temp: 21.5, unit: "C", nested: { ok: true } };
@@ -40,9 +40,9 @@ test("con 속성이 JSON 객체로 왕복한다", async () => {
   assert.deepEqual(back.body["m2m:cin"].con, payload);
 });
 
-test("UPDATE는 PUT + ty 없는 Content-Type으로 동작한다", async () => {
-  // op은 HTTP 메서드가 아니라 Content-Type에서 유도된다(코드 지도 L-2).
-  // ';'가 없으면 메서드로 op을 정하므로 PUT → op=3(UPDATE)이 된다.
+test("UPDATE works with PUT plus a Content-Type that carries no ty", async () => {
+  // op is derived from the Content-Type, not from the HTTP method (code map L-2).
+  // With no ';' present the method decides op, so PUT -> op=3 (UPDATE).
   const rn = uniqueRn("upd");
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn } });
   const u = await update(srv.baseUrl, `${root.sid}/${rn}`, { "m2m:cnt": { lbl: ["tag-a"] } });
@@ -51,19 +51,22 @@ test("UPDATE는 PUT + ty 없는 Content-Type으로 동작한다", async () => {
   assert.deepEqual(r.body["m2m:cnt"].lbl, ["tag-a"]);
 });
 
-test("<CSEBase>는 DELETE되지 않는다", async () => {
-  // 코드 지도 G-1: 실효 가드는 delete_a_res의 switch(to_ty) case 5다.
+test("the <CSEBase> cannot be DELETEd", async () => {
+  // Code map G-1: the guard that actually takes effect is case 5 of the switch(to_ty) in
+  // delete_a_res.
   const d = await remove(srv.baseUrl, CSE_BASE);
   assert.equal(d.rsc, "4005");
-  // 삭제되지 않았음을 확인 — 이 단정이 없으면 코드만 보고 통과했다고 착각할 수 있다.
+  // Confirm it really was not deleted — without this assertion one could read the code alone
+  // and mistakenly believe the test passed.
   const still = await retrieve(srv.baseUrl, CSE_BASE);
   assert.equal(still.rsc, "2000");
 });
 
-test("fanout 응답은 m2m:agr 봉투로 감싸인다", async () => {
-  // 실측 결과 브리프의 가정과 다름: mobius4는 <grp>를 ae/rce/cb 하위에서만 생성할 수 있고
-  // (cse/resources/grp.js의 grp_parent_res_types), cnt(root) 하위에 만들면 4108이 난다.
-  // 그래서 그룹은 CSEBase 바로 아래 만들고, 멤버만 root 하위 컨테이너를 가리키게 한다.
+test("a fanout response is wrapped in an m2m:agr envelope", async () => {
+  // Measured behavior differs from the brief's assumption: mobius4 can only create a <grp>
+  // under ae/rce/cb (grp_parent_res_types in cse/resources/grp.js), and creating one under a
+  // cnt (root) yields 4108. So the group is created directly under the <CSEBase>, and only
+  // its members point at containers below root.
   const a = uniqueRn("m1"), b = uniqueRn("m2"), g = uniqueRn("grp");
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: a } });
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: b } });
@@ -76,36 +79,39 @@ test("fanout 응답은 m2m:agr 봉투로 감싸인다", async () => {
   try {
     const fo = await retrieve(srv.baseUrl, `${gsid}/fopt`);
     const agr = fo.body["m2m:agr"];
-    assert.ok(agr, `m2m:agr 봉투가 있어야 한다. 실제: ${fo.raw.slice(0, 300)}`);
-    assert.ok(Array.isArray(agr.rsp), "agr.rsp는 배열이어야 한다");
+    assert.ok(agr, `an m2m:agr envelope should be present. actual: ${fo.raw.slice(0, 300)}`);
+    assert.ok(Array.isArray(agr.rsp), "agr.rsp should be an array");
     assert.equal(agr.rsp.length, 2);
     for (const r of agr.rsp) {
-      assert.ok("rsc" in r && "rqi" in r && "pc" in r, `rsp 항목 형식: ${JSON.stringify(r)}`);
+      assert.ok("rsc" in r && "rqi" in r && "pc" in r, `rsp entry shape: ${JSON.stringify(r)}`);
     }
   } finally {
-    // root 서브트리 밖(CSEBase 직속)에 만들었으므로 root.remove()로는 지워지지 않는다 — 직접 정리.
-    // delete_a_res는 대상 리소스 자신의 삭제도 fire-and-forget이라(hostingCSE.js:559),
-    // grp 자신도 root와 같은 레이스에 걸린다 — 동일하게 폴링해서 실제로 지워졌는지 확인한다.
+    // It was created outside the root subtree (directly under the <CSEBase>), so root.remove()
+    // will not clear it — clean it up here. Since delete_a_res deletes the target resource
+    // itself fire-and-forget too (hostingCSE.js:559), the grp is subject to the same race as
+    // root — poll the same way to confirm it really is gone.
     await remove(srv.baseUrl, gsid);
     await waitForSubtreeGone(srv.baseUrl, gsid);
   }
 });
 
-test("이름의 밑줄이 형제 리소스를 끌어들이지 않는다 (삭제)", async () => {
-  // delete_a_res의 자손 수집 LIKE 조건도 디스커버리와 같은 이스케이프 결함을 공유한다.
-  // 'a_c-…'를 지울 때 '_' 자리가 어떤 문자든 매칭돼 'abc-…'의 자손까지 함께 지워지면
-  // 남의 리소스가 삭제되는 사고다. 같은 이름 규칙(밑줄 위치가 형제와 정확히 겹치게)으로
-  // 재현한다 — uniqueRn의 난수 접미어에 의존하면 우연히 안 겹쳐 결함을 놓친다.
+test("an underscore in a name does not drag in sibling resources (deletion)", async () => {
+  // The LIKE condition that delete_a_res uses to collect descendants shares the same
+  // escaping defect as discovery. When deleting 'a_c-…', the '_' position matches any
+  // character, so if the descendants of 'abc-…' get deleted along with it, someone else's
+  // resources are destroyed. Reproduce it with the same naming rule (the underscore position
+  // lining up exactly with the sibling) — relying on uniqueRn's random suffix would let the
+  // names miss each other by chance and the defect would slip through.
   const tag = uniqueRn("t").slice(-6);
   const under = `a_c-${tag}`;
   const other = `abc-${tag}`;
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: under } });
   await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: other } });
-  const cin = await create(srv.baseUrl, `${root.sid}/${other}`, 4, { "m2m:cin": { con: { v: "형제것" } } });
+  const cin = await create(srv.baseUrl, `${root.sid}/${other}`, 4, { "m2m:cin": { con: { v: "sibling-owned" } } });
 
   const d = await remove(srv.baseUrl, `${root.sid}/${under}`);
   assert.equal(d.rsc, "2002");
 
   const stillThere = await retrieve(srv.baseUrl, `${root.sid}/${other}/${cin.body["m2m:cin"].rn}`);
-  assert.equal(stillThere.rsc, "2000", "형제 자손이 함께 삭제됐다");
+  assert.equal(stillThere.rsc, "2000", "the sibling's descendant was deleted along with it");
 });

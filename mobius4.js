@@ -1,5 +1,5 @@
-// mobius 4 — 버전의 정본은 package.json이다. 여기 하드코딩하면 갈라진다(오래도록
-// 0.1.0으로 남아 package.json의 4.x와 어긋나 있었다).
+// mobius 4 — package.json is the single source of truth for the version. Hardcoding it
+// here makes the two diverge (it sat at 0.1.0 long after package.json had moved to 4.x).
 
 // load environment variables from .env
 require('dotenv').config();
@@ -44,7 +44,7 @@ async function main() {
 }
 
 main().then(() => {
-    if (process.send) process.send('ready'); // PM2 wait_ready 연동
+    if (process.send) process.send('ready'); // ties into PM2 wait_ready
 });
 
 // graceful shutdown
@@ -57,19 +57,19 @@ async function shutdown(signal) {
     }, 30000);
 
     try {
-        // 1. 인터벌 정지 (새 작업 스케줄링 차단)
+        // 1. Stop the intervals (blocks any new work from being scheduled)
         if (cleanupIntervalId) clearInterval(cleanupIntervalId);
         require('./cse/datasetManager').shutdown();
 
-        // 2. HTTP 서버 종료 — 새 연결 차단 + keep-alive 커넥션 즉시 해제
+        // 2. Close the HTTP servers — refuse new connections + drop keep-alive connections at once
         const { server, https_server } = require('./bindings/http');
         await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
         await new Promise((resolve) => { https_server.close(resolve); https_server.closeAllConnections(); });
 
-        // 3. MQTT 연결 해제
+        // 3. Disconnect MQTT
         await mqtt.disconnect();
 
-        // 4. DB 커넥션 종료
+        // 4. Close the DB connections
         const sequelize = require('./db/sequelize');
         await sequelize.close();
         const pool = require('./db/connection');

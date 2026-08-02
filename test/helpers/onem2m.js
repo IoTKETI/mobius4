@@ -1,10 +1,10 @@
 "use strict";
-// oneM2M HTTP 클라이언트. 테스트가 실제 클라이언트와 같은 경로(바인딩 → 접근제어 → DB)를
-// 타도록 일부러 HTTP로 나간다.
+// oneM2M HTTP client. The tests deliberately go out over HTTP so that they travel the
+// same path a real client does (binding -> access control -> DB).
 
 const CSE_BASE = "Mobius";   // config.cse.csebase_rn
-const ADMIN = "SM";          // config.cse.admin — 기본 ACP의 acop에는 delete 비트가 없어
-                             // (코드 지도 G-2) 일반 오리지네이터로는 삭제가 4103이 된다.
+const ADMIN = "SM";          // config.cse.admin — the default ACP's acop has no delete bit
+                             // (code map G-2), so a regular originator gets 4103 on delete.
 
 let seq = 0;
 function nextRqi() { return `t${process.pid.toString(36)}-${++seq}`; }
@@ -25,8 +25,9 @@ async function request(baseUrl, { method, to, ty, body, originator = ADMIN, head
   };
   const init = { method, headers: h };
   if (body !== undefined) {
-    // op은 Content-Type에서 유도된다(코드 지도 L-2): ';ty=N'이 있으면 CREATE(op=1),
-    // 없으면 HTTP 메서드로 정해진다. 그래서 ty 유무로 Content-Type을 갈라 쓴다.
+    // op is derived from Content-Type (code map L-2): if ';ty=N' is present it is CREATE
+    // (op=1), otherwise op comes from the HTTP method. So we branch the Content-Type on
+    // whether ty was supplied.
     h["Content-Type"] = ty === undefined ? "application/json" : `application/json;ty=${ty}`;
     init.body = JSON.stringify(body);
   }
@@ -47,8 +48,8 @@ function discover(b, to, query = {}, o = {}) {
   return request(b, { method: "GET", to: `${to}?${qs}`, ...o });
 }
 
-// 디스커버리 응답의 URI 목록. 결과가 없을 때 mobius4가 키를 아예 생략할 수 있어
-// 호출부마다 방어 코드를 쓰지 않도록 여기서 [] 로 정규화한다.
+// The URI list of a discovery response. When there are no results mobius4 may omit the key
+// entirely, so we normalize to [] here rather than making every call site defend against it.
 function urils(res) {
   const u = res && res.body && res.body["m2m:uril"];
   if (Array.isArray(u)) return u;
@@ -56,44 +57,48 @@ function urils(res) {
   return [];
 }
 
-// mobius4의 delete_a_res(cse/hostingCSE.js)는 대상 리소스는 물론 그 자손들까지도
-// await 없이 fire-and-forget으로 지운다(2002 응답 후 백그라운드에서 삭제 진행).
-// 테스트가 remove() 직후 srv.stop()으로 서버를 SIGTERM하면 이 비동기 삭제가 중간에
-// 끊겨 고아 row가 DB에 남는다 — 그리고 고아를 ri로 조회하면 응답 자체가 오지 않아
-// (타임아웃) 이후 테스트 실행까지 오염시킬 수 있다. 그래서 DELETE 후에는 고정 sleep이
-// 아니라, 서브트리가 실제로 비었는지 discovery로 폴링해 확인한 뒤 반환한다.
+// mobius4's delete_a_res (cse/hostingCSE.js) deletes the target resource — and its
+// descendants — fire-and-forget, without awaiting (the 2002 response goes out first and the
+// deletion continues in the background). If a test SIGTERMs the server via srv.stop()
+// immediately after remove(), that async deletion is cut off mid-flight and orphan rows are
+// left in the DB — and retrieving an orphan by ri never comes back at all (timeout), which
+// can contaminate later test runs too. So after a DELETE we do not sleep for a fixed time;
+// we poll with discovery until the subtree is genuinely empty, then return.
 const REMOVE_WAIT_TIMEOUT_MS = 5000;
 const REMOVE_WAIT_INTERVAL_MS = 100;
 
-// sid 아래(그리고 sid 자신)가 더 이상 조회되지 않을 때까지 폴링한다.
+// Polls until nothing under sid (and sid itself) is discoverable any more.
 //
-// 주의: discover(baseUrl, sid)를 sid 자신에 대고 쏘면 안 된다 — delete_a_res는 대상
-// 리소스 자신의 삭제(hostingCSE.js:559)와 자손 삭제(hostingCSE.js:592)를 서로 다른
-// fire-and-forget 태스크로 던지고, 자신의 삭제(단일 row)가 자손 삭제(N개 순차 처리)보다
-// 먼저 끝나는 경우가 실제로 있다. sid 자신의 row가 먼저 사라지면 reqPrim.js의 조기 반환
-// (reqPrim.js의 4004 가드 — 'to'가 안 풀리면 discovery까지 가지도 않고 즉시 4004)
-// 때문에, 자손이 아직 남아있어도 폴링이 "끝났다"고 오판하게 된다(실측: 이 방식으로는
-// 3회 연속 실행 후 자손 컨테이너가 orphan으로 남았다). 그래서 항상 살아있는 CSE_BASE를
-// discovery 대상으로 삼고, 응답을 클라이언트 쪽에서 sid 접두어로 걸러 판단한다.
+// Careful: do not aim discover(baseUrl, sid) at sid itself — delete_a_res dispatches the
+// deletion of the target resource itself (hostingCSE.js:559) and the deletion of its
+// descendants (hostingCSE.js:592) as two separate fire-and-forget tasks, and the former (a
+// single row) really does finish before the latter (N rows processed sequentially) at times.
+// Once sid's own row disappears first, reqPrim.js returns early (the 4004 guard in
+// reqPrim.js — if 'to' cannot be resolved it answers 4004 immediately without ever reaching
+// discovery), so the poll would wrongly conclude "done" while descendants are still around
+// (measured: with that approach a descendant container was left orphaned after three
+// consecutive runs). So we always target the always-alive CSE_BASE for discovery and decide
+// client-side by filtering the response on the sid prefix.
 async function waitForSubtreeGone(baseUrl, sid) {
   const deadline = Date.now() + REMOVE_WAIT_TIMEOUT_MS;
   for (;;) {
     const res = await discover(baseUrl, CSE_BASE);
     const remaining = urils(res).filter((u) => u === sid || u.startsWith(`${sid}/`));
     if (remaining.length === 0) return;
-    // 타임아웃에 도달해도 절대 throw하지 않는다 — 정리 지연이 실제 테스트 실패를
-    // 가리면 안 된다. 남은 고아는 다음 실행의 DB 카운트 증가로 드러난다.
+    // Never throw on timeout — a slow cleanup must not mask a real test failure. Any
+    // leftover orphans surface as a growing DB row count on the next run.
     if (Date.now() >= deadline) return;
     await new Promise((r) => setTimeout(r, REMOVE_WAIT_INTERVAL_MS));
   }
 }
 
-// 각 테스트 파일이 CSEBase 아래에 자기 루트를 하나 만들고, 끝나면 그 서브트리만 지운다.
+// Each test file creates one root of its own under the <CSEBase> and, when done, deletes
+// only that subtree.
 async function createRoot(baseUrl, prefix = "t") {
   const rn = uniqueRn(prefix);
   const res = await create(baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn } });
   if (res.rsc !== "2001") {
-    throw new Error(`테스트 루트 생성 실패: rsc=${res.rsc} body=${res.raw.slice(0, 200)}`);
+    throw new Error(`failed to create test root: rsc=${res.rsc} body=${res.raw.slice(0, 200)}`);
   }
   const sid = `${CSE_BASE}/${rn}`;
   return {
