@@ -1,10 +1,11 @@
 "use strict";
-// mobius4를 테스트 전용 설정으로 자식 프로세스로 띄운다.
+// Spawns mobius4 as a child process with a test-only configuration.
 //
-// 설정을 config/test.json이 아니라 NODE_CONFIG 환경변수로 주입하는 이유(DEC-037):
-// node-config의 병합 순서에서 local.json(9순위)이 {deployment}.json(3순위)을 덮어쓴다.
-// 실측 결과 config/test.json으로는 포트가 7599, mqtt가 true로 남아 테스트가 개발
-// 인스턴스를 두드린다. config/local-test.json은 .gitignore로 커밋할 수 없다.
+// Why the config is injected through the NODE_CONFIG environment variable instead of
+// config/test.json (DEC-037): in node-config's merge order, local.json (priority 9)
+// overrides {deployment}.json (priority 3). Measured: with config/test.json the port stayed
+// 7599 and mqtt stayed true, so the tests hit the development instance.
+// config/local-test.json cannot be committed because it is in .gitignore.
 
 const { spawn } = require("node:child_process");
 const path = require("node:path");
@@ -15,7 +16,8 @@ const TEST_DB = "mobius4_test";
 const START_TIMEOUT_MS = 30000;
 const STOP_TIMEOUT_MS = 5000;
 
-// OS가 비어 있는 포트를 골라준다 — 고정 포트로 두면 개발 인스턴스나 병행 실행과 겹친다.
+// Let the OS pick a free port — a fixed port would collide with the development instance or
+// with a parallel run.
 function freePort() {
   return new Promise((resolve, reject) => {
     const probe = net.createServer();
@@ -27,31 +29,35 @@ function freePort() {
   });
 }
 
-// 진단 버퍼 상한 — 수다스러운 서버라도 무한정 자라지 않게 마지막 ~64KB만 남긴다.
+// Diagnostic buffer cap — keep only the last ~64KB so a chatty server cannot grow it without
+// bound.
 const DIAG_BUFFER_MAX = 64 * 1024;
 
 async function startServer() {
   const port = await freePort();
-  // bindings/http.js는 https 리스너에 enabled 플래그가 없이 config.https.port(기본 7580)로
-  // 무조건 listen한다. 개발 인스턴스가 그 포트를 이미 물고 있으므로 여기서도 별도의
-  // 빈 포트를 골라 겹치지 않게 한다(HTTPS 자체는 이 테스트들이 검증 대상으로 삼지 않는다).
+  // bindings/http.js has no enabled flag for the https listener and unconditionally listens
+  // on config.https.port (7580 by default). The development instance already holds that
+  // port, so we pick a separate free port here too and avoid the clash (HTTPS itself is not
+  // what these tests set out to verify).
   const httpsPort = await freePort();
   const overrides = {
     http: { port },
     https: { port: httpsPort },
     db: { name: TEST_DB },
     mqtt: { enabled: false },
-    // default.json이 logs/mobius4.log 파일 로깅을 켜므로 명시적으로 끈다.
-    // console은 남겨 둔다 — logger.js는 stdout에만 쓰고 stderr에는 아무것도 쓰지 않으므로
-    // 기동 실패 시 단서는 stdout(예: fatal 로그)에 있다. 그래서 stdout·stderr를 모두 모은다.
+    // default.json turns on file logging to logs/mobius4.log, so we explicitly turn it off.
+    // Console logging stays on — logger.js writes only to stdout and never to stderr, so
+    // when startup fails the clue is in stdout (a fatal log, for example). That is why we
+    // collect both stdout and stderr.
     logging: { level: "error", file: { enabled: false } },
   };
 
   const child = spawn(process.execPath, ["mobius4.js"], {
     cwd: REPO_ROOT,
     env: { ...process.env, NODE_ENV: "test", NODE_CONFIG: JSON.stringify(overrides) },
-    // ipc: mobius4.js가 main() 완료 후 process.send('ready')를 보낸다(PM2 wait_ready 연동).
-    // 덕분에 HTTP 폴링 없이 결정론적으로 기동 완료를 알 수 있다.
+    // ipc: mobius4.js sends process.send('ready') once main() completes (this is what PM2's
+    // wait_ready hooks into). It lets us detect startup completion deterministically,
+    // without HTTP polling.
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
 
@@ -60,20 +66,20 @@ async function startServer() {
     diag += chunk.toString();
     if (diag.length > DIAG_BUFFER_MAX) diag = diag.slice(diag.length - DIAG_BUFFER_MAX);
   }
-  // 두 파이프 모두 반드시 소비한다 — 읽지 않은 파이프는 버퍼가 차서 자식 프로세스를 멈춰 세운다.
+  // Both pipes must be consumed — an unread pipe fills its buffer and stalls the child process.
   child.stdout.on("data", appendDiag);
   child.stderr.on("data", appendDiag);
 
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
-      reject(new Error(`서버 기동 타임아웃(${START_TIMEOUT_MS}ms). 출력:\n${diag}`));
+      reject(new Error(`server startup timed out (${START_TIMEOUT_MS}ms). output:\n${diag}`));
     }, START_TIMEOUT_MS);
 
     const onMessage = (m) => { if (m === "ready") { cleanup(); resolve(); } };
     const onExit = (code) => {
       cleanup();
-      reject(new Error(`서버가 기동 중 종료됨(code=${code}). 출력:\n${diag}`));
+      reject(new Error(`server exited during startup (code=${code}). output:\n${diag}`));
     };
     function cleanup() {
       clearTimeout(timer);

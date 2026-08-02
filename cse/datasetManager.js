@@ -103,7 +103,7 @@ async function get_dataset_info(sri) {
 function get_feature_list(data) {
     // extract hierarchical key names from data (e.g. observation.air.humi from 'data' object)
     // key names are separated by '.'
-    // use JSON Path to extract key names - 리프 노드만 추출
+    // use JSON Path to extract key names - extract leaf nodes only
 
     const leafPaths = [];
 

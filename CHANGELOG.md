@@ -1,29 +1,87 @@
 # Changelog
 
-이 저장소의 주목할 만한 변경을 기록한다. 최신 항목이 위에 온다.
+Notable changes to this repository are recorded here. The newest entry comes
+first.
 
-## 버전 규칙
+## Versioning
 
-버전의 **정본은 `package.json`의 `version`** 하나다. 다른 곳에 하드코딩하지 않는다
-(오래도록 `mobius4.js` 첫 줄이 `0.1.0`으로 남아 `package.json`의 4.x와 어긋나 있었다 —
-지금은 `package.json`을 읽는다).
+The **single source of truth for the version is `version` in `package.json`**.
+It is not hardcoded anywhere else (for a long time the first line of
+`mobius4.js` still said `0.1.0`, out of sync with the 4.x in `package.json` —
+it now reads `package.json`).
 
-SemVer를 이 프로젝트 문맥으로 구체화하면:
+SemVer, made concrete for this project:
 
-| 자릿수 | 올리는 경우 |
+| Digit | When it goes up |
 |---|---|
-| **MAJOR** | oneM2M 릴리스 축 변경, 수동 개입이 필요한 호환성 파괴 |
-| **MINOR** | oneM2M 기능 추가(리소스 타입·오퍼레이션·필터 크리테리아·통지 이벤트 타입), 새 바인딩, 하위호환 DB 마이그레이션 |
-| **PATCH** | 능력을 더하지 않는 버그 수정, 성능, 문서, 테스트 |
+| **MAJOR** | oneM2M release-axis change, compatibility break requiring manual intervention |
+| **MINOR** | oneM2M capability added (resource type, operation, filter criteria, notification event type), new binding, backward-compatible DB migration |
+| **PATCH** | Bug fix that adds no capability, performance, docs, tests |
 
-릴리스 시 `[Unreleased]`를 `## vX.Y.Z (YYYY-MM-DD)`로 끊고 `package.json`을 함께 올린다.
+At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
+`package.json` along with it.
 
 ## [Unreleased]
 
 _(Accumulate items here for the next release.)_
 
-**Why PATCH**: none of the below adds oneM2M capability — it's a bug fix and a
-dependency upgrade.
+**Why MINOR**: `<flexContainer>` is a oneM2M resource type that did not exist
+here before, and `db/migrations/v4.5.0.sql` is a backward-compatible schema
+change. The rest is a bug fix and a dependency upgrade.
+
+- **Added `<flexContainer>` (ty=28): CRUD and discovery.** The type was
+  half-wired — `config/enums.js` already mapped `28: "flx"`, and `<container>`
+  and `<subscription>` already accepted `flx` as a parent, but all eight
+  dispatch sites in `cse/hostingCSE.js` were commented out. In that state a
+  `ty=28` request fell through to a `ReferenceError` and no response was ever
+  sent, the same failure mode as the unwired `ty=24`/`ty=34` entries.
+
+  Three things about this resource type do not follow the pattern the other
+  handlers use:
+
+  - **The envelope key is not `m2m:`.** TS-0004:7.4.37.1 lets a specialization's
+    XSD use a targetNamespace other than `m2m:`, so real payloads look like
+    `{"sc:parkingBlock": {...}}`. The key is read generically from the request,
+    stored on the resource (`flx.ek`), and replayed on RETRIEVE — nothing else
+    in the record preserves it. The surrounding plumbing already read the
+    envelope key generically, so only the handler needed changing.
+  - **`stateTag` tracks custom attributes, not every update.** TS-0001:9.6.35 —
+    "This *stateTag* attribute value shall be incremented when a custom
+    attribute of the flexContainer is modified." `<container>` bumps `st` on
+    every UPDATE; copying that here would be non-conformant. `contentSize` is
+    recomputed on the same trigger (TS-0004:7.4.37.2.3 step 2b).
+  - **`containerDefinition` is validated against a registry, not an XSD.**
+    TS-0004:7.4.37.2.1 requires validating the representation against the schema
+    named by `cnd` and answering `SPECIALIZATION_SCHEMA_NOT_FOUND` when that
+    schema is unavailable. Fetching an arbitrary XSD on the CREATE path would
+    add an external network dependency, so the contract is declared locally in
+    `config/specializations.json`: an unregistered `cnd` is 4125, and an
+    undeclared or mistyped custom attribute is 4000. That registry is its own
+    file, read directly by `cse/specialization.js` rather than through the
+    `config` package — it describes the deployment's information model rather
+    than CSE settings, and it grows one entry per specialization, so adding one
+    never touches `default.json`. A missing or unparseable file is not fatal:
+    the CSE starts, logs a warning, and rejects every `cnd` with 4125.
+
+  `[customAttribute]` values live in a single `custom` JSONB column — the
+  attribute set is defined by whatever `cnd` points at and is unknown at
+  schema-design time, so it cannot be modelled as columns. A GIN index keeps
+  them queryable.
+
+  **Not included: `<flexContainerInstance>` (ty=58)**, and therefore no
+  `<latest>`/`<oldest>` and no retention policy. TS-0004:7.4.37.2.1 step 3 makes
+  instance creation conditional on a non-zero `mni`/`mbs`/`mia`, so `mni`, `mbs`
+  and `mia` are rejected with 5001 rather than stored — storing them would
+  report success for a retention policy that does not run.
+
+- **Fixed requests hanging when a response status code had no HTTP mapping.**
+  Each verb handler in `bindings/http.js` is an `if`/`else if` chain over known
+  RSC values with no final `else`, so any unmapped code left the request with no
+  response at all and the client blocked until its own timeout. Added a
+  fallback that answers 500 and logs, mapped 4125 to 501 per TS-0009:6.3.2 (the
+  same group as 4001/5001/5206), added the missing 501 branch to PUT, and turned
+  a stray `if` into `else if` in the DELETE chain so the new fallback cannot
+  double-send on a 2002.
 
 - **Fixed outbound notifications double-encoding their payload, and upgraded
   `axios` 0.19.0 → 1.19.0.** An external contributor's automated PR upgraded
@@ -61,32 +119,38 @@ dependency upgrade.
 
 ## v4.4.1 (2026-08-01)
 
-**PATCH인 근거**: 아래 전부가 oneM2M 능력을 더하지 않는다 — CI 인프라, 의존성 정리,
-Node 24 호환이다.
+**Why PATCH**: none of the below adds oneM2M capability — it's CI
+infrastructure, dependency cleanup, and Node 24 compatibility.
 
-- **CI 도입** — `.github/workflows/ci.yml`. Node 22·24 매트릭스, PostgreSQL 17 +
-  PostGIS 3.6 서비스 컨테이너. (PR #9, #12)
-- **`engines: { node: ">=22" }`** 추가, `.nvmrc` = `24` 신설. 22 지원은 유지한다.
-- **`config` 1.31.0 → 3.3.12.** Node 24가 제거한 `util.isRegExp`를 `config` 1.x가
-  호출해 Node 24에서 **기동조차 하지 못했다**. 3.3.12가 그 호출을
-  `parent instanceof RegExp`로 바꾼 최초 버전이고, 2.x 라인은 2.0.2에서 끝나며
-  여전히 취약하므로 더 작은 단계는 없었다. 소스 수정은 필요 없었다 — 이 저장소의
-  config 사용은 `config.get(...)`과 속성 직접 읽기뿐이다.
+- **Introduced CI** — `.github/workflows/ci.yml`. Node 22/24 matrix,
+  PostgreSQL 17 + PostGIS 3.6 service containers. (PR #9, #12)
+- **Added `engines: { node: ">=22" }`** and a new `.nvmrc` = `24`. Support for
+  22 is retained.
+- **`config` 1.31.0 → 3.3.12.** `config` 1.x calls `util.isRegExp`, which Node
+  24 removed, so the server **could not even start** on Node 24. 3.3.12 is the
+  first version that replaced that call with `parent instanceof RegExp`, and
+  the 2.x line ends at 2.0.2 and is still affected, so there was no smaller
+  step available. No source changes were needed — this repository only uses
+  config via `config.get(...)` and direct property reads.
 
-  **⚠️ 주의**: config 1.x는 중첩 속성을 비쓰기화해 잘못된 대입이 조용히 무시됐으나,
-  3.x는 배열을 `Object.freeze`하고 중첩 객체를 Proxy로 감싸 **대입 시 예외를
-  던진다.** 앞으로 `config.get()`이 돌려준 객체·배열을 라이브러리에 그대로 넘기면
-  안 된다 — 옵션 객체를 제자리에서 정규화하는 라이브러리를 만나면 런타임 예외가 난다.
-- **미사용 의존성 13개 제거** — `fast-xml-parser` `shortid` `sync-request`
-  `path-to-regexp` `query-string` `urlencode` `bson-objectid` `base-64` `debug`
-  `morgan` `rdfxml-streaming-parser` `fs` `https`. `fs`와 `https`는 Node 내장
-  모듈과 이름이 같은 껍데기 패키지로, 로드될 경로가 없었다. `pg-hstore`
-  (sequelize 런타임 로드)와 `pino-roll`(`logger.js:53` transport 타깃 문자열)은
-  `require`가 0건이지만 존치했다. (PR #10)
-- **테스트 리포터를 `--test-reporter=tap`으로 고정.** Node 24가 `node --test`의
-  기본 리포터를 tap에서 spec으로 바꿔, `test/README.md`가 안내하는
-  `not ok … # TODO` / `ok … # TODO` 판독 절차가 Node 24에서 깨졌다.
-- 추적되던 `.DS_Store` 3개 제거 + `.gitignore` 등재.
+  **⚠️ Caution**: config 1.x made nested properties non-writable, so a bad
+  assignment was silently ignored; 3.x `Object.freeze`s arrays and wraps
+  nested objects in a Proxy, so **assignment throws**. From now on, do not
+  hand an object or array returned by `config.get()` straight to a library —
+  any library that normalizes an options object in place will raise a runtime
+  exception.
+- **Removed 13 unused dependencies** — `fast-xml-parser` `shortid`
+  `sync-request` `path-to-regexp` `query-string` `urlencode` `bson-objectid`
+  `base-64` `debug` `morgan` `rdfxml-streaming-parser` `fs` `https`. `fs` and
+  `https` are shim packages that share a name with Node built-in modules, so
+  there was no code path that would ever load them. `pg-hstore` (loaded by
+  sequelize at runtime) and `pino-roll` (a transport target string at
+  `logger.js:53`) have zero `require`s but were kept. (PR #10)
+- **Pinned the test reporter to `--test-reporter=tap`.** Node 24 changed the
+  default reporter for `node --test` from tap to spec, which broke the
+  `not ok … # TODO` / `ok … # TODO` reading procedure documented in
+  `test/README.md` on Node 24.
+- Removed 3 tracked `.DS_Store` files and added them to `.gitignore`.
 - **Removed the unreachable DAS/`jose` dead code.** `parse_dynamic_auth_resp`
   (`cse/hostingCSE.js`) read `config.das.private_key`, but `das` was never
   defined anywhere in `config/default.json` or `config/local.json`
@@ -104,203 +168,256 @@ Node 24 호환이다.
 
 ## v4.4.0 (2026-07-26)
 
-**MINOR인 근거**: `net=4` 통지와 `lvl` 필터는 **없던 oneM2M 기능이 생긴 것**이다(버그
-수정이 아니다). `db/migrations/v4.4.0.sql`(하위호환 스키마 변경)도 이 릴리스에 포함된다.
+**Why MINOR**: the `net=4` notification and the `lvl` filter are **oneM2M
+capabilities that did not exist before** (not bug fixes). This release also
+includes `db/migrations/v4.4.0.sql` (a backward-compatible schema change).
 
-**요약**
+**Summary**
 
-| 분류 | 내용 |
+| Category | Contents |
 |---|---|
-| 기능 추가 | `net=4`(Delete of Direct Child Resource) 통지, `lvl`(level) 필터 크리테리아 |
-| 버그 수정 | 디스커버리가 조용히 틀린 결과를 주던 경로 3종 |
-| 개발 인프라 | 테스트 하니스 신설(테스트 0개 → 36개) |
-| 스키마 | `db/migrations/v4.4.0.sql` |
+| Capability added | `net=4` (Delete of Direct Child Resource) notification, `lvl` (level) filter criteria |
+| Bug fixes | 3 paths where discovery silently returned wrong results |
+| Dev infrastructure | New test harness (0 tests → 36 tests) |
+| Schema | `db/migrations/v4.4.0.sql` |
 
-**⚠️ 동작 변경 — 기존 클라이언트에 보입니다**
+**⚠️ Behavior changes — visible to existing clients**
 
-- **디스커버리 실패가 더는 성공으로 둔갑하지 않는다.** 지금까지 SQL 오류 등으로 실패해도
-  빈 목록과 RSC 2000이 나갔다. 이제 5000(또는 미구현 파라미터면 5001)이 나간다.
-  "결과 없음"과 "실패"를 구별할 수 있게 된 것이지만, 2000을 기대하던 코드는 영향을 받는다.
-- **`gmty` 범위 검증이 생겼다.** 규격상 유효 범위(1..6) 밖이면 4000, 범위 안이지만
-  mobius4가 구현하지 않은 4~6이면 5001이다. 그전에는 조용히 무시됐다.
-- **`lvl`이 실제로 동작한다.** 그전에는 파싱·검증만 되고 결과에 반영되지 않았다.
-  `lvl`을 보내면서 전체 결과를 받아 쓰던 코드가 있다면 결과 집합이 줄어든다.
-- **디스커버리·삭제의 이름 매칭이 정확해졌다.** 이름에 `_`가 든 리소스가 형제를 끌어들이던
-  문제를 고쳤다 — 그전에는 `a_c`로 조회할 때 `abc`의 자손까지 나왔다.
+- **Discovery failures no longer masquerade as success.** Until now, a failure
+  such as a SQL error still produced an empty list and RSC 2000. It now
+  produces 5000 (or 5001 for an unimplemented parameter). This makes "no
+  results" distinguishable from "failed," but code that expected 2000 is
+  affected.
+- **`gmty` is now range-checked.** Outside the valid range in the
+  specification (1..6) it is 4000; inside the range but 4–6, which mobius4
+  does not implement, it is 5001. Previously it was silently ignored.
+- **`lvl` actually works now.** Previously it was only parsed and validated,
+  never applied to the results. If any code sends `lvl` while relying on
+  getting the full result set back, its result set will shrink.
+- **Name matching in discovery and deletion is now exact.** Fixed resources
+  with `_` in their name pulling in their siblings — previously, querying for
+  `a_c` also returned the descendants of `abc`.
 
 
-### 테스트 하니스 신설 (2026-07-25, 브랜치 `test/harness-foundation`)
+### New test harness (2026-07-25, branch `test/harness-foundation`)
 
-이 저장소에 **처음으로 테스트가 생겼다**. 그 전까지 `npm run test:basic`은
-`echo "Error: no test specified" && exit 1` 스텁이었고 `devDependencies`는 빈 객체였다.
+This repository **has tests for the first time**. Until now `npm run
+test:basic` was an `echo "Error: no test specified" && exit 1` stub and
+`devDependencies` was an empty object.
 
-**추가된 것**
+**What was added**
 
-- `test/` — Node 22 내장 `node:test` 기반 HTTP 블랙박스 회귀 스위트. **25개 테스트**
-  (19 통과 / 0 실패 / 6 todo), 약 15초.
-  - `test/helpers/server.js` — 테스트가 mobius4를 **자식 프로세스로 직접 기동**한다.
-    설정은 `NODE_CONFIG` 환경변수로 주입해 전용 DB(`mobius4_test`)와 OS가 고른 동적
-    포트(HTTP·HTTPS 각각)를 쓴다. 개발 인스턴스가 7599에서 돌고 있어도 안전하다.
-    기동 완료는 `mobius4.js`가 보내는 `process.send('ready')`를 `ipc`로 받아 감지한다.
-  - `test/helpers/onem2m.js` — oneM2M HTTP 클라이언트. 각 테스트가 `<CSEBase>` 아래에
-    고유 루트를 만들고 끝나면 그 서브트리만 지운다.
-  - `test/helpers/noti-sink.js` — 구독의 `nu`가 가리킬 통지 수신기.
+- `test/` — an HTTP black-box regression suite built on Node 22's built-in
+  `node:test`. **25 tests** (19 pass / 0 fail / 6 todo), about 15 seconds.
+  - `test/helpers/server.js` — the tests **start mobius4 directly as a child
+    process**. Configuration is injected through the `NODE_CONFIG` environment
+    variable so it uses a dedicated DB (`mobius4_test`) and OS-assigned dynamic
+    ports (one each for HTTP and HTTPS). This is safe even while a development
+    instance is running on 7599. Startup completion is detected by receiving
+    the `process.send('ready')` that `mobius4.js` emits over `ipc`.
+  - `test/helpers/onem2m.js` — a oneM2M HTTP client. Each test creates its own
+    unique root under `<CSEBase>` and deletes only that subtree when it
+    finishes.
+  - `test/helpers/noti-sink.js` — a notification receiver for a subscription's
+    `nu` to point at.
   - `test/protocol.test.js` · `test/discovery.test.js` · `test/notification.test.js`
-- `package.json` — `scripts.test` 추가(`node --test --test-concurrency=1 'test/**/*.test.js'`),
-  `test:basic` 스텁 제거.
-- `test/README.md` — 사전 준비(`createdb mobius4_test`)와 결과 읽는 법.
+- `package.json` — added `scripts.test` (`node --test --test-concurrency=1 'test/**/*.test.js'`)
+  and removed the `test:basic` stub.
+- `test/README.md` — prerequisites (`createdb mobius4_test`) and how to read
+  the results.
 
-**의도적으로 하지 않은 것**
+**What was deliberately not done**
 
-- **새 의존성을 하나도 추가하지 않았다.** 필요한 모든 것이 Node 22 내장에 있다
-  (`node:test`, `node:child_process`, `node:http`, `node:net`, 전역 `fetch`).
-- **기존 소스를 한 줄도 수정하지 않았다.** `test/` 신설과 `package.json`의 `scripts`
-  한 줄이 변경의 전부다.
-- `config/` 아래에 파일을 추가하지 않았다. 테스트 설정은 실행 시 환경변수로 주입한다
-  (`config/test.json`은 `config/local.json`이 덮어써서 동작하지 않고,
-  `config/local-test.json`은 `.gitignore` 대상이라 커밋할 수 없다).
+- **Not a single new dependency was added.** Everything needed is built into
+  Node 22 (`node:test`, `node:child_process`, `node:http`, `node:net`, global
+  `fetch`).
+- **Not a single line of existing source was modified.** The new `test/`
+  directory and one `scripts` line in `package.json` are the whole change.
+- No files were added under `config/`. Test configuration is injected through
+  environment variables at run time (`config/test.json` does not work because
+  `config/local.json` overrides it, and `config/local-test.json` cannot be
+  committed because it is covered by `.gitignore`).
 
-**현재 스위트가 고정한 동작** — 아래는 지금 정상 동작하며, 앞으로의 수정이 이걸 깨면
-테스트가 실패한다.
+**Behavior the current suite pins down** — the following works today, and a
+future change that breaks it will fail the tests.
 
-| 영역 | 고정한 것 |
+| Area | What is pinned |
 |---|---|
-| 프로토콜 | 응답 코드가 `X-M2M-RSC` **헤더**로 오고 바디에 `rsc`가 없음 / 생성 2001·조회 2000·삭제 2002·갱신 2004 / `con`이 JSON 객체로 왕복 / `<CSEBase>`는 DELETE 불가(4005) / fanout 응답이 `{"m2m:agr":{"rsp":[…]}}` 봉투 |
-| 디스커버리 | `fu=1` 전체 반환 / `ty`·`lbl` 필터 / `cra`·`crb`(`YYYYMMDDThhmmss`) / **`lvl` 미지정 시 전체 반환** |
-| 통지 | `net=1`(갱신)·`net=2`(구독 대상 삭제)·`net=3`(직속 자식 생성) 발화 / `enc.chty` 필터 / 통지 봉투(`sur`·`nev.rep`·`nev.net`) / **`net=[3]`만 설정된 구독은 CIN 삭제 시 무통지** |
+| Protocol | Response code arrives in the `X-M2M-RSC` **header** with no `rsc` in the body / create 2001, retrieve 2000, delete 2002, update 2004 / `con` round-trips as a JSON object / `<CSEBase>` cannot be DELETEd (4005) / fanout responses use the `{"m2m:agr":{"rsp":[…]}}` envelope |
+| Discovery | `fu=1` returns everything / `ty` and `lbl` filters / `cra` and `crb` (`YYYYMMDDThhmmss`) / **everything is returned when `lvl` is unspecified** |
+| Notification | `net=1` (update), `net=2` (deletion of the subscribed-to resource), `net=3` (creation of a direct child) fire / `enc.chty` filter / notification envelope (`sur`, `nev.rep`, `nev.net`) / **a subscription with only `net=[3]` set sends no notification on CIN deletion** |
 
-### `lvl` (level) 필터 크리테리아 적용 (2026-07-26)
+### `lvl` (level) filter criteria applied (2026-07-26)
 
-**구현했다.** `lvl`은 그동안 파싱과 검증까지만 되고 질의에 반영되지 않아, 요청이 RSC 2000으로
-성공 응답하면서 필터를 **조용히 버리고** 모든 깊이의 리소스를 돌려주고 있었다.
+**Implemented.** Until now `lvl` was only parsed and validated, never applied
+to the query, so a request would answer successfully with RSC 2000 while
+**silently discarding the filter** and returning resources at every depth.
 
-**변경**: `cse/hostingCSE.js` 한 곳 — 디스커버리 WHERE 절의 `sid` 접두어 조건 바로 다음.
+**Change**: one place in `cse/hostingCSE.js` — immediately after the `sid`
+prefix condition in the discovery WHERE clause.
 
-**규격 근거**: oneM2M `TS-0001:8.1.2` — *"The maximum level of resource tree that the Hosting
-CSE shall perform the operation starting from the target resource… The level of the target
-resource itself is zero and the level of the direct children of the target is one."*
-즉 `lvl`은 **대상으로부터의 상대 깊이**다. 미지정 시 깊이 제한이 없다는 것도 같은 절에 있다.
+**Specification basis**: oneM2M `TS-0001:8.1.2` — *"The maximum level of
+resource tree that the Hosting CSE shall perform the operation starting from
+the target resource… The level of the target resource itself is zero and the
+level of the direct children of the target is one."* That is, `lvl` is a
+**depth relative to the target**. The same clause also states that there is no
+depth limit when it is unspecified.
 
-**구현 시 주의한 지점 셋:**
+**Three points that needed care during implementation:**
 
-- **상대 → 절대 환산.** 저장된 깊이는 `Mobius`=1부터 시작하는 절대값이라, 대상의 절대 깊이를
-  더해 상한으로 바꿔야 한다. 이 환산을 빠뜨리면 **트리 최상위에서만 우연히 맞고 하위
-  노드에서 틀린다.**
-- **`lookup.lvl` 컬럼은 쓸 수 없다.** 디스커버리는 `lookup`이 아니라 타입별 테이블
-  (`cnt`·`cin`·`acp`…)을 각각 조회하는데 그 테이블들에는 `lvl` 컬럼이 없다. 대신 모든
-  타입 테이블에 공통인 `sid`에서 SQL로 깊이를 센다
-  (`array_length(string_to_array(sid,'/'),1)` — 모든 sid에서 `sid.split("/").length`와
-  정확히 일치함을 검증했다).
-- **SQL WHERE에서 거른다.** 조회 후 애플리케이션에서 거르면 `lim`(기본 200)이 먼저 적용돼
-  깊은 노드가 정원을 채우고 정작 원하는 얕은 결과가 잘려나간다.
+- **Relative → absolute conversion.** The stored depth is an absolute value
+  starting from `Mobius`=1, so the target's absolute depth has to be added to
+  turn it into an upper bound. Omitting this conversion **happens to be correct
+  only at the top of the tree and is wrong at lower nodes.**
+- **The `lookup.lvl` column cannot be used.** Discovery does not query
+  `lookup`; it queries the per-type tables (`cnt`, `cin`, `acp`…) individually,
+  and those tables have no `lvl` column. Instead, the depth is counted in SQL
+  from `sid`, which is common to all type tables
+  (`array_length(string_to_array(sid,'/'),1)` — verified to match
+  `sid.split("/").length` exactly for every sid).
+- **Filter in the SQL WHERE clause.** Filtering in the application after the
+  query would let `lim` (default 200) apply first, so deep nodes fill the quota
+  and the shallow results actually wanted get truncated away.
 
-**부수 효과(의도됨)**: `rcn=4/8` 중첩 조회도 같은 경로를 타므로 `lvl`을 함께 존중하게 됐다.
-`TS-0001:8.1.2`가 `offset`·`limit`·`level`을 한 묶음으로 규정하는 것과 맞는 동작이다.
+**Side effect (intended)**: `rcn=4/8` nested retrieval goes through the same
+path, so it now honors `lvl` as well. That matches `TS-0001:8.1.2` specifying
+`offset`, `limit`, and `level` as one group.
 
-**알려진 이탈**: `lvl=0`은 `prim_schema.js`가 `min(1)`로 거부해 4000이 된다. 규격은 "대상
-자신이 level 0"이라고 하지만, 디스커버리(`fu=1`)는 대상 자신을 반환하지 않으므로 `lvl=0`은
-어차피 빈 결과다. 스키마 변경은 범위 밖으로 두었다.
+**Known deviation**: `lvl=0` is rejected by `min(1)` in `prim_schema.js` and
+becomes 4000. The specification says "the target resource itself is level 0,"
+but discovery (`fu=1`) does not return the target itself, so `lvl=0` would be
+an empty result anyway. A schema change was left out of scope.
 
-**공인 시험 없음**: ATS 전체를 확인한 결과 `level`을 세팅하는 테스트 케이스가 하나도 없다
-(템플릿은 전부 `omit`). TTA·oneM2M 인증에는 필요하지 않으며, 자동 검증 수단은 이 저장소의
-회귀 테스트 5건이 전부다.
+**No conformance test**: a review of the entire ATS found not a single test
+case that sets `level` (the templates all `omit` it). It is not required for
+TTA or oneM2M certification, and the only automated verification is the 5
+regression tests in this repository.
 
-**테스트**: `test/discovery.test.js`에 5건(`lvl=1`·`lvl=2`·상대 깊이·`lvl`+`ty` AND·
-비구조화 ID 주소 지정).
+**Tests**: 5 in `test/discovery.test.js` (`lvl=1`, `lvl=2`, relative depth,
+`lvl` + `ty` AND, unstructured-ID addressing).
 
-### `net=4` (Delete of Direct Child Resource) 통지 구현 (2026-07-26)
+### `net=4` (Delete of Direct Child Resource) notification implemented (2026-07-26)
 
-**구현했다.** `cse/noti.js`의 주석이 오래도록 `net` 1~4 지원을 표방했으나 실제로는 4번
-분기가 없었고, 이제 코드와 주석이 일치한다.
+**Implemented.** The comments in `cse/noti.js` had long claimed support for
+`net` 1–4, but there was in fact no branch for 4; code and comments now agree.
 
-**구조적 원인**은 `check_and_send_noti()`가 구독을 `pi === req_prim.ri`(동작 대상의 자식)로만
-조회한다는 점이었다. net 1·2·3은 이 조회로 충분하지만, net=4는 **삭제되는 자식**이 동작
-대상이고 구독은 **부모** 아래 있어 조회 기준이 어긋났다.
+**The structural cause** was that `check_and_send_noti()` looks up
+subscriptions only by `pi === req_prim.ri` (children of the operation target).
+That lookup is sufficient for net 1, 2, and 3, but for net=4 the operation
+target is the **child being deleted** while the subscription sits under the
+**parent**, so the lookup key did not line up.
 
-**변경**: `cse/noti.js` 한 파일. `notify_parent_of_child_deletion(deleted_pc, deleted_ty)`를
-신설하고 `check_and_send_noti` 진입부에서 호출한다. `delete_a_res`·`cin.js`·`hostingCSE.js`는
-**건드리지 않았다.**
+**Change**: one file, `cse/noti.js`. Added
+`notify_parent_of_child_deletion(deleted_pc, deleted_ty)` and call it at the
+entry of `check_and_send_noti`. `delete_a_res`, `cin.js`, and `hostingCSE.js`
+were **left untouched**.
 
-구현 시 주의한 지점 셋:
+Three points that needed care during implementation:
 
-- **조기 반환보다 앞에 둬야 한다.** `check_and_send_noti`는 동작 대상 자신의 구독이 0건이면
-  즉시 반환하는데, `<contentInstance>` 아래에는 보통 구독이 없다. net=4 처리를 그 뒤에 두면
-  주 사용 사례에서 영영 실행되지 않는다.
-- **자기 구독 조회를 먼저 '발사'해 둔다.** `delete_a_res`가 통지와 캐스케이드 삭제를 동시에
-  굴리므로, 자기 구독 SELECT가 net=4 조회 뒤로 밀리면 `delete_resources`의 `SUB.destroy`가
-  먼저 도착해 **그 리소스의 net=2 통지가 조용히 사라진다.**
-- **net=4 실패를 격리한다.** 부모 구독의 고장(예: 잘못된 `nu`)이 삭제된 리소스 자신의
-  net=1/2/3 통지까지 죽이지 않도록 `.catch`로 막았다.
+- **It has to come before the early return.** `check_and_send_noti` returns
+  immediately when the operation target itself has zero subscriptions, and
+  there is usually no subscription under a `<contentInstance>`. Putting the
+  net=4 handling after that point would mean it never runs in the primary use
+  case.
+- **Fire the resource's own subscription lookup first.** `delete_a_res` runs
+  notification and cascade deletion concurrently, so if the SELECT for the
+  resource's own subscriptions is pushed behind the net=4 lookup,
+  `delete_resources`'s `SUB.destroy` arrives first and **that resource's net=2
+  notification silently disappears.**
+- **Isolate net=4 failures.** A `.catch` prevents a broken parent subscription
+  (a bad `nu`, for example) from also killing the deleted resource's own
+  net=1/2/3 notifications.
 
-**규격 근거**: oneM2M `TS-0004:6.3.4.2.19`(`4 = Delete_of_Direct_Child_Resource`),
-`TS-0004:7.5.1.2.2` Step 1.0(`childResourceType` 필터는 net=3과 동일 규칙, 없으면 모든 자식
-타입에 발화 / `notificationEventType` 미설정 시 기본값은 `Update_of_Resource`),
-같은 절 Step 2.1(통지 내용은 **자식** 리소스의 표현). 공인 시험은 `TC_CSE_SUB_DEL_003`.
+**Specification basis**: oneM2M `TS-0004:6.3.4.2.19` (`4 =
+Delete_of_Direct_Child_Resource`), `TS-0004:7.5.1.2.2` Step 1.0 (the
+`childResourceType` filter follows the same rule as net=3; with no filter it
+fires for every child type / when `notificationEventType` is unset the default
+is `Update_of_Resource`), and Step 2.1 of the same clause (the notification
+content is the representation of the **child** resource). The conformance test
+is `TC_CSE_SUB_DEL_003`.
 
-**구현 범위 — 직접 DELETE만.** 아래 둘은 **의도적으로 제외**했다.
+**Implementation scope — direct DELETE only.** The two below were
+**deliberately excluded**.
 
-| 삭제 유형 | 동작 | 사유 |
+| Deletion type | Behavior | Reason |
 |---|---|---|
-| 직접 DELETE | **통지함** | 공인 시험 범위, 규격이 명확 |
-| CIN eviction(`mni`/`mbs` 초과) | 통지 안 함 | `int_cr_req !== true` 가드로 배제 — 아래 참조 |
-| 캐스케이드 자손(부모 삭제로 함께 삭제) | 통지 안 함 | `delete_resources`가 통지 함수를 호출하지 않음(기존 동작 유지) |
+| Direct DELETE | **Notifies** | In conformance test scope, specification is clear |
+| CIN eviction (`mni`/`mbs` exceeded) | Does not notify | Excluded by the `int_cr_req !== true` guard — see below |
+| Cascaded descendants (deleted along with the parent) | Does not notify | `delete_resources` does not call the notification function (existing behavior preserved) |
 
-**⚠️ 열린 질문**: oneM2M 표준화 논의에서 **indirect deletion**(다른 리소스를 삭제하면서
-부수적으로 발생하는 삭제)은 통지 이벤트를 발생시키지 않는 것으로 다뤄졌다. 캐스케이드
-자손 삭제가 여기 해당한다. **CIN eviction이 여기 포함되는지는 확인이 필요하다** — eviction을
-유발하는 것은 DELETE가 아니라 CREATE이므로 문자 그대로는 해당하지 않는다. 확인 전까지
-보수적으로 제외했고, 회귀 테스트를 `todo`로 남겨 질문이 살아 있음을 표시했다.
+**⚠️ Open question**: in oneM2M standardization discussion, **indirect
+deletion** (a deletion that occurs as a side effect of deleting a different
+resource) has been treated as not raising a notification event. Cascaded
+descendant deletion falls under this. **Whether CIN eviction is included needs
+confirmation** — what triggers eviction is CREATE, not DELETE, so taken
+literally it does not qualify. It was excluded conservatively pending
+confirmation, and the regression test is left as `todo` to keep the question
+visible.
 
-이 답에 따라 **`mni` 초과 시 수집 데이터가 무통지로 사라지는 문제**의 성격이 갈린다 —
-규격상 정상 동작이거나, 아직 남은 결함이거나.
+The answer determines the nature of the problem where **collected data
+disappears without notification once `mni` is exceeded** — either it is
+correct per the specification, or it is a defect that still stands.
 
-**테스트**: `test/notification.test.js`에 6건(발화·`nev.rep` 내용·`chty` 양방향·조부모
-미발화·캐스케이드 무통지). eviction 1건은 `todo`로 유지.
+**Tests**: 6 in `test/notification.test.js` (firing, `nev.rep` content, `chty`
+in both directions, no firing at the grandparent, no notification on cascade).
+The 1 eviction test is kept as `todo`.
 
-### 디스커버리가 조용히 틀린 결과를 주던 경로 3종 수정 (2026-07-26)
+### Fixed 3 paths where discovery silently returned wrong results (2026-07-26)
 
-셋은 서로 다른 버그지만 증상의 성격이 같았다 — **오류를 내지 않고 조용히 틀린 결과를 준다.**
+These are three different bugs, but the symptom had the same character —
+**they returned wrong results silently, without raising an error.**
 
-**1. 잘못된 `gmty`가 범위 제한을 통째로 무력화했다** (조용히 너무 많이)
+**1. A bad `gmty` disabled the scope restriction entirely** (silently too much)
 
-`set_where_clause`의 계약은 `{ where, has_geo_query }`인데 지오쿼리 분기의 `default:`
-두 곳이 `return where;`로 빠져나갔다. 호출부가 구조분해하므로 `where`가 `undefined`가 되고
-`findAll({ where: undefined })`는 **조건 없이 테이블 전체**를 돌려준다 — 대상 서브트리로
-좁히는 `sid` 조건까지 함께 사라진다. `gsf`는 Joi가 1..3으로 막고 있었지만 `gmty`에는
-범위 검증이 없어 `?fu=1&gmty=9&gsf=1&geom=[1,2]`로 도달했다.
+The contract of `set_where_clause` is `{ where, has_geo_query }`, but two
+`default:` cases in the geo-query branch exited with `return where;`. Since the
+caller destructures, `where` became `undefined`, and
+`findAll({ where: undefined })` returns **the entire table with no
+conditions** — the `sid` condition that narrows to the target subtree
+disappears along with everything else. Joi was constraining `gsf` to 1..3, but
+`gmty` had no range validation, so `?fu=1&gmty=9&gsf=1&geom=[1,2]` reached it.
 
-두 겹으로 고쳤다 — 계약을 바로잡아 최악의 경우에도 `sid` 제한이 살아남게 하고,
-`gmty`에 규격 범위(`TS-0004:6.3.4.2.74` — 1..6) 검증을 더했다.
+It was fixed in two layers — the contract was corrected so that the `sid`
+restriction survives even in the worst case, and range validation against the
+specification (`TS-0004:6.3.4.2.74` — 1..6) was added for `gmty`.
 
-**2. 디스커버리 실패가 성공으로 둔갑했다** (조용히 아무것도 안)
+**2. Discovery failures masqueraded as success** (silently nothing)
 
-`fu1_discovery` 호출이 예외를 삼키고 로그만 남겨, SQL이 실패해도 **빈 목록 + RSC 2000**이
-나갔다. 이 결함은 이미 대가를 치렀다 — `lvl` 구현 중 잘못된 WHERE 조건이 에러가 아니라
-빈 결과로 나타나 진단이 늦어졌다. **다른 결함을 숨기는 결함**이었다.
+The `fu1_discovery` call swallowed exceptions and only logged them, so an
+**empty list + RSC 2000** went out even when the SQL failed. This defect had
+already cost something — during the `lvl` implementation, a wrong WHERE
+condition surfaced as an empty result rather than an error, which delayed
+diagnosis. It was **a defect that hides other defects**.
 
-**3. LIKE 와일드카드가 이스케이프되지 않았다** (조용히 엉뚱한 걸)
+**3. LIKE wildcards were not escaped** (silently the wrong thing)
 
-`sid` 접두어의 `_`가 SQL LIKE에서 임의의 한 문자와 매칭돼, `a_c`로 조회하면 `abc`의
-자손까지 나왔다. 리소스 이름에 밑줄은 흔하다 — 3부 표준의 엔티티 인스턴스 컨테이너가
-`{modelId}_{version}_{instanceId}` 형식이고 기본 ACP도 `cb_default_acp`다.
-**디스커버리와 `delete_a_res`의 자손 수집 두 곳** 모두 고쳤다(삭제 쪽은 과다 매칭이 곧
-남의 리소스 삭제다).
+The `_` in a `sid` prefix matched any single character in SQL LIKE, so
+querying for `a_c` also returned the descendants of `abc`. Underscores are
+common in resource names — the entity instance container in the Part 3
+standard has the form `{modelId}_{version}_{instanceId}`, and the default ACP
+is `cb_default_acp`. It was fixed in **both places: discovery and the
+descendant collection in `delete_a_res`** (on the deletion side, over-matching
+means deleting someone else's resources).
 
-**테스트**: 5건 추가(범위 유지·`gmty` 코드·실패가 2000이 아님·밑줄 디스커버리·밑줄 삭제).
-전부 **수정 전에 실패하는 것을 확인**한 뒤 고쳤다.
+**Tests**: 5 added (scope preserved, `gmty` code, failure is not 2000,
+underscore discovery, underscore deletion). All of them were **confirmed to
+fail before the fix**, and then fixed.
 
-### 검증 중 발견한 그 밖의 사항 (미수정, 테스트 없음)
+### Other findings from verification (not fixed, no tests)
 
-- **`delete_a_res`의 자손 삭제가 fire-and-forget이다.** `delete_resources(child_res_list)`를
-  `await` 없이 호출한다(최초 커밋부터 동일 — 회귀 아님). DELETE가 2002를 반환한 시점에
-  자손이 아직 남아 있는 짧은 창이 생기고, 그 도중 프로세스가 죽으면 고아가 남는다.
-  자손 삭제 자체는 시간을 주면 정상 완료한다(실측 확인).
-- **`cse/reqPrim.js`의 시맨틱 디스커버리 분기에 오타로 보이는 줄이 있다** —
-  `resp_prim.rsc = { "m2m:dbg": ... }`로 두 번째도 `rsc`에 대입한다(`pc`여야 한다).
-  이번 범위 밖이라 손대지 않았다.
+- **Descendant deletion in `delete_a_res` is fire-and-forget.** It calls
+  `delete_resources(child_res_list)` without `await` (unchanged since the
+  initial commit — not a regression). This creates a brief window in which
+  descendants still exist at the moment DELETE returns 2002, and if the process
+  dies during that window, orphans remain. The descendant deletion itself
+  completes correctly if given time (confirmed by measurement).
+- **There is a line that looks like a typo in the semantic discovery branch of
+  `cse/reqPrim.js`** — `resp_prim.rsc = { "m2m:dbg": ... }` assigns to `rsc` a
+  second time (it should be `pc`). It was out of scope this time and was left
+  alone.
 
-### 해소 확인 (업스트림)
+### Confirmed resolved (upstream)
 
-- ~~고아 리소스를 `ri`로 조회하면 응답이 종료되지 않는다~~ — `cse/reqPrim.js`의
-  `return;` → `return resp_prim;` 수정으로 해소됐다. 2026-07-26 재현 시도: 무한 대기 →
-  **10ms 만에 응답**.
+- ~~Retrieving an orphaned resource by `ri` never terminates the response~~ —
+  resolved by changing `return;` to `return resp_prim;` in `cse/reqPrim.js`.
+  Reproduction attempt on 2026-07-26: infinite wait → **response in 10ms**.

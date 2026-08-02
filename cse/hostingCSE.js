@@ -16,7 +16,7 @@ const AE = require('../models/ae-model');
 const CIN = require('../models/cin-model');
 const CNT = require('../models/cnt-model');
 const CSR = require('../models/csr-model');
-// const FLX = require('../models/flx-model');
+const FLX = require('../models/flx-model');
 const GRP = require('../models/grp-model');
 const SUB = require('../models/sub-model');
 
@@ -40,7 +40,7 @@ const cin = require("./resources/cin");
 const grp = require("./resources/grp");
 const sub = require("./resources/sub");
 // const smd = require("./resources/smd");
-// const flx = require("./resources/flx");
+const flx = require("./resources/flx");
 const noti = require("./noti");
 
 // below are not specified in oneM2M yet
@@ -52,10 +52,11 @@ const dsp = require("./resources/dsp"); // <datasetPolicy>
 const dts = require("./resources/dts"); // <dataset>
 const dsf = require("./resources/dsf"); // <datasetFragment>
 
-// SQL LIKE에서 '%'와 '_'는 와일드카드다. 리소스 이름에는 밑줄이 흔하므로(예: 3부 표준의
-// '{modelId}_{version}_{instanceId}', 기본 ACP의 cb_default_acp) 이스케이프하지 않으면
-// 형제 리소스까지 매칭된다 — 디스커버리에서는 결과 오염, 삭제에서는 남의 리소스 삭제다.
-// PostgreSQL LIKE의 기본 이스케이프 문자가 백슬래시라 별도 ESCAPE 절이 필요 없다.
+// In SQL LIKE, '%' and '_' are wildcards. Underscores are common in resource names (e.g.
+// '{modelId}_{version}_{instanceId}' from the Part 3 standard, or cb_default_acp for the default
+// ACP), so without escaping they match sibling resources too — polluted results in discovery,
+// and deletion of someone else's resource in delete. PostgreSQL LIKE uses backslash as its
+// default escape character, so no separate ESCAPE clause is needed.
 function escape_like(s) {
 	return String(s).replace(/([\\%_])/g, '\\$1');
 }
@@ -81,7 +82,7 @@ async function create_a_lookup_record(ty, rn, sid, ri, pi, cr, int_cr, loc) {
 			pi,
 			cr,
 			int_cr,
-			loc: loc || null, // geometry 객체 또는 null
+			loc: loc || null, // geometry object or null
 		});
 	} catch (err) {
 		logger.error({ err }, 'lookup insert failed');
@@ -150,9 +151,9 @@ async function create_a_res(req_prim, resp_prim) {
 		case 24:
 			await smd.create_a_smd(req_prim, resp_prim);
 			break;
-		// case 28:
-		//   await flx.create_a_flx(req_prim, resp_prim);
-		//   break;
+		case 28:
+			await flx.create_a_flx(req_prim, resp_prim);
+			break;
 		case 34:
 			await dac.create_a_dac(req_prim, resp_prim);
 			break;
@@ -249,9 +250,9 @@ async function retrieve_a_res(req_prim, resp_prim) {
 		case 24:
 			await smd.retrieve_a_smd(req_prim, resp_prim);
 			break;
-		// case 28:
-		//   await flx.retrieve_a_flx(req_prim, resp_prim);
-		//   break;
+		case 28:
+			await flx.retrieve_a_flx(req_prim, resp_prim);
+			break;
 		case 101:
 			await mrp.retrieve_an_mrp(req_prim, resp_prim);
 			break;
@@ -360,19 +361,21 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 			//   if (temp_reses.length)
 			//     aggr_res[target_res_key]["m2m:smd"] = [...temp_reses];
 			// }
-			// if ("flx" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "flx");
-			//   // each <flx> specialization has different object key
-			//   if (temp_reses.length) {
-			//     for (flx_obj of temp_reses) {
-			//       let obj_key = Object.keys(flx_obj);
-			//       if (aggr_res[target_res_key][obj_key] == undefined) {
-			//         aggr_res[target_res_key][obj_key] = [];
-			//       }
-			//       aggr_res[target_res_key][obj_key].push(flx_obj[obj_key]);
-			//     }
-			//   }
-			// }
+			if ("flx" === ty_str) {
+				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "flx");
+				// Unlike the other types, each <flexContainer> specialization has its own
+				// envelope key (TS-0004:7.4.37.1 permits a non-m2m: namespace prefix), so the
+				// results are grouped by the key each resource actually carries rather than
+				// collected under one fixed key.
+				for (const flx_obj of temp_reses) {
+					if (!flx_obj) continue;
+					const obj_key = Object.keys(flx_obj)[0];
+					if (aggr_res[res_key][obj_key] === undefined) {
+						aggr_res[res_key][obj_key] = [];
+					}
+					aggr_res[res_key][obj_key].push(flx_obj[obj_key]);
+				}
+			}
 			// if ("mrp" === ty_str) {
 			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "mrp");
 			//   if (temp_reses.length)
@@ -436,10 +439,11 @@ async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 				case "smd":
 					await sub.retrieve_a_smd(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:smd"];
-				// case "flx":
-				//   await flx.retrieve_a_flx(tmp_req_prim, tmp_resp_prim);
-				//   // object keys are different for flexContainer specializations
-				//   return tmp_resp_prim.pc;
+				case "flx":
+					await flx.retrieve_a_flx(tmp_req_prim, tmp_resp_prim);
+					// object keys are different for flexContainer specializations, so the whole
+					// pc is returned and the caller groups by the key it finds
+					return tmp_resp_prim.pc;
 
 				// case "mrp":
 				//   await mrp.retrieve_an_mrp(tmp_req_prim, tmp_resp_prim);
@@ -494,9 +498,9 @@ async function update_a_res(req_prim, resp_prim) {
 		case 24:
 			await smd.update_a_smd(req_prim, resp_prim);
 			break;
-		// case 28:
-		//   await flx.update_a_flx(req_prim, resp_prim);
-		//   break;
+		case 28:
+			await flx.update_a_flx(req_prim, resp_prim);
+			break;
 		// case 34:
 		//   await dac.update_a_dac(req_prim, resp_prim);
 		//   break;
@@ -614,7 +618,7 @@ async function delete_a_res(req_prim, resp_prim) {
 
 // model registry for batch delete
 const DELETE_MODEL = {
-	1: ACP, 2: AE, 3: CNT, 4: CIN, 9: GRP, 16: CSR, 23: SUB,
+	1: ACP, 2: AE, 3: CNT, 4: CIN, 9: GRP, 16: CSR, 23: SUB, 28: FLX,
 	101: MRP, 102: MMD, 103: MDP, 104: DPM, 105: DSP, 106: DTS, 107: DSF,
 };
 
@@ -649,10 +653,10 @@ async function discovery_core(req_prim) {
 	let ids_list = []; // this is for discovery response
 	let ids_list_per_ty = {}; // this is for rcn = 4 or rcn = 8 response
 
-	const { where, has_geo_query, unsupported_geo } = set_where_clause(req_prim);
+	const { where, where_per_ty, has_geo_query, unsupported_geo } = set_where_clause(req_prim);
 	if (unsupported_geo) {
-		// 규격상 유효하나 미구현인 지오메트리 타입 — TS-0004:7.3.2.1의 "지원하지 않으면
-		// 거부한다"에 따라 조용히 무시하지 않는다.
+		// A geometry type that is valid per the spec but not implemented here — following
+		// TS-0004:7.3.2.1 ("reject what is not supported"), it must not be silently ignored.
 		const err = new Error('unsupported geometry type');
 		err.rsc_hint = 'NOT_IMPLEMENTED';
 		throw err;
@@ -674,6 +678,7 @@ async function discovery_core(req_prim) {
 		9:   { model: GRP, no_geo: true  },
 		16:  { model: CSR, no_geo: false },
 		23:  { model: SUB, no_geo: true  },
+		28:  { model: FLX, no_geo: false },
 		101: { model: MRP, no_geo: true  },
 		102: { model: MMD, no_geo: true  },
 		103: { model: MDP, no_geo: true  },
@@ -683,6 +688,11 @@ async function discovery_core(req_prim) {
 		107: { model: DSF, no_geo: true  },
 	};
 
+	// A filter that names a column only some tables have restricts the query to those tables.
+	// Types without the column cannot satisfy the filter, and including them would send the
+	// condition to a table that does not have it — the failure mode documented for lvl above.
+	const has_per_ty_filter = Object.keys(where_per_ty).length > 0;
+
 	// run all type queries in parallel instead of sequentially
 	const query_tasks = ty_list
 		.map(ty_str => parseInt(ty_str))
@@ -690,11 +700,13 @@ async function discovery_core(req_prim) {
 			const entry = TYPE_MODEL[ty];
 			if (!entry) return false;
 			if (entry.no_geo && has_geo_query) return false;
+			if (has_per_ty_filter && !where_per_ty[ty]) return false;
 			return true;
 		})
 		.map(ty => {
 			const { model } = TYPE_MODEL[ty];
-			return model.findAll({ where, attributes: ['sid', 'ri', 'ty'], limit: fetch_lim })
+			const ty_where = where_per_ty[ty] ? { ...where, ...where_per_ty[ty] } : where;
+			return model.findAll({ where: ty_where, attributes: ['sid', 'ri', 'ty'], limit: fetch_lim })
 				.then(rows => ({ ty, rows }));
 		});
 
@@ -761,7 +773,7 @@ function set_where_clause(req_prim) {
 
 	// array filter condition
 	const cty_list = req_prim.fc.cty; // contentType
-	// const cnd_list = req_prim.fc.cnd; // container definition of <flx>
+	const cnd_list = req_prim.fc.cnd; // container definition of <flx>
 	const or_list = req_prim.fc.or; // ontology reference of <smd>
 
 	// generic 'attribute' condition
@@ -780,24 +792,36 @@ function set_where_clause(req_prim) {
 
 	const where = {};
 
+	// Conditions on columns that only some type tables have. `where` is applied to every type
+	// table, so putting a column-specific condition there makes the other tables' queries fail
+	// with "column does not exist" — the same trap documented for lvl below. discovery_core
+	// merges these into the matching type's query and skips the types without the column.
+	const where_per_ty = {};
+
 	// basically, target resources are all children of the discovery target
 	where.sid = { [Op.like]: `${escape_like(req_prim.sid)}/%` };
 
-	// lvl(level)은 '대상으로부터의 상대 깊이' 상한이다(TS-0001:8.1.2 — 대상 자신이 0,
-	// 직속 자식이 1). 반면 sid.split("/").length로 셀 수 있는 절대 깊이는 Mobius=1부터
-	// 시작한다. 그래서 대상의 절대 깊이(target_lvl)를 더해 상한으로 환산한다 — 이 환산을
-	// 빠뜨리면 트리 최상위에서만 우연히 맞고 하위 노드에서 틀린다.
+	// cnd (containerDefinition) exists only on <flexContainer> (ty=28)
+	if (cnd_list) {
+		where_per_ty[28] = { cnd: { [Op.in]: Array.isArray(cnd_list) ? cnd_list : [cnd_list] } };
+	}
+
+	// lvl (level) is an upper bound on the depth *relative to the target* (TS-0001:8.1.2 — the
+	// target itself is 0, its direct children are 1). The absolute depth that can be counted with
+	// sid.split("/").length, on the other hand, starts at 1 for Mobius. So the target's absolute
+	// depth (target_lvl) is added to convert lvl into an absolute bound — leave that conversion
+	// out and it only happens to be right at the top of the tree and is wrong for nodes below.
 	//
-	// lookup 테이블에는 이 절대 깊이가 lvl 컬럼으로 미리 채워져 있지만(Mobius=1),
-	// 디스커버리는 lookup이 아니라 타입별 테이블(cnt/cin/acp/...)을 각각 조회하며
-	// 그 테이블들에는 lvl 컬럼이 없다(실측 2026-07-26: `SELECT ... FROM cnt WHERE
-	// lvl <= 3` → "column lvl does not exist", where.lvl을 그대로 쓰면 타입별 질의가
-	// 전부 에러로 죽어 디스커버리가 빈 결과를 반환한다). 그래서 모든 타입 테이블에
-	// 공통으로 있는 sid 컬럼으로부터 SQL에서 직접 깊이(슬래시 개수+1)를 셈해 비교한다.
+	// The lookup table is pre-populated with this absolute depth in its lvl column (Mobius=1), but
+	// discovery does not query lookup: it queries each per-type table (cnt/cin/acp/...) separately
+	// and those tables have no lvl column (measured 2026-07-26: `SELECT ... FROM cnt WHERE
+	// lvl <= 3` → "column lvl does not exist"; using where.lvl as-is kills every per-type query
+	// with an error and discovery returns an empty result). So the depth (slash count + 1) is
+	// computed in SQL directly from the sid column, which all type tables have in common.
 	//
-	// 애플리케이션에서 사후 필터링하지 않고 WHERE에 넣는 이유(DEC-040): 디스커버리는
-	// lim(기본 200)으로 결과를 자르므로, 나중에 거르면 깊은 노드가 정원을 먼저 채워
-	// 정작 원하는 얕은 결과가 잘려나간다.
+	// Why this goes into the WHERE clause instead of being filtered afterwards in the application
+	// (DEC-040): discovery truncates results at lim (200 by default), so filtering later lets deep
+	// nodes fill the quota first and cuts off the shallow results that were actually wanted.
 	if (lvl !== undefined) {
 		const target_lvl = req_prim.sid.split("/").length;
 		const sid_depth = Sequelize.fn(
@@ -805,10 +829,11 @@ function set_where_clause(req_prim) {
 			Sequelize.fn('string_to_array', Sequelize.col('sid'), '/'),
 			1
 		);
-		// 바인딩마다 lvl 타입 강제가 다르다 — HTTP는 parseInt를 거치지만 MQTT는 JSON.parse된
-		// fc를 그대로 넘기고 Joi도 coerced 값을 되쓰지 않는다. 문자열이면 target_lvl + lvl이
-		// 산술이 아니라 연결이 되어(예: 2 + "2" → "22") 상한이 사실상 무제한이 되므로 여기서
-		// 명시적으로 숫자로 강제한다.
+		// Type coercion of lvl differs per binding — HTTP puts it through parseInt, but MQTT passes
+		// the JSON.parse'd fc straight through and Joi does not write its coerced value back
+		// either. With a string, target_lvl + lvl becomes concatenation instead of arithmetic
+		// (e.g. 2 + "2" → "22"), making the bound effectively unlimited, so it is coerced to a
+		// number explicitly here.
 		const lvl_condition = Sequelize.where(sid_depth, { [Op.lte]: target_lvl + Number(lvl) });
 		if (where[Op.and] && Array.isArray(where[Op.and])) {
 			where[Op.and].push(lvl_condition);
@@ -887,11 +912,12 @@ function set_where_clause(req_prim) {
 					postgis_geometry_type = 'Polygon';
 					break;
 				default:
-					// 스키마가 1..6만 통과시키므로 여기 오는 값은 규격상 유효하지만
-					// mobius4가 구현하지 않은 타입(4..6)이다. 조용히 무시하면 lvl에서
-					// 겪은 것과 같은 사고가 난다 — 호출부가 5001을 낼 수 있게 표시한다.
+					// The schema only lets 1..6 through, so a value arriving here is valid
+					// per the spec but a type mobius4 does not implement (4..6). Silently
+					// ignoring it repeats the failure seen with lvl — flag it so the caller
+					// can respond with 5001.
 					logger.warn({ geometry_type }, 'unsupported geometry type');
-					return { where, has_geo_query, unsupported_geo: true };
+					return { where, where_per_ty, has_geo_query, unsupported_geo: true };
 			}
 
 			// create geometry object in GeoJSON format
@@ -913,13 +939,15 @@ function set_where_clause(req_prim) {
 					postgis_function = 'ST_Intersects';
 					break;
 				default:
-					// 이 함수의 계약은 { where, has_geo_query }다. where만 반환하면
-					// 호출부의 구조분해에서 where가 undefined가 되고, findAll({ where:
-					// undefined })는 조건 없이 테이블 전체를 돌려준다 — 대상 서브트리로
-					// 좁히는 sid 조건까지 함께 사라진다. gsf는 스키마가 1..3으로 막고
-					// 있어 도달 불가지만, 계약을 geometry_type 분기와 일관되게 유지한다.
+					// The contract of this function is { where, has_geo_query }. Returning
+					// where alone leaves where undefined in the caller's destructuring, and
+					// findAll({ where: undefined }) returns the entire table with no
+					// conditions — the sid condition that narrows the query to the target
+					// subtree disappears along with it. gsf is capped at 1..3 by the schema
+					// so this is unreachable, but the contract is kept consistent with the
+					// geometry_type branch.
 					logger.warn({ geo_function }, 'unsupported geo function');
-					return { where, has_geo_query, unsupported_geo: true };
+					return { where, where_per_ty, has_geo_query, unsupported_geo: true };
 			}
 
 			// add PostGIS spatial query condition (parameterized to prevent SQL injection)
@@ -958,7 +986,7 @@ function set_where_clause(req_prim) {
 		}
 	}
 
-	return { where, has_geo_query };
+	return { where, where_per_ty, has_geo_query };
 }
 
 async function fu1_discovery(req_prim, resp_prim) {
@@ -1490,7 +1518,7 @@ async function expired_resource_cleanup() {
 		attributes: ['ri', 'ty', 'sid']
 	});
 
-	// ri와 ty 속성을 가지는 객체 배열로 변환
+	// convert into an array of objects carrying the ri and ty attributes
 	const expired_res_list = result.map(resource => ({
 		ri: resource.ri,
 		ty: resource.ty,

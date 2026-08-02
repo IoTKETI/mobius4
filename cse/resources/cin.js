@@ -46,7 +46,7 @@ async function create_a_cin(req_prim, resp_prim) {
         return;
     }
 
-    // content size 계산
+    // compute content size
     const { get_mem_size } = require('../hostingCSE');
     const content_size = get_mem_size(prim_res.con);
 

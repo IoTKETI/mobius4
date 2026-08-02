@@ -7,7 +7,7 @@
     "poa": [
       "http://localhost:7599"
     ],
-    "registrar": {  
+    "registrar": {
       "cse_type": 1,
       "cse_id": "/Mobius2",
       "csebase_rn": "Mobius",
@@ -36,7 +36,8 @@
       5,
       9,
       16,
-      23
+      23,
+      28
     ],
     "serializations": [
       "json"
@@ -122,7 +123,10 @@
     },
     "http": {
       "logBody": false,
-      "redactPaths": ["req.headers.authorization", "req.body.pw"]
+      "redactPaths": [
+        "req.headers.authorization",
+        "req.body.pw"
+      ]
     }
   },
   "security": {

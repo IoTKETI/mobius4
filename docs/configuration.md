@@ -181,3 +181,64 @@ These settings control internal ID and data size limits. The defaults work for m
 | `default.datasetPolicy.nvp` | Default null value policy for dataset creation |
 | `default.datasetPolicy.nrhd` | Default number of rows in historical dataset |
 | `default.datasetPolicy.nrld` | Default number of rows in live dataset |
+
+### flexContainer specializations
+
+A `<flexContainer>` (ty=28) carries `[customAttribute]` members whose names and types are
+defined by the document its `cnd` (containerDefinition) attribute points at, not by oneM2M.
+TS-0004:7.4.37.2.1 requires the CSE to validate a request against that schema and to answer
+`SPECIALIZATION_SCHEMA_NOT_FOUND` (4125, HTTP 501) when the schema is unavailable.
+
+Mobius4 declares that contract locally instead of fetching an XSD on the CREATE path. The
+registry lives in its own file, **`config/specializations.json`**, read directly by
+`cse/specialization.js` — it is not part of the `config` settings tree, so `NODE_ENV` and
+`local.json` layering do not apply to it. The whole file is the registry, keyed by `cnd` URI:
+
+```json
+{
+  "http://developers.iotocean.org/schema/parkingBlock.xsd": {
+    "typeName": "parkingBlock",
+    "namespacePrefix": "sc",
+    "attributes": {
+      "type":                { "type": "string"  },
+      "category":            { "type": "array"   },
+      "availableSpotNumber": { "type": "integer" },
+      "totalSpotNumber":     { "type": "integer" }
+    }
+  }
+}
+```
+
+It is a separate file because it describes the deployment's information model rather than CSE
+settings, and it grows one entry per specialization. Adding one therefore never touches
+`default.json`, and the two can be reviewed and deployed independently.
+
+| key | description |
+| :--- | :--- |
+| `<cnd URI>` | The exact `cnd` value clients will send. An unregistered value is rejected with 4125 |
+| `typeName` | Local name of the specialization, e.g. `parkingBlock` |
+| `namespacePrefix` | Namespace prefix of the envelope key. TS-0004:7.4.37.1 allows a specialization to use a targetNamespace other than `m2m:` |
+| `attributes` | Allowed `[customAttribute]` names and their types. Supported types: `string`, `integer`, `number`, `boolean`, `array`, `object` |
+
+The envelope key of a request must be exactly `namespacePrefix:typeName` — for the entry
+above, `{"sc:parkingBlock": {...}}`. Custom attribute names are matched **as they appear on
+the wire**; no long-name/short-name translation is applied, because TS-0004:8.2.1 confines the
+short-name tables to oneM2M-defined names and a third-party specialization has none.
+
+All custom attributes are optional (TS-0004:7.4.37.1 lists `[customAttribute]` as O/O). A
+name that is not declared, or a declared name carrying the wrong type, is rejected with 4000.
+
+Adding a specialization means editing `config/specializations.json` and restarting the CSE; the
+file is read once at startup. If it is missing or unparseable the CSE still starts, logs a
+warning, and answers every `cnd` with 4125 — a deployment that uses no `<flexContainer>` does
+not need the file at all.
+
+For a walkthrough of registering a specialization and then creating, updating, discovering and
+deleting resources against it, see
+[How to — flexContainer specializations](how-to.md#flexcontainer-specializations).
+
+> **Not implemented: `<flexContainerInstance>` (ty=58).** TS-0004:7.4.37.2.1 step 3 makes
+> instance creation conditional on a non-zero `mni`, `mbs` or `mia`, so those three attributes
+> are rejected with 5001 rather than stored. Consequently `<latest>` and `<oldest>` are not
+> available under a `<flexContainer>` either — TS-0001:9.6.35 scopes them to the case where
+> instances are being created.

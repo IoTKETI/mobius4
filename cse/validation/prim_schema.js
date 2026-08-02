@@ -41,15 +41,18 @@ const req_prim_schema = Joi.object().keys({
         lvl: Joi.number().integer().min(1),
         lim: Joi.number().integer().min(0),
         ofst: Joi.number().integer().min(1),
-        // TS-0004:6.3.4.2.74 — geometryType 유효값은 1..6이다. 범위 밖은 잘못된 요청이므로
-        // 여기서 4000으로 막는다(gsf가 이미 같은 방식으로 1..3을 막고 있다).
-        // 4..6(MultiPoint/MultiLineString/MultiPolygon)은 규격상 유효하지만 mobius4가
-        // 구현하지 않았다 — 그것은 스키마가 아니라 처리 단계에서 5001로 알린다.
+        // TS-0004:6.3.4.2.74 — valid geometryType values are 1..6. Anything outside that range is
+        // a bad request and is rejected here with 4000 (gsf already caps 1..3 the same way).
+        // 4..6 (MultiPoint/MultiLineString/MultiPolygon) are valid per the spec but mobius4 does
+        // not implement them — that is reported as 5001 during processing, not by the schema.
         gmty: Joi.number().integer().min(1).max(6).optional(),
         gsf: Joi.number().integer().min(1).max(3).optional(),
         geom: Joi.array().optional(),
         smf: Joi.string().optional(),
         or: Joi.array().items(Joi.string().optional()).optional(),
+        // containerDefinition filter for <flexContainer>. bindings/http.js already parses
+        // ?cnd= into fc.cnd; without the key here Joi rejects the whole request with 4000.
+        cnd: Joi.array().items(Joi.string()).optional(),
     }),
     drt: Joi.number().integer().min(1).max(2).optional(),
     sqi: Joi.boolean().optional(),

@@ -26,6 +26,7 @@ oneM2M resource types (until Release 4):
 - CSEBase, AE, remoteCSE
 - accessControlPolicy
 - container, contentInstance, latest, oldest
+- flexContainer (specializations; [how to use](docs/how-to.md#flexcontainer-specializations) · [configuration](docs/configuration.md#flexcontainer-specializations))
 - subscription
 - group, fanOutPoint
 
