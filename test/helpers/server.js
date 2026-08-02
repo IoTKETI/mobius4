@@ -33,7 +33,19 @@ function freePort() {
 // bound.
 const DIAG_BUFFER_MAX = 64 * 1024;
 
-async function startServer() {
+// Send SIGTERM and escalate to SIGKILL if the child has not exited after STOP_TIMEOUT_MS.
+// Shared by stopServer() and the START_TIMEOUT_MS branch in startServer(): on a startup timeout
+// the caller never receives a stop handle, so nobody else can clean up the child — the kill has
+// to happen right here. It is fire-and-forget on purpose: a hung child must not turn a 30s
+// startup timeout into a 35s one by making the rejection wait for the exit event.
+function killChild(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const force = setTimeout(() => child.kill("SIGKILL"), STOP_TIMEOUT_MS);
+  child.once("exit", () => clearTimeout(force));
+  child.kill("SIGTERM");
+}
+
+async function startServer({ mqttPort, logLevel = "error" } = {}) {
   const port = await freePort();
   // bindings/http.js has no enabled flag for the https listener and unconditionally listens
   // on config.https.port (7580 by default). The development instance already holds that
@@ -44,12 +56,22 @@ async function startServer() {
     http: { port },
     https: { port: httpsPort },
     db: { name: TEST_DB },
-    mqtt: { enabled: false },
+    // MQTT is disabled by default: most tests only exercise the HTTP binding, and there is no
+    // broker running unless a test starts one. A test that wants MQTT coverage spawns its own
+    // broker via startBroker() (test/helpers/broker.js) and passes its port here.
+    mqtt: mqttPort
+      ? { enabled: true, ip: "127.0.0.1", port: mqttPort }
+      : { enabled: false },
     // default.json turns on file logging to logs/mobius4.log, so we explicitly turn it off.
     // Console logging stays on — logger.js writes only to stdout and never to stderr, so
     // when startup fails the clue is in stdout (a fatal log, for example). That is why we
     // collect both stdout and stderr.
-    logging: { level: "error", file: { enabled: false } },
+    //
+    // logLevel defaults to "error" (drops warn-level records, matching the previous fixed
+    // behavior). A caller that needs to observe a warn-level diagnostic in diagnostics() --
+    // e.g. mqtt.test.js checking bindings/mqtt.js's "broker not reachable" warning -- can
+    // raise it to "warn" for just that server.
+    logging: { level: logLevel, file: { enabled: false } },
   };
 
   const child = spawn(process.execPath, ["mobius4.js"], {
@@ -73,6 +95,17 @@ async function startServer() {
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
+      // The startup wait timed out before startServer() returned a stop handle to the caller,
+      // so this is the only place that can clean up the orphaned child (which otherwise holds a
+      // DB pool and two listening sockets).
+      killChild(child);
+      // Stop reading rather than waiting for the pipes to see EOF: nothing here guarantees a
+      // hung child hasn't spawned a subprocess that inherited these fds, which would otherwise
+      // hold the pipe open — and with it, the event loop — long after the child we signaled
+      // above has exited. diag already has everything captured up to this point, so nothing is
+      // lost.
+      child.stdout.destroy();
+      child.stderr.destroy();
       reject(new Error(`server startup timed out (${START_TIMEOUT_MS}ms). output:\n${diag}`));
     }, START_TIMEOUT_MS);
 
@@ -97,10 +130,9 @@ async function startServer() {
 function stopServer(child) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
-    const force = setTimeout(() => child.kill("SIGKILL"), STOP_TIMEOUT_MS);
-    child.once("exit", () => { clearTimeout(force); resolve(); });
-    child.kill("SIGTERM");
+    child.once("exit", resolve);
+    killChild(child);
   });
 }
 
-module.exports = { startServer, stopServer, TEST_DB };
+module.exports = { startServer, stopServer, freePort, killChild, TEST_DB };
