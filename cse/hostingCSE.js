@@ -570,11 +570,15 @@ async function delete_a_res(req_prim, resp_prim) {
 	}
 
 	// delete a target resource
-	// wait for target resource deletion before returning the deleted resource
+	// The await matters: without it the response says DELETED while the rows are still being
+	// removed, so a client that deletes and then immediately retrieves can catch the resource
+	// half-gone. That window is narrow but real — it produced an intermittent RSC 5000 in CI,
+	// reproduced locally at roughly one request in 300 (see delete_a_res's own descendants
+	// below, which are deliberately left asynchronous).
 	const tmp_resp = {};
 	await retrieve_a_res(req_prim, tmp_resp);
 	if (tmp_resp.pc) {
-		delete_resources([{ ri: req_prim.ri, ty: req_prim.to_ty }]);
+		await delete_resources([{ ri: req_prim.ri, ty: req_prim.to_ty }]);
 		// [C6] invalidate lookup cache for deleted resource
 		if (req_prim.sid) lookupCache.del(req_prim.sid);
 		if (req_prim.to)  lookupCache.del(req_prim.to);
@@ -1105,6 +1109,17 @@ async function set_ri_sid(req_prim) {
 	req_prim.sid   = await get_structuredID(req_prim.to);
 	req_prim.to_ty = await get_ty_from_unstructuredID(req_prim.ri);
 
+	// The two lookups above are separate queries, so a concurrent DELETE can commit between
+	// them: the first still sees the row and yields an ri, the second no longer does and yields
+	// 0. An ri with no type is a resource that has just ceased to exist, and passing it on is
+	// worse than reporting it gone — retrieve_a_res has no case for type 0, so it would answer
+	// OK with no content and callers that read that content would throw.
+	if (req_prim.ri && !req_prim.to_ty) {
+		logger.warn({ sid: req_prim.to, ri: req_prim.ri },
+			'set_ri_sid: resource disappeared between the id and type lookups');
+		req_prim.ri = null;
+	}
+
 	if (req_prim.ri) {
 		lookupCache.set(req_prim.to, { ri: req_prim.ri, sid: req_prim.sid, to_ty: req_prim.to_ty });
 	}
@@ -1182,9 +1197,13 @@ async function access_decision(req_prim, resp_prim) {
 	}
 
 	await retrieve_a_res(temp_req, temp_resp);
-	if (temp_resp.rsc === enums.rsc_str['NOT_FOUND']) {
-		resp_prim.rsc = temp_resp.rsc;
-		resp_prim.pc = temp_resp.pc;
+	// An empty pc is treated the same as an explicit NOT_FOUND. retrieve_a_res leaves pc unset
+	// for a target whose type it has no case for, and then labels the answer OK, so the absence
+	// of content is the only signal there is. Reading obj_key off it would throw and surface as
+	// RSC 5000 — a server fault reported for a resource that is simply not there.
+	if (temp_resp.rsc === enums.rsc_str['NOT_FOUND'] || !temp_resp.pc) {
+		resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+		resp_prim.pc = temp_resp.pc || { 'm2m:dbg': 'target resource does not exist' };
 		return false;
 	}
 

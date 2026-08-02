@@ -129,6 +129,32 @@ upgrading: this release does not start on an unchanged configuration.**
   policy and `create_default_acp` then appended it again, so the `<CSEBase>` listed it
   twice. New databases no longer do that, and the migration deduplicates existing ones.
 
+- **DELETE answered 2002 before the resource was actually gone, and a retrieve that
+  landed in the gap got RSC 5000.** Unrelated to the admin change above. It dates to
+  `4e977e0` (2026-04-09, on the 4.2.0 line), where the `await` was dropped from
+  `delete_resources()` in `cse/hostingCSE.js` as a performance optimization — the
+  comment on the line still said the deletion was waited for — so every tagged release
+  in this repository carries it. A client that deleted a resource and retrieved it
+  immediately could hit the window: `set_ri_sid` resolves the resource id and its type
+  in two separate queries against `lookup`, so a deletion committing between them
+  produced an id with type `0`; `retrieve_a_res` has no case for type `0` and left the
+  content empty while still labelling the answer OK; `access_decision` then threw
+  reading that content, and the failure surfaced as a server fault for a resource that
+  was merely absent. Reproduced at roughly one request in 300, on any Node version.
+
+  Three changes. `delete_a_res` now awaits the target's removal, so 2002 means gone —
+  measured cost on the DELETE response: none (p50 5.3 ms before and after, 1000
+  requests). `set_ri_sid` treats an id whose type will not resolve as an absent
+  resource rather than passing it on. `access_decision` reports empty content as
+  NOT_FOUND instead of throwing. **Descendants are still deleted asynchronously** — a
+  deliberate choice so that deleting a large subtree does not hold the response open,
+  and the reason `waitForSubtreeGone` exists in the test helpers.
+
+  Performance is unchanged by design; the `await` only orders work that was already
+  being done. `test/deletion.test.js` covers the contract, including a case that writes
+  the mid-deletion state directly and so checks the guard on every run rather than
+  waiting for the race to recur.
+
 ## v4.5.1 (2026-08-02)
 
 **Why PATCH**: none of the below adds oneM2M capability — it's regression test

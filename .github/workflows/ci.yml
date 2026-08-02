@@ -102,12 +102,12 @@ jobs:
           # Even when an empty glob matches zero tests, `node --test` reports `# tests 0 / # fail 0`
           # and exits 0 — so if test/ is moved or deleted, or package.json's glob is changed
           # incorrectly, the `Run tests` step is still green. Hence we count the tests that actually
-          # ran and compare against this repo's regression baseline (66 = 36 from v4.4.0 + 19 for
+          # ran and compare against this repo's regression baseline (74 = 36 from v4.4.0 + 19 for
           # <flexContainer> + 6 for MQTT binding coverage + 5 for the admin identity guard
-          # + 5 for the admin access-control policy).
+          # + 5 for the admin access-control policy + 3 for the deletion contract).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=71
+          BASELINE=74
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."
