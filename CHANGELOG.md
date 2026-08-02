@@ -25,6 +25,20 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 _(Accumulate items here for the next release.)_
 
+### Unresolved — pending spec clarification
+
+- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
+  standardization discussion, **indirect deletion** (a deletion that happens as a
+  side effect of deleting a different resource) is treated as not firing a
+  notification. Whether eviction falls under this needs confirmation — what
+  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
+  confirmation; the regression test is left as `todo` to keep the question visible.
+  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
+  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
+  must be stripped from the notification).
+
+## v4.5.0 (2026-08-02)
+
 **Why MINOR**: `<flexContainer>` is a oneM2M resource type that did not exist
 here before, and `db/migrations/v4.5.0.sql` is a backward-compatible schema
 change. The rest is a bug fix and a dependency upgrade.
@@ -104,18 +118,6 @@ change. The rest is a bug fix and a dependency upgrade.
   up a same-range patch bump as npm's resolver deduped them against axios's
   new transitive dependencies — neither changed its own declared dependency
   range.
-
-### Unresolved — pending spec clarification
-
-- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
-  standardization discussion, **indirect deletion** (a deletion that happens as a
-  side effect of deleting a different resource) is treated as not firing a
-  notification. Whether eviction falls under this needs confirmation — what
-  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
-  confirmation; the regression test is left as `todo` to keep the question visible.
-  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
-  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
-  must be stripped from the notification).
 
 ## v4.4.1 (2026-08-01)
 

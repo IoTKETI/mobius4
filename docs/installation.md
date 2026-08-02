@@ -6,7 +6,7 @@ This guide covers installing all prerequisites for Mobius4 on each supported OS.
 | :--- | :---: | :---: | :---: | :---: |
 | Node.js | v22 or v24 | Official installer | Official installer | NodeSource |
 | PostgreSQL | v17 | EDB installer | Homebrew | PGDG apt repo |
-| PostGIS | 3.x | StackBuilder | Homebrew | PGDG apt repo |
+| PostGIS | v3.6 (3.x works; 3.6.4 is what this repo is developed and tested on) | StackBuilder | Homebrew | PGDG apt repo |
 | Mosquitto | 2.x | Official installer | Homebrew | apt |
 
 ---
