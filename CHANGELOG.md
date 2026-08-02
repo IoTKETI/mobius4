@@ -36,6 +36,24 @@ _(Accumulate items here for the next release.)_
   If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
   `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
   must be stripped from the notification).
+- **Three questions about the MQTT binding, left open rather than guessed at
+  when its test coverage was designed.** Confirmed from TS-0010's topic-format
+  rule only, not from a full reading of the spec:
+  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
+    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
+    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
+    like an unimplemented feature, but confirming that needs the full spec
+    text, not a test suite.
+  - **QoS levels and retained-message handling** — not yet checked against
+    the spec at all.
+  - **MQTT-specific error mapping** — likewise unchecked.
+
+  Encoding a guess about any of these as a passing test would be worse than
+  leaving them untested: it would cement whatever mobius4 does today as
+  though it were the standard, the same reasoning that keeps the `net=4`
+  eviction question above as a `todo` rather than a silent choice.
+  `test/mqtt.test.js` (added below) is now the harness that a future pass
+  through the full TS-0010 text can use to settle them.
 
 ## v4.5.1 (2026-08-02)
 
@@ -45,10 +63,11 @@ coverage, a documentation update, and CI configuration.
 - **Added regression coverage for the MQTT protocol binding.** Until now
   `bindings/mqtt.js` had zero automated tests. Six tests were added, backed by
   a dedicated test broker: `test/helpers/broker.js` spawns its own `mosquitto`
-  instance on a free port for the duration of the run (so the suite never
-  touches a developer's or CI's own broker, and is safe to run concurrently),
-  and `test/helpers/onem2m-mqtt.js` is a oneM2M-over-MQTT client helper used by
-  the new tests.
+  instance on a free port for the duration of the run, so the suite never
+  touches a developer's or CI's own broker — the broker itself is safe to run
+  concurrently, though concurrent `npm test` runs still share the single
+  `mobius4_test` database. `test/helpers/mqtt-onem2m.js` is a oneM2M-over-MQTT
+  client helper used by the new tests.
 - **`mosquitto` added as a test prerequisite.** Only the binary needs to be on
   `PATH` — the suite starts and stops its own broker itself, so, unlike
   running Mobius4 as a server, no running instance and no

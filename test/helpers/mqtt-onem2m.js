@@ -45,10 +45,19 @@ async function connect(brokerPort, { originator = ADMIN } = {}) {
     connectTimeout: 10000,
   });
 
-  await new Promise((resolve, reject) => {
-    client.once("connect", resolve);
-    client.once("error", reject);
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      client.once("connect", resolve);
+      client.once("error", reject);
+    });
+  } catch (err) {
+    // If 'error' fires before 'connect', connect() is about to throw and the client object is
+    // never returned to the caller, so nobody else can ever end() it -- without this, a
+    // connect-time error (e.g. ECONNREFUSED against a dead broker port) leaks an open socket.
+    // Fire-and-forget, force=true: there is nothing to flush on a client that never connected.
+    client.end(true);
+    throw err;
+  }
 
   const originatorTopicId = toTopicId(originator);
   const reqTopic = `/oneM2M/req/${originatorTopicId}/${RECEIVER}/json`;

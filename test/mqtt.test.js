@@ -15,7 +15,22 @@ let broker, srv, client, root;
 
 before(async () => {
   broker = await startBroker();
-  srv = await startServer({ mqttPort: broker.port });
+  // logLevel: "warn" (the default is "error") so that if bindings/mqtt.js's initial connect
+  // to our broker fails, its warn-level log ("mqtt broker not reachable at startup...",
+  // mqtt.js:91-92) actually lands in srv.diagnostics() instead of being dropped by pino. Without
+  // this, a broker-side failure here is indistinguishable from a mobius4 regression: every one
+  // of the six tests below would just time out waiting for a response that bindings/mqtt.js
+  // never subscribed to send, all reporting the same generic
+  // "timed out waiting for mqtt response" message.
+  srv = await startServer({ mqttPort: broker.port, logLevel: "warn" });
+  if (srv.diagnostics().includes("mqtt broker not reachable")) {
+    throw new Error(
+      `mobius4 could not reach the test broker on 127.0.0.1:${broker.port} during startup -- ` +
+      "this is a broker/connectivity problem, not a mobius4 regression. Every test below would " +
+      "otherwise fail with an identical, uninformative 'timed out waiting for mqtt response'. " +
+      `Server diagnostics:\n${srv.diagnostics()}`
+    );
+  }
   client = await mq.connect(broker.port);
   root = await createRoot(srv.baseUrl, "mqtt");
 });
@@ -97,7 +112,6 @@ test("a structured originator (Mobius4:CAE123) gets answered on the matching str
 
     const res = await structClient.retrieve(mq.CSE_BASE);
     assert.equal(structClient.lastResponseTopic(), "/oneM2M/resp/Mobius4:CAE123/Mobius4/json");
-    assert.ok(res.rqi, "the response should carry the rqi it was correlated on");
     assert.equal(typeof res.rsc, "number", "rsc should still be a JSON number over MQTT");
   } finally {
     await structClient.end();

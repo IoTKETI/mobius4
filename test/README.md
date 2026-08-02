@@ -1,7 +1,8 @@
 # mobius4 tests
 
-An HTTP black-box regression suite. The tests start mobius4 themselves on a dedicated DB and a
-dynamic port, so they are safe to run even while a development instance is up.
+A black-box regression suite over both protocol bindings (HTTP and MQTT). The tests start
+mobius4 themselves on a dedicated DB and a dynamic port, so they are safe to run even while a
+development instance is up.
 
 ## Prerequisites (one time)
 
@@ -23,11 +24,12 @@ the suite finishes (`test/helpers/broker.js`); it only needs the binary to be on
 
 The tests override only the DB name, ports, MQTT, and logging via `NODE_CONFIG`; everything
 else is taken from `config/` as-is. So **the tests will break if you have changed
-`cse.admin` (default `SM`), `cse.csebase_rn` (default `Mobius`), or `cse.cse_type`
-(default `1`) in your local configuration** — the originator and the `<CSEBase>` name are
-hardcoded in the tests, and with a `cse_type` of 2 or 3 the CSE tries to register with a
-remote CSE at boot, which can make the startup wait time out. The DB credentials also come
-from `config/`.
+`cse.admin` (default `SM`), `cse.csebase_rn` (default `Mobius`), `cse.cse_type`
+(default `1`), or `cse.cse_id` (default `/Mobius4`) in your local configuration** — the
+originator and the `<CSEBase>` name are hardcoded in the tests, `test/helpers/mqtt-onem2m.js`
+hardcodes `cse_id` to build every MQTT request/response topic, and with a `cse_type` of 2 or 3
+the CSE tries to register with a remote CSE at boot, which can make the startup wait time out.
+The DB credentials also come from `config/`.
 
 ## Running
 

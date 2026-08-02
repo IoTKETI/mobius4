@@ -45,7 +45,7 @@ function killChild(child) {
   child.kill("SIGTERM");
 }
 
-async function startServer({ mqttPort } = {}) {
+async function startServer({ mqttPort, logLevel = "error" } = {}) {
   const port = await freePort();
   // bindings/http.js has no enabled flag for the https listener and unconditionally listens
   // on config.https.port (7580 by default). The development instance already holds that
@@ -66,7 +66,12 @@ async function startServer({ mqttPort } = {}) {
     // Console logging stays on — logger.js writes only to stdout and never to stderr, so
     // when startup fails the clue is in stdout (a fatal log, for example). That is why we
     // collect both stdout and stderr.
-    logging: { level: "error", file: { enabled: false } },
+    //
+    // logLevel defaults to "error" (drops warn-level records, matching the previous fixed
+    // behavior). A caller that needs to observe a warn-level diagnostic in diagnostics() --
+    // e.g. mqtt.test.js checking bindings/mqtt.js's "broker not reachable" warning -- can
+    // raise it to "warn" for just that server.
+    logging: { level: logLevel, file: { enabled: false } },
   };
 
   const child = spawn(process.execPath, ["mobius4.js"], {
@@ -130,4 +135,4 @@ function stopServer(child) {
   });
 }
 
-module.exports = { startServer, stopServer, freePort, TEST_DB };
+module.exports = { startServer, stopServer, freePort, killChild, TEST_DB };
