@@ -80,8 +80,8 @@ For upgrading an existing deployment: [DB Migration Guide — v4.4.0](docs/migra
 
 Since Mobius4 is developed with Node.js and PostgreSQL, any operating system that supports them can run Mobius4.
 - Node.js v22 or v24 — both are supported (CI runs both on every change; see [`engines`](package.json)). New installs should use v24, the current LTS and this repository's development default (see [.nvmrc](.nvmrc)); existing v22 deployments continue to work unchanged.
-- PostgreSQL v17
-- PostGIS
+- PostgreSQL v17 — developed and CI-tested on 17.4.
+- PostGIS v3.6 — **required, not optional.** `db/init.js` declares `GEOMETRY(GEOMETRY, 4326)` columns on the resource tables, so schema creation fails without the extension even if you never issue a geo-query. Developed on 3.6.4; CI runs the `postgis/postgis:17-3.6-alpine` image. 3.x releases below 3.6 are expected to work but are not tested here. Enable it per database with `CREATE EXTENSION postgis;`.
 - MQTT broker (e.g. Mosquitto)
 
 For OS-specific installation instructions (Windows, macOS, Linux): [docs/installation.md](docs/installation.md)
@@ -138,3 +138,4 @@ iotketi@keti.re.kr
 | 4.3.0 | 2026-04-09 | performance improvements |
 | 4.4.0 | 2026-04-19 | conformance updates for performance improvements (for earlier versions, DB migration is needed: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md)) |
 | 4.4.1 | 2026-08-01 | Node.js 22/24 CI, dead dependency cleanup, DAS/`jose` removal, installation docs update (see [CHANGELOG.md](CHANGELOG.md)) |
+| 4.5.0 | 2026-08-02 | `<flexContainer>` (ty=28) with a specialization registry; response-status fallback in the HTTP binding (DB migration: `db/migrations/v4.5.0.sql`, see [CHANGELOG.md](CHANGELOG.md)) |
