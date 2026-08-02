@@ -55,6 +55,80 @@ _(Accumulate items here for the next release.)_
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.6.0 (2026-08-02)
+
+**Also breaking**: the administrator no longer bypasses access control. See the
+second item below — some resources the administrator could reach before are now
+refused, and that is deliberate.
+
+**Why MINOR, deliberately, despite being a breaking change**: mobius4 now refuses
+to start until `cse.admin` is set to a value this deployment chose. Deployments
+that never overrode it will not boot until they do, and the identity recorded in
+the database has to be migrated as well. By the rule table above that is a
+"compatibility break requiring manual intervention" and would be MAJOR. It is
+released as MINOR by an explicit decision, so that the fix reaches deployments
+that track minor versions rather than waiting on a major upgrade — the exposure
+being closed is a full access-control bypass reachable over plain HTTP, and
+delaying it is the worse outcome. **Read the upgrade steps below before
+upgrading: this release does not start on an unchanged configuration.**
+
+- **`cse.admin` no longer has a default, and `SM` is refused.** A request whose
+  `From` parameter matches `cse.admin` is granted access to every resource:
+  `cse/hostingCSE.js` returns "granted" before any `<accessControlPolicy>` is
+  consulted, and that path is reached over plain HTTP exactly as over TLS. Up to
+  v4.5.1 the shipped default was `SM`, and `config/local.json.example` did not
+  mention the key at all — so a deployment that filled in the example kept a value
+  published in this repository. Anyone who could reach the port and send
+  `X-M2M-Origin: SM` had full control of the CSE, including DELETE.
+
+  `config/default.json` no longer carries the key, and a new startup check
+  (`config/validate.js`) exits with a fatal log when it is missing, blank, or `SM`.
+  Only `SM` is refused: it is the one value that actually shipped, and refusing a
+  value no deployment ever ran would break upgrades for no gain. The placeholder in
+  `config/local.json.example` (`Superuser`) is warned about rather than refused,
+  since anything printed in this repository is not secret either.
+
+  The admin comparisons in `cse/hostingCSE.js` and `cse/authorization.js` are now
+  guarded on the identity being set. That is not redundant: the `From` parameter is
+  optional, so `req_prim.fr` is `undefined` for a request with no `X-M2M-Origin`,
+  and an unset admin identity would have matched it — turning "no default" into a
+  worse hole than the one being closed.
+
+  **Upgrading**: set `cse.admin` in `config/local.json`, then run
+  `db/migrations/v4.6.0.sql`. Configuration alone is not enough — `db/init.js` writes
+  the admin identity into the database when it first creates the `<CSEBase>` and the
+  default `<accessControlPolicy>` and never rewrites them, so the old value survives
+  in every resource's `cr`/`int_cr` and in that ACP's `privileges`. Without the
+  migration the new admin cannot modify the default ACP through the standard path.
+  The migration is one transaction and is idempotent.
+
+- **The administrator's privileges now come from an `<accessControlPolicy>`.**
+  `cse/hostingCSE.js` used to grant the identity in `cse.admin` every operation
+  before any policy was read. oneM2M has no such concept — privileges are expressed
+  as `<accessControlPolicy>` resources — so `db/init.js` now creates an admin policy
+  (`cb.admin_acp.rn`, default `cb_admin_acp`) granting `acop` 63, attaches it to the
+  `<CSEBase>`, and the short-circuit is removed.
+
+  **What changes for you.** The administrator now reaches a resource only through a
+  policy that names it, or through the creator fallback when the resource carries no
+  `acpi`. Two consequences are worth checking before upgrading:
+
+  - A resource whose `acpi` names only the default policy is no longer deletable or
+    updatable by the administrator: that policy grants `acop` 35 (create, retrieve,
+    discovery) and nothing else.
+  - A resource created by someone else with no `acpi` at all is governed by the
+    creator fallback, and the administrator is not the creator.
+
+  `db/migrations/v4.6.0.sql` creates the policy on an existing database and adds it
+  to every resource that already carries an `acpi`. Resources with an **empty**
+  `acpi` are deliberately left alone: giving them one would switch them from the
+  creator fallback to policy evaluation, and their creator would lose the update and
+  delete rights it has today.
+
+  Also fixed while here: `create_cb` seeded the `<CSEBase>`'s `acpi` with the default
+  policy and `create_default_acp` then appended it again, so the `<CSEBase>` listed it
+  twice. New databases no longer do that, and the migration deduplicates existing ones.
+
 ## v4.5.1 (2026-08-02)
 
 **Why PATCH**: none of the below adds oneM2M capability — it's regression test

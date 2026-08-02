@@ -22,10 +22,13 @@ running Mobius4 itself, **the tests do not need a running or configured broker**
 test run starts its own dedicated `mosquitto` instance on a free port and shuts it down when
 the suite finishes (`test/helpers/broker.js`); it only needs the binary to be on `PATH`.
 
-The tests override only the DB name, ports, MQTT, and logging via `NODE_CONFIG`; everything
-else is taken from `config/` as-is. So **the tests will break if you have changed
-`cse.admin` (default `SM`), `cse.csebase_rn` (default `Mobius`), `cse.cse_type`
-(default `1`), or `cse.cse_id` (default `/Mobius4`) in your local configuration** — the
+The tests override the DB name, ports, MQTT, logging, and `cse.admin` via `NODE_CONFIG`;
+everything else is taken from `config/` as-is. `cse.admin` is overridden because
+`config/default.json` no longer ships one and `config/validate.js` refuses to start without
+it — the tests set `test-admin`, which `test/helpers/onem2m.js` sends as `X-M2M-Origin`.
+So **the tests will break if you have changed `cse.csebase_rn` (default `Mobius`),
+`cse.cse_type` (default `1`), or `cse.cse_id` (default `/Mobius4`) in your local
+configuration** — the
 originator and the `<CSEBase>` name are hardcoded in the tests, `test/helpers/mqtt-onem2m.js`
 hardcodes `cse_id` to build every MQTT request/response topic, and with a `cse_type` of 2 or 3
 the CSE tries to register with a remote CSE at boot, which can make the startup wait time out.

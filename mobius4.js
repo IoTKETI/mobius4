@@ -5,6 +5,12 @@
 require('dotenv').config();
 
 const logger = require('./logger');
+
+// Before anything else. A deployment whose admin identity is missing or is one mobius4 once
+// shipped has no effective access control, and that must stop the process rather than surface
+// as a rejected request later.
+require('./config/validate').validate_config(logger);
+
 const db = require('./db/init');
 const mqtt = require('./bindings/mqtt');
 

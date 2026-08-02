@@ -69,12 +69,37 @@ cp config/local.json.example config/local.json
 | `cse.registrar.ip` | IP address of the Registrar |
 | `cse.registrar.port` | Port number of the Registrar |
 | `cse.registrar.versions` | Supported oneM2M versions of the Registrar |
-| `cse.admin` | ID of the Administrator — has full privileges to all resources |
+| `cse.admin` | **Required, no default.** Identity the admin `<accessControlPolicy>` grants all six operations to. See the warning below |
 | `cse.aeid_length` | String length of AE ID |
 | `cse.expired_resource_cleanup_interval_days` | Interval for expired resource cleanup in days |
 | `cse.discovery_limit` | Max number of resource IDs in a discovery response |
 | `cse.allow_discovery_for_any` | If `true`, access control is skipped for discovery (faster responses) |
 | `cse.keep_alive_timeout` | HTTP keep-alive session timeout in seconds |
+
+
+> #### ⚠️ `cse.admin` is a privileged identity
+>
+> `cse.admin` names the identity that the admin `<accessControlPolicy>`
+> (`cb.admin_acp.rn`, created at startup) grants all six operations to. Whoever knows this
+> value and can reach the port has whatever that policy allows, on every resource that carries
+> it — over plain HTTP exactly as over TLS. Treat it as a credential.
+>
+> Up to v4.5.1 it was worse than that: `cse/hostingCSE.js` granted the identity every
+> operation **before any `<accessControlPolicy>` was consulted**, on every resource
+> regardless of policy. That short-circuit is gone as of v4.6.0 — the administrator now
+> reaches a resource only through a policy that names it, or through the creator fallback
+> when the resource carries no `acpi`.
+>
+> Because of that there is **no default**. Up to v4.5.1 the shipped value was `SM`, which meant
+> every deployment that never overrode it could be taken over by anyone who had read this
+> repository. Since v4.6.0 mobius4 refuses to start when `cse.admin` is missing, blank, or set
+> to `SM`.
+>
+> Choose a value unique to this deployment and treat it as a credential. If you are upgrading
+> from v4.5.1 or earlier, the old identity is also recorded in the database — in every
+> resource's `cr`/`int_cr` and in the default ACP's `privileges` — so run
+> `db/migrations/v4.6.0.sql` after changing the configuration. Changing the configuration alone
+> leaves the new admin unable to modify the default `<accessControlPolicy>`.
 
 ### CSEBase
 
@@ -85,6 +110,7 @@ cp config/local.json.example config/local.json
 | `cb.default_acp.retrieve` | Allow Retrieve privilege |
 | `cb.default_acp.update` | Allow Update privilege |
 | `cb.default_acp.delete` | Allow Delete privilege |
+| `cb.admin_acp.rn` | Resource name of the admin `<accessControlPolicy>`, which grants `cse.admin` all six operations (`acop` 63) |
 | `cb.default_acp.discovery` | Allow Discovery privilege |
 
 ### HTTP / HTTPS

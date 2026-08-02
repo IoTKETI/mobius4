@@ -140,3 +140,4 @@ iotketi@keti.re.kr
 | 4.4.1 | 2026-08-01 | Node.js 22/24 CI, dead dependency cleanup, DAS/`jose` removal, installation docs update (see [CHANGELOG.md](CHANGELOG.md)) |
 | 4.5.0 | 2026-08-02 | `<flexContainer>` (ty=28) with a specialization registry; response-status fallback in the HTTP binding (DB migration: `db/migrations/v4.5.0.sql`, see [CHANGELOG.md](CHANGELOG.md)) |
 | 4.5.1 | 2026-08-02 | MQTT binding test coverage (see [CHANGELOG.md](CHANGELOG.md)) |
+| 4.6.0 | 2026-08-02 | **Breaking**: `cse.admin` has no default and `SM` is refused — mobius4 will not start until it is set; and the administrator no longer bypasses access control, getting its privileges from an `<accessControlPolicy>` instead. Closes a full access-control bypass. DB migration required: `db/migrations/v4.6.0.sql` (see [CHANGELOG.md](CHANGELOG.md)) |

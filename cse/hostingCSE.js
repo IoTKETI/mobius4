@@ -1197,11 +1197,14 @@ async function access_decision(req_prim, resp_prim) {
 	// disable this so it is not applied for subsequent procedures, hence not exposed in responses
 	req_prim.int_cr_req = false;
 
-	// Cheat-key for system admin
-	if (req_prim.fr === config.cse.admin) {
-		logger.debug({ fr: req_prim.fr }, 'access granted as admin');
-		return true;
-	}
+	// The administrator used to be granted every operation here, before any policy was read.
+	// oneM2M has no such concept — privileges are expressed as <accessControlPolicy> resources —
+	// so the grant now comes from the admin policy (config.cb.admin_acp, created by db/init.js)
+	// like any other originator's, and this function no longer special-cases an identity.
+	//
+	// One consequence is worth knowing when reading the branches below: the administrator now
+	// reaches a resource only through an <accessControlPolicy> that names it, or through the
+	// creator fallback in Case D when the resource carries no acpi at all.
 
 	// Case A.
 	// special handling for <ACP> resource as a target 

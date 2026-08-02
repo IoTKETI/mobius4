@@ -3,8 +3,10 @@
 // same path a real client does (binding -> access control -> DB).
 
 const CSE_BASE = "Mobius";   // config.cse.csebase_rn
-const ADMIN = "SM";          // config.cse.admin — the default ACP's acop has no delete bit
-                             // (code map G-2), so a regular originator gets 4103 on delete.
+const ADMIN = "test-admin";  // config.cse.admin — must match TEST_ADMIN in helpers/server.js.
+                             // The default ACP's acop has no delete bit (code map G-2), so a
+                             // regular originator gets 4103 on delete; this identity bypasses
+                             // access control entirely.
 
 let seq = 0;
 function nextRqi() { return `t${process.pid.toString(36)}-${++seq}`; }

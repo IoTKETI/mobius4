@@ -13,6 +13,9 @@ const net = require("node:net");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
 const TEST_DB = "mobius4_test";
+// Admin identity for the test CSE. Kept in sync with ADMIN in test/helpers/onem2m.js,
+// which is what the request helpers send as X-M2M-Origin.
+const TEST_ADMIN = "test-admin";
 const START_TIMEOUT_MS = 30000;
 const STOP_TIMEOUT_MS = 5000;
 
@@ -56,6 +59,10 @@ async function startServer({ mqttPort, logLevel = "error" } = {}) {
     http: { port },
     https: { port: httpsPort },
     db: { name: TEST_DB },
+    // Required since v4.6.0: config/default.json no longer ships an admin identity and
+    // config/validate.js refuses to start without one. The value is deliberately not "SM" --
+    // that is the identity earlier versions shipped, and the same guard now rejects it.
+    cse: { admin: TEST_ADMIN },
     // MQTT is disabled by default: most tests only exercise the HTTP binding, and there is no
     // broker running unless a test starts one. A test that wants MQTT coverage spawns its own
     // broker via startBroker() (test/helpers/broker.js) and passes its port here.

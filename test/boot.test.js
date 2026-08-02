@@ -2,6 +2,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
+const { ADMIN } = require("./helpers/onem2m");
 
 let srv;
 before(async () => { srv = await startServer(); });
@@ -9,7 +10,7 @@ after(async () => { if (srv) await srv.stop(); });
 
 test("the test-only instance starts up and serves the <CSEBase>", async () => {
   const res = await fetch(`${srv.baseUrl}/Mobius`, {
-    headers: { "X-M2M-Origin": "SM", "X-M2M-RI": "boot1", "X-M2M-RVI": "3", Accept: "application/json" },
+    headers: { "X-M2M-Origin": ADMIN, "X-M2M-RI": "boot1", "X-M2M-RVI": "3", Accept: "application/json" },
   });
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("x-m2m-rsc"), "2000");
