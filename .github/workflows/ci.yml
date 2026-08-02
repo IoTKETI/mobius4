@@ -74,6 +74,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The MQTT tests start their own broker on a free port; only the binary needs to exist.
+      - name: Install mosquitto
+        run: sudo apt-get update && sudo apt-get install -y mosquitto
+
       # Why shell: bash is spelled out — the default GitHub Actions shell does not set pipefail.
       # Under that shell, `npm test | tee` lets tee's exit code (0) become the step's result
       # even when npm test fails, which hides the failure.
@@ -98,10 +102,11 @@ jobs:
           # Even when an empty glob matches zero tests, `node --test` reports `# tests 0 / # fail 0`
           # and exits 0 — so if test/ is moved or deleted, or package.json's glob is changed
           # incorrectly, the `Run tests` step is still green. Hence we count the tests that actually
-          # ran and compare against this repo's regression baseline (55 = 36 from v4.4.0 + 19 for <flexContainer>).
+          # ran and compare against this repo's regression baseline (61 = 36 from v4.4.0 + 19 for
+          # <flexContainer> + 6 for MQTT binding coverage).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=55
+          BASELINE=61
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."

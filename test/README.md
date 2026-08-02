@@ -13,6 +13,14 @@ PostgreSQL and the PostGIS extension are required (the same requirement as the d
 DB). The tables, the `<CSEBase>`, and the default ACP are created automatically on the first
 run.
 
+The `mosquitto` binary is also required, for the MQTT binding tests
+(`brew install mosquitto` on macOS, `sudo apt install -y mosquitto` on Debian/Ubuntu). Unlike
+running Mobius4 itself, **the tests do not need a running or configured broker** — no
+`mosquitto.conf`, no listener setup, none of what
+[docs/installation.md](../docs/installation.md) describes for the development server. Each
+test run starts its own dedicated `mosquitto` instance on a free port and shuts it down when
+the suite finishes (`test/helpers/broker.js`); it only needs the binary to be on `PATH`.
+
 The tests override only the DB name, ports, MQTT, and logging via `NODE_CONFIG`; everything
 else is taken from `config/` as-is. So **the tests will break if you have changed
 `cse.admin` (default `SM`), `cse.csebase_rn` (default `Mobius`), or `cse.cse_type`

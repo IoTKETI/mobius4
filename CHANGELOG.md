@@ -37,6 +37,34 @@ _(Accumulate items here for the next release.)_
   `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
   must be stripped from the notification).
 
+## v4.5.1 (2026-08-02)
+
+**Why PATCH**: none of the below adds oneM2M capability — it's regression test
+coverage, a documentation update, and CI configuration.
+
+- **Added regression coverage for the MQTT protocol binding.** Until now
+  `bindings/mqtt.js` had zero automated tests. Six tests were added, backed by
+  a dedicated test broker: `test/helpers/broker.js` spawns its own `mosquitto`
+  instance on a free port for the duration of the run (so the suite never
+  touches a developer's or CI's own broker, and is safe to run concurrently),
+  and `test/helpers/onem2m-mqtt.js` is a oneM2M-over-MQTT client helper used by
+  the new tests.
+- **`mosquitto` added as a test prerequisite.** Only the binary needs to be on
+  `PATH` — the suite starts and stops its own broker itself, so, unlike
+  running Mobius4 as a server, no running instance and no
+  `mosquitto.conf`/listener configuration is needed. Documented in
+  `test/README.md`.
+- **CI**: `.github/workflows/ci.yml` installs `mosquitto` via `apt-get` before
+  the test step (not as a service container — the suite already manages its
+  own broker lifecycle, so a service container would just be a second, unused
+  broker). The regression-count baseline (`BASELINE` in the same file) rose
+  from 55 to 61 (36 from v4.4.0 + 19 for `<flexContainer>` + 6 for this MQTT
+  coverage).
+- **Corrected out-of-sync `package-lock.json` version fields (4.4.1 → 4.5.1).** The lockfile's `version` fields remained at 4.4.1 through the v4.5.0 release, mismatched with `package.json`. This release synced them to 4.5.1. This is a metadata-only change to version fields in `package-lock.json`; no dependency tree or installed packages changed.
+- One test remains `todo`: whether CIN eviction should fire `net=4` (carried
+  over from v4.4.0, see "Unresolved — pending spec clarification" above — no
+  new `todo` test was added by this release).
+
 ## v4.5.0 (2026-08-02)
 
 **Why MINOR**: `<flexContainer>` is a oneM2M resource type that did not exist
