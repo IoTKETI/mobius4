@@ -188,6 +188,70 @@ infrastructure, dependency cleanup, and Node 24 compatibility.
   hand an object or array returned by `config.get()` straight to a library —
   any library that normalizes an options object in place will raise a runtime
   exception.
+
+  <a id="troubleshooting-utils-isregexp"></a>
+  **Still hitting `Utils.isRegExp is not a function` after upgrading?**
+
+  ```
+  TypeError: Utils.isRegExp is not a function
+      at _clone (node_modules/config/lib/config.js:1217:22)
+      at Config.cloneDeep (node_modules/config/lib/config.js:1255:10)
+      ...
+  Node.js v24.x
+  ```
+
+  If you see this on Node 24, the fix above is present in your source tree but
+  an **old `config` is still installed**. The code is fine; `node_modules` is
+  stale.
+
+  The stack trace identifies the installed version precisely, because the
+  offending call sits on a different line in each release:
+
+  | Line of `Utils.isRegExp(parent)` | Installed version |
+  |---|---|
+  | 1217 | 1.31.0 |
+  | 1087 | 2.0.2 |
+  | 1008 | 3.3.11 |
+  | *(absent)* | **3.3.12+ — this is what you want** |
+
+  Diagnose first — the two causes need the same fix but tell you different
+  things about your checkout:
+
+  ```bash
+  git branch --show-current
+  node -e "console.log('required :', require('./package.json').dependencies.config)"
+  node -e "console.log('installed:', require('./node_modules/config/package.json').version)"
+  git status --short
+  ```
+
+  - `required` is `^1.30.0` → **you are on a branch that predates this
+    release.** `git pull` updates the branch you are on, not `master`, so a
+    stale branch stays stale and `npm install` then correctly installs the old
+    `config` its `package.json` asks for.
+  - `required` is `^3.3.12` but `installed` is `1.31.0` → the branch is right
+    and the install did not take.
+  - `package.json` shows as modified → a local edit is overriding the pinned
+    version.
+
+  Fix (commit or stash any work in progress first — this changes branches):
+
+  ```bash
+  git checkout master
+  git pull
+  rm -rf node_modules
+  npm ci
+  ```
+
+  Use `npm ci`, not `npm install`: it installs exactly what `package-lock.json`
+  pins and rebuilds `node_modules` from scratch, which is what clears a
+  mismatched tree.
+
+  Verify:
+
+  ```bash
+  node -v                                                              # v24.x
+  node -e "console.log(require('./node_modules/config/package.json').version)"   # 3.3.12
+  ```
 - **Removed 13 unused dependencies** — `fast-xml-parser` `shortid`
   `sync-request` `path-to-regexp` `query-string` `urlencode` `bson-objectid`
   `base-64` `debug` `morgan` `rdfxml-streaming-parser` `fs` `https`. `fs` and
