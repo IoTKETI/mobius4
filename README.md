@@ -71,7 +71,7 @@ There are some modifications from the previous version so please check
 
 For developers adding new oneM2M resource types to Mobius4: [Adding a new resource type](docs/new-resource-guide.md) — covers every file to create or modify (enums, model, DDL, CRUD handler, dispatch switches, discovery maps, validation schema) with copy-paste code patterns.
 
-For upgrading an existing deployment: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md) — covers schema changes (dropped column, widened column, new indexes) with step-by-step instructions and rollback procedure.
+For upgrading an existing deployment: **[Upgrading Mobius4](docs/upgrading.md)** — the required steps (DB migrations, new prerequisites) and the known upgrade problems, per version. None of it applies to a clean install.
 
 
 # Running Mobius4
@@ -130,14 +130,18 @@ iotketi@keti.re.kr
 
 ## Mobius4 source code
 
-| Version | Date | description |
-| :---: | :---: | :--- |
-| 4.0.0 | 2025-09-22 | Initial release of Mobius4 |
-| 4.1.0 | 2026-03-13 | oneM2M Rel-2 certification |
-| 4.2.0 | 2026-04-05 | logging module update |
-| 4.3.0 | 2026-04-09 | performance improvements |
-| 4.4.0 | 2026-04-19 | conformance updates for performance improvements (for earlier versions, DB migration is needed: [DB Migration Guide — v4.4.0](docs/migration-v4.4.0.md)) |
-| 4.4.1 | 2026-08-01 | Node.js 22/24 CI, dead dependency cleanup, DAS/`jose` removal, installation docs update (see [CHANGELOG.md](CHANGELOG.md)) |
-| 4.5.0 | 2026-08-02 | `<flexContainer>` (ty=28) with a specialization registry; response-status fallback in the HTTP binding (DB migration: `db/migrations/v4.5.0.sql`, see [CHANGELOG.md](CHANGELOG.md)) |
-| 4.5.1 | 2026-08-02 | MQTT binding test coverage (see [CHANGELOG.md](CHANGELOG.md)) |
-| 4.6.0 | 2026-08-02 | **Breaking**: `cse.admin` has no default and `SM` is refused — mobius4 will not start until it is set; and the administrator no longer bypasses access control, getting its privileges from an `<accessControlPolicy>` instead. Closes a full access-control bypass. DB migration required: `db/migrations/v4.6.0.sql` (see [CHANGELOG.md](CHANGELOG.md)) |
+Full detail for every release is in [CHANGELOG.md](CHANGELOG.md). The **Upgrading**
+column links to what an existing deployment has to *do* — required steps and known
+upgrade problems. A clean install needs none of it.
+
+| Version | Date | Description | Upgrading |
+| :---: | :---: | :--- | :--- |
+| 4.0.0 | 2025-09-22 | Initial release of Mobius4 | — |
+| 4.1.0 | 2026-03-13 | oneM2M Rel-2 certification | — |
+| 4.2.0 | 2026-04-05 | logging module update | — |
+| 4.3.0 | 2026-04-09 | performance improvements | — |
+| 4.4.0 | 2026-04-19 | conformance updates for performance improvements | [**DB migration required**](docs/upgrading.md#v440) |
+| 4.4.1 | 2026-08-01 | Node.js 22/24 CI, dead dependency cleanup, DAS/`jose` removal, installation docs update | [Node 24 notes](docs/upgrading.md#v441) |
+| 4.5.0 | 2026-08-02 | `<flexContainer>` (ty=28) with a specialization registry; response-status fallback in the HTTP binding | [**DB migration required**](docs/upgrading.md#v450) |
+| 4.5.1 | 2026-08-02 | MQTT binding test coverage | [test prerequisite](docs/upgrading.md#v451) |
+| 4.6.0 | 2026-08-02 | **Breaking**: `cse.admin` has no default and `SM` is refused; the administrator's privileges now come from an `<accessControlPolicy>` rather than a bypass; `resourceName` is checked against its ABNF. Closes a full access-control bypass | [**Will not start until configured; DB migration required**](docs/upgrading.md#v460) |

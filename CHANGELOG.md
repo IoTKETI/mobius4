@@ -324,6 +324,13 @@ infrastructure, dependency cleanup, and Node 24 compatibility.
   hand an object or array returned by `config.get()` straight to a library —
   any library that normalizes an options object in place will raise a runtime
   exception.
+
+  **Hitting `TypeError: Utils.isRegExp is not a function` on Node 24 after
+  upgrading?** That means the fix above is in your source tree but an old
+  `config` is still installed. See
+  [Upgrading Mobius4 — v4.4.1](docs/upgrading.md#utils-isregexp) for how to
+  identify the installed version straight from the stack trace, and how to
+  clear it.
 - **Removed 13 unused dependencies** — `fast-xml-parser` `shortid`
   `sync-request` `path-to-regexp` `query-string` `urlencode` `bson-objectid`
   `base-64` `debug` `morgan` `rdfxml-streaming-parser` `fs` `https`. `fs` and
