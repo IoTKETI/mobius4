@@ -433,11 +433,24 @@ function httpToPrim(http_req) {
   let query = "";
 
   // parsing 'To' param
+  //
+  // TS-0009:6.2.2.1 defines "/_" and "/~" as *prefixes* of the path component, marking the
+  // Absolute and SP-Relative forms of the To parameter respectively; anything else is
+  // CSE-Relative and only needs its leading slash removed.
+  //
+  // These have to be matched at the start of the path, not merely found somewhere in it.
+  // Testing with includes() misread any path holding a segment that begins with "_" -- a
+  // resource named "_config" made "/CSEBase/ae/_config" take the Absolute branch, where the
+  // replacement found no "/_/" to act on and, worse, the leading slash was never stripped
+  // because that only happens in the final branch. To then read "/CSEBase/ae/_config" while
+  // every sid in the lookup table is stored without the leading slash, so the resource
+  // became unreachable by its hierarchical path -- created successfully, then answering 4004
+  // to both retrieve and delete, while remaining reachable by its unstructured resource ID.
   prim.to = http_req.url.split("?")[0];
-  if (prim.to.includes("/_")) {
-    prim.to = prim.to.replace("/_/", "//");
-  } else if (prim.to.includes("/~")) {
-    prim.to = prim.to.replace("/~/", "/");
+  if (prim.to.startsWith("/_/")) {
+    prim.to = `/${prim.to.slice("/_".length)}`;
+  } else if (prim.to.startsWith("/~/")) {
+    prim.to = prim.to.slice("/~".length);
   } else {
     prim.to = prim.to.replace(/^\/+/g, "");
   }

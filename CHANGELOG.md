@@ -57,9 +57,13 @@ _(Accumulate items here for the next release.)_
 
 ## v4.6.0 (2026-08-02)
 
-**Also breaking**: the administrator no longer bypasses access control. See the
-second item below — some resources the administrator could reach before are now
-refused, and that is deliberate.
+**Also breaking**, in two further ways, both deliberate:
+
+- The administrator no longer bypasses access control. See the second item below —
+  some resources the administrator could reach before are now refused.
+- `resourceName` is now checked against its ABNF. Names starting with `-`, `.` or
+  `_`, or containing `@`, are refused with 4000 where they used to be accepted.
+  See the last item below.
 
 **Why MINOR, deliberately, despite being a breaking change**: mobius4 now refuses
 to start until `cse.admin` is set to a value this deployment chose. Deployments
@@ -154,6 +158,38 @@ upgrading: this release does not start on an unchanged configuration.**
   being done. `test/deletion.test.js` covers the contract, including a case that writes
   the mid-deletion state directly and so checks the guard on every run rather than
   waiting for the race to recur.
+
+- **A resource named with a leading `_` was created, then answered 4004 to every retrieve
+  and delete.** Reported by an integrating developer. Two defects met, and both are fixed.
+
+  *The path parser.* `TS-0009:6.2.2.1` defines `/~` and `/_` as **prefixes** of the HTTP path
+  component, marking the SP-Relative and Absolute forms of the *To* parameter; a server "shall
+  apply the reverse operations" to recover *To*. `bindings/http.js` tested for them with
+  `includes()` instead of at the start of the path, so any path holding a segment that begins
+  with `_` took the Absolute branch. There the replacement found no `/_/` to act on and — the
+  part that actually broke things — the leading slash was never stripped, because that happens
+  only in the final branch. *To* kept its leading slash while every `sid` in the lookup table is
+  stored without one, so the resource was unreachable by its hierarchical path. It stayed
+  reachable by its unstructured resource ID, which is what made the report look contradictory.
+  The prefixes are now matched at the start of the path.
+
+  *The validation.* `TS-0004:6.2.4` gives `resourceName` an ABNF of its own, resolved through
+  6.2.3: `resource-name = 1*unreserved`, `unreserved = (ALPHA / DIGIT) *(ALPHA / DIGIT / "-" /
+  "." / "_")`. A leading `_` was never valid. `cse/validation/res_schema.js` accepted it, and
+  also accepted `@`, which appears in no ABNF. Names are now checked against the ABNF and a
+  violation is refused with 4000 BAD_REQUEST.
+
+  **What changes for you.** `CREATE` now refuses a `resourceName` that starts with `-`, `.` or
+  `_`, or that contains `@`. Clients relying on any of those get 4000 where they previously got
+  2001. Existing resources are untouched and — thanks to the parser fix — are retrievable and
+  deletable again, so a deployment holding such names can clean them up. `TS-0001:7.2` describes
+  resource identifiers more loosely, via RFC 3986's unreserved set, which has no
+  first-character restriction; the two documents disagree on paper and this release follows the
+  protocol binding's ABNF as the one clause that names a `resource-name` production.
+
+  `test/addressing.test.js` covers all six *To*/path combinations of table 6.2.2.1-1, which is
+  what the defect slipped through; `test/resource-name.test.js` covers the ABNF and the
+  already-stored case.
 
 ## v4.5.1 (2026-08-02)
 
