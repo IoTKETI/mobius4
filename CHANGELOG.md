@@ -25,6 +25,38 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 _(Accumulate items here for the next release.)_
 
+### Unresolved — pending spec clarification
+
+- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
+  standardization discussion, **indirect deletion** (a deletion that happens as a
+  side effect of deleting a different resource) is treated as not firing a
+  notification. Whether eviction falls under this needs confirmation — what
+  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
+  confirmation; the regression test is left as `todo` to keep the question visible.
+  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
+  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
+  must be stripped from the notification).
+- **Three questions about the MQTT binding, left open rather than guessed at
+  when its test coverage was designed.** Confirmed from TS-0010's topic-format
+  rule only, not from a full reading of the spec:
+  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
+    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
+    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
+    like an unimplemented feature, but confirming that needs the full spec
+    text, not a test suite.
+  - **QoS levels and retained-message handling** — not yet checked against
+    the spec at all.
+  - **MQTT-specific error mapping** — likewise unchecked.
+
+  Encoding a guess about any of these as a passing test would be worse than
+  leaving them untested: it would cement whatever mobius4 does today as
+  though it were the standard, the same reasoning that keeps the `net=4`
+  eviction question above as a `todo` rather than a silent choice.
+  `test/mqtt.test.js` (added below) is now the harness that a future pass
+  through the full TS-0010 text can use to settle them.
+
+## v4.6.4 (2026-08-05)
+
 ### Fixed — a name conflict is answered with 4105, not 4000
 
 `create_a_res` checks up front whether the `resourceName` is taken and answers 4105 CONFLICT
@@ -64,36 +96,6 @@ spread the load instead, and is the better answer once the broker in use is know
 instance in fork mode. The remaining blocker is that `lookupCache` invalidation does not cross
 processes: after a resource is deleted and recreated under the same name on another instance, an
 instance holding the old mapping answers 4004 for up to five minutes.
-
-### Unresolved — pending spec clarification
-
-- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
-  standardization discussion, **indirect deletion** (a deletion that happens as a
-  side effect of deleting a different resource) is treated as not firing a
-  notification. Whether eviction falls under this needs confirmation — what
-  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
-  confirmation; the regression test is left as `todo` to keep the question visible.
-  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
-  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
-  must be stripped from the notification).
-- **Three questions about the MQTT binding, left open rather than guessed at
-  when its test coverage was designed.** Confirmed from TS-0010's topic-format
-  rule only, not from a full reading of the spec:
-  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
-    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
-    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
-    like an unimplemented feature, but confirming that needs the full spec
-    text, not a test suite.
-  - **QoS levels and retained-message handling** — not yet checked against
-    the spec at all.
-  - **MQTT-specific error mapping** — likewise unchecked.
-
-  Encoding a guess about any of these as a passing test would be worse than
-  leaving them untested: it would cement whatever mobius4 does today as
-  though it were the standard, the same reasoning that keeps the `net=4`
-  eviction question above as a `todo` rather than a silent choice.
-  `test/mqtt.test.js` (added below) is now the harness that a future pass
-  through the full TS-0010 text can use to settle them.
 
 ## v4.6.3 (2026-08-05)
 
