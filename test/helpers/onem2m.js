@@ -5,8 +5,11 @@
 const CSE_BASE = "Mobius";   // config.cse.csebase_rn
 const ADMIN = "test-admin";  // config.cse.admin — must match TEST_ADMIN in helpers/server.js.
                              // The default ACP's acop has no delete bit (code map G-2), so a
-                             // regular originator gets 4103 on delete; this identity bypasses
-                             // access control entirely.
+                             // regular originator gets 4103 on delete; this identity is named by
+                             // the admin ACP (acop 63) that db/init.js attaches to the <CSEBase>.
+                             // It is not a bypass — the v4.6.0 short-circuit is gone. A test that
+                             // needs to see what a plain client sees must send its own originator:
+                             // defaulting to ADMIN is what hid the <CSEBase> 4005/4103 bug.
 
 let seq = 0;
 function nextRqi() { return `t${process.pid.toString(36)}-${++seq}`; }

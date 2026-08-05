@@ -62,6 +62,35 @@ test("the <CSEBase> cannot be DELETEd", async () => {
   assert.equal(still.rsc, "2000");
 });
 
+// TP/oneM2M/CSE/REG/UPD/001 and TP/oneM2M/CSE/REG/DEL/001 send these from a registered AE, not
+// from the administrator. TS-0004:7.4.3.2.3 and 7.4.3.2.4 both place the rejection at Recv-1.0
+// "check the syntax of received message" — before access control — so the answer is 4005
+// whoever asks. The test above only covers the administrator, who reaches the 4005 in
+// delete_a_res because the admin ACP lets it through access control first.
+test("a registered AE gets 4005, not 4103, on UPDATE and DELETE of the <CSEBase>", async () => {
+  const rn = uniqueRn("ae");
+  const reg = await create(srv.baseUrl, CSE_BASE, 2,
+    { "m2m:ae": { rn, api: "Nconf", rr: false } }, { originator: "C" });
+  assert.equal(reg.rsc, "2001", `AE registration failed: ${reg.raw.slice(0, 200)}`);
+  const aei = reg.body["m2m:ae"].aei;
+
+  try {
+    const u = await update(srv.baseUrl, CSE_BASE,
+      { "m2m:cb": { lbl: ["VALUE_1"] } }, { originator: aei });
+    assert.equal(u.rsc, "4005", `UPDATE of the <CSEBase> answered ${u.rsc}`);
+
+    const d = await remove(srv.baseUrl, CSE_BASE, { originator: aei });
+    assert.equal(d.rsc, "4005", `DELETE of the <CSEBase> answered ${d.rsc}`);
+
+    // The <CSEBase> must still be there — a rejected request that nevertheless mutated state
+    // would pass the two assertions above.
+    const still = await retrieve(srv.baseUrl, CSE_BASE);
+    assert.equal(still.rsc, "2000");
+  } finally {
+    await remove(srv.baseUrl, `${CSE_BASE}/${rn}`);
+  }
+});
+
 test("a fanout response is wrapped in an m2m:agr envelope", async () => {
   // Measured behavior differs from the brief's assumption: mobius4 can only create a <grp>
   // under ae/rce/cb (grp_parent_res_types in cse/resources/grp.js), and creating one under a
@@ -80,9 +109,12 @@ test("a fanout response is wrapped in an m2m:agr envelope", async () => {
     const fo = await retrieve(srv.baseUrl, `${gsid}/fopt`);
     const agr = fo.body["m2m:agr"];
     assert.ok(agr, `an m2m:agr envelope should be present. actual: ${fo.raw.slice(0, 300)}`);
-    assert.ok(Array.isArray(agr.rsp), "agr.rsp should be an array");
-    assert.equal(agr.rsp.length, 2);
-    for (const r of agr.rsp) {
+    // 'm2m:rsp', not 'rsp' — it is m2m:responsePrimitive in the TS-0004 symbol table, namespaced
+    // like the m2m:agr envelope around it.
+    const rsp = agr["m2m:rsp"];
+    assert.ok(Array.isArray(rsp), `agr["m2m:rsp"] should be an array. actual keys: ${Object.keys(agr)}`);
+    assert.equal(rsp.length, 2);
+    for (const r of rsp) {
       assert.ok("rsc" in r && "rqi" in r && "pc" in r, `rsp entry shape: ${JSON.stringify(r)}`);
     }
   } finally {
