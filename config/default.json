@@ -42,7 +42,6 @@
     "serializations": [
       "json"
     ],
-    "admin": "SM",
     "aeid_length": 5,
     "timestamp_format": "YYYYMMDDTHHmmss",
     "allowed_ri_characters": "0123456789abcdefghijklmnopqrstuvwxyz",
@@ -58,6 +57,9 @@
       "retrieve": true,
       "update": false,
       "discovery": true
+    },
+    "admin_acp": {
+      "rn": "cb_admin_acp"
     }
   },
   "request": {

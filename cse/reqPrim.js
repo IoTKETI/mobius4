@@ -120,15 +120,22 @@ async function prim_handling(req_prim) {
       return resp_prim;
     }
   }
+  // UPDATE and DELETE are judged on the type of the resource being addressed ('to_ty', resolved
+  // by set_ri_sid above), not on 'ty'. 'ty' is the type of the resource to be created, so the
+  // HTTP binding only ever fills it in for CREATE and these two guards never fired — the
+  // request fell through to access control instead, and a registered AE got 4103 for a
+  // <CSEBase> it merely lacked privileges on. TS-0004:7.4.3.2.3 and 7.4.3.2.4 reject at
+  // Recv-1.0 "check the syntax of received message", before access control, so the answer is
+  // 4005 no matter who asks (TP/oneM2M/CSE/REG/UPD/001, TP/oneM2M/CSE/REG/DEL/001).
   else if (req_prim.op === 3) {
-    if (req_prim.ty === 5) {
+    if (req_prim.to_ty === 5) {
       resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
       resp_prim.pc = { "m2m:dbg": "<cb> resource update is not allowed" };
       return resp_prim;
     }
   }
   else if (req_prim.op === 4) {
-    if (req_prim.ty === 5) {
+    if (req_prim.to_ty === 5) {
       resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
       resp_prim.pc = { "m2m:dbg": "<cb> resource deletion is not allowed" };
       return resp_prim;

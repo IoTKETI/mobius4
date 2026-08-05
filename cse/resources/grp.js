@@ -341,12 +341,16 @@ async function memberType_validation(req_prim, resp_prim) {
 }
 
 exports.fanout = async function (req_prim, resp_prim) {
-    resp_prim.pc = { 'm2m:agr': { 'rsp': {} } };
+    // 'rsp' is m2m:responsePrimitive (TS-0004 symbol table), so the member is namespaced the
+    // same way the enclosing 'm2m:agr' is. It was carried unprefixed for a while to work around
+    // a conformance tester issue; the prefix is what the standard specifies, so it is restored
+    // here and the tester side is tracked separately.
+    resp_prim.pc = { 'm2m:agr': { 'm2m:rsp': {} } };
 
-    // send fanout requests concurrently and sum-up 
+    // send fanout requests concurrently and sum-up
     const fanout_resp_prims = await aggregate_fanout_resp_prims(req_prim);
 
-    resp_prim.pc['m2m:agr']['rsp'] = fanout_resp_prims;
+    resp_prim.pc['m2m:agr']['m2m:rsp'] = fanout_resp_prims;
 
     return;
 }

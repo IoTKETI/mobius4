@@ -4,7 +4,23 @@ const Joi = require('joi');
 
 const create_universal_attr = {
     ty: Joi.forbidden(), // 'ty' is not allowed in create request, but included as request parameter
-    rn: Joi.string().optional().regex(/^[-._a-zA-Z0-9@]+$/),
+    // TS-0004:6.2.4 gives resourceName its own ABNF production, resolved through 6.2.3:
+    //
+    //   resource-name = 1*unreserved
+    //   unreserved    = (ALPHA / DIGIT) *(ALPHA / DIGIT / "-" / "." / "_")
+    //
+    // So the first character must be a letter or a digit, and "-", "." and "_" are allowed
+    // from the second onwards. TS-0001:7.2 describes resource identifiers more loosely, by
+    // way of RFC 3986's unreserved set, which carries no first-character restriction; the
+    // two documents disagree on paper and this deployment follows the protocol binding's
+    // ABNF, as the one clause that names a resource-name production (see the decision log).
+    //
+    // The previous pattern, /^[-._a-zA-Z0-9@]+$/, was looser in two ways. It let a name
+    // begin with any of those characters, and a leading "_" then collided with TS-0009's
+    // "/_" path prefix in bindings/http.js: the resource was created and could never be
+    // retrieved or deleted by its hierarchical path. It also permitted "@", which appears in
+    // neither ABNF.
+    rn: Joi.string().optional().regex(/^[a-zA-Z0-9][-._a-zA-Z0-9]*$/),
     ri: Joi.forbidden(), // 'ri' cannot be included in create request
     pi: Joi.forbidden(), // 'pi' cannot be included in create request
     ct: Joi.forbidden(), // 'ct' cannot be included in create request

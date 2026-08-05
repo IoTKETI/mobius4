@@ -78,6 +78,13 @@ exports.init_db = async function () {
         } else {
             logger.info('default acp already exists, skipped');
         }
+
+        // create the admin <acp> resource
+        if (await create_admin_acp(client, cb_ri)) {
+            logger.info({ sid: `${config.cse.csebase_rn}/${config.cb.admin_acp.rn}` }, 'admin acp created');
+        } else {
+            logger.info('admin acp already exists, skipped');
+        }
     } finally {
         client.release();
     }
@@ -676,11 +683,13 @@ async function create_default_acp(client, cb_ri) {
             et:     et,
         }));
 
-        // update acpi of <cb> resource
+        // update acpi of <cb> resource.
+        // Guarded against a duplicate: create_cb already seeds acpi with this same sid, so an
+        // unconditional append left the <CSEBase> listing the default policy twice.
         await client.query(`
             UPDATE cb 
             SET acpi = array_append(acpi, $1)
-            WHERE ri = $2
+            WHERE ri = $2 AND NOT ($1 = ANY(COALESCE(acpi, ARRAY[]::varchar[])))
         `, [`${config.cse.csebase_rn}/${config.cb.default_acp.rn}`, cb_ri]);
 
         await client.query('COMMIT');
@@ -689,6 +698,71 @@ async function create_default_acp(client, cb_ri) {
         await client.query('ROLLBACK');
         if (err.code !== '23505') {
             logger.error({ err }, 'create default acp failed');
+        }
+        return false;
+    }
+}
+
+// The <accessControlPolicy> that carries the administrator's privileges.
+//
+// Until v4.6.0 the administrator was handled by a check in cse/hostingCSE.js that granted
+// every operation before any policy was consulted. oneM2M has no such concept: privileges are
+// expressed as <accessControlPolicy> resources, so the administrator gets one like any other
+// originator. Keeping it separate from the default policy means "what everyone may do" and
+// "what the administrator may do" can be read, audited and changed independently.
+//
+// pv grants all six operations (acop 63) to the administrator. pvs grants the same over this
+// policy itself, so the administrator can maintain it without needing another policy to do so.
+async function create_admin_acp(client, cb_ri) {
+    const ri = generate_ri();
+    const now = moment().utc().format(timestamp_format);
+    const et = moment().utc().add(config.default.common.et_month, 'month').format(timestamp_format);
+    const sid = `${config.cse.csebase_rn}/${config.cb.admin_acp.rn}`;
+
+    const privileges = { acr: [{ acor: [config.cse.admin], acop: 63 }] };
+
+    try {
+        await client.query('BEGIN');
+
+        await client.query(build_insert('acp', {
+            ri,
+            ty:  1,
+            sid,
+            rn:  config.cb.admin_acp.rn,
+            pi:  cb_ri,
+            et,
+            ct:  now,
+            lt:  now,
+            pv:  JSON.stringify(privileges),
+            pvs: JSON.stringify(privileges),
+        }));
+
+        await client.query(build_insert('lookup', {
+            ri,
+            ty:     1,
+            rn:     config.cb.admin_acp.rn,
+            sid,
+            lvl:    2,
+            pi:     cb_ri,
+            cr:     config.cse.admin,
+            int_cr: config.cse.admin,
+            et,
+        }));
+
+        // The <CSEBase> is the one resource that must carry it from the start: it is the entry
+        // point for every request, and without it the administrator could not reach the tree.
+        await client.query(`
+            UPDATE cb
+            SET acpi = array_append(acpi, $1)
+            WHERE ri = $2 AND NOT ($1 = ANY(COALESCE(acpi, ARRAY[]::varchar[])))
+        `, [sid, cb_ri]);
+
+        await client.query('COMMIT');
+        return true;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        if (err.code !== '23505') {
+            logger.error({ err }, 'create admin acp failed');
         }
         return false;
     }

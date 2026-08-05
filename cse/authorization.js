@@ -12,8 +12,11 @@ exports.grant_owner_update = function (target_res, originator) {
     if (!target_res.own && target_res.int_cr && target_res.int_cr == originator)
         return true;
 
-    // system admin always gets full access
-    if (originator === config.cse.admin)
+    // system admin always gets full access.
+    // Guarded on cse.admin being set for the same reason as the check in cse/hostingCSE.js:
+    // originator can be undefined when a request carries no X-M2M-Origin, and an undefined
+    // admin identity would then match it.
+    if (config.cse.admin && originator === config.cse.admin)
         return true;
 
     return false

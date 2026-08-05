@@ -46,16 +46,16 @@ after(async () => {
 });
 
 test("a request published to the spec'd request topic is answered on the spec'd response topic", async () => {
-  // client connects as the default originator (ADMIN, "SM"); toTopicId("SM") is "SM" (it has
+  // client connects as the default originator (ADMIN); toTopicId leaves it unchanged (it has
   // no embedded '/' to turn into ':'), so these are exactly the TS-0010 topics for this CSE.
-  assert.equal(client.reqTopic, "/oneM2M/req/SM/Mobius4/json");
-  assert.equal(client.respTopic, "/oneM2M/resp/SM/Mobius4/json");
+  assert.equal(client.reqTopic, `/oneM2M/req/${mq.ADMIN}/Mobius4/json`);
+  assert.equal(client.respTopic, `/oneM2M/resp/${mq.ADMIN}/Mobius4/json`);
 
   const res = await client.retrieve(mq.CSE_BASE);
   assert.equal(res.rsc, 2000);
   // request() already only resolves on a message received on respTopic (see
   // mqtt-onem2m.js), but assert the exact topic string explicitly, as the brief asks.
-  assert.equal(client.lastResponseTopic(), "/oneM2M/resp/SM/Mobius4/json");
+  assert.equal(client.lastResponseTopic(), `/oneM2M/resp/${mq.ADMIN}/Mobius4/json`);
 });
 
 test("rqi is echoed, and two in-flight requests are correlated by rqi rather than by arrival order", async () => {
@@ -99,7 +99,7 @@ test("a structured originator (Mobius4:CAE123) gets answered on the matching str
   // TS-0010: an SP-relative ID occupying a single topic segment has its leading '/' dropped and
   // any embedded '/' replaced with ':' -- '/Mobius4/CAE123' becomes 'Mobius4:CAE123'. This pins
   // down that bindings/mqtt.js's req_topic.split('/')[3] parses a spec-formatted structured ID
-  // correctly, not just the plain unstructured originators ("SM") the other tests use.
+  // correctly, not just the plain unstructured originators the other tests use.
   //
   // "CAE123" is not a registered <AE>, so this legitimately draws an access-denied rsc.
   // Asserting only topic routing and rqi correlation here -- not rsc -- is deliberate: asserting

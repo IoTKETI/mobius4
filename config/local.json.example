@@ -3,6 +3,10 @@
 
   "cse": {
     "_comment_cse": "CSE identity — must be unique per deployment",
+
+    "_comment_admin": "REQUIRED, no default: mobius4 refuses to start until you set this. Names the identity that the admin <accessControlPolicy> grants all six operations to, so it reaches every resource carrying that policy — over HTTP as well as TLS. Replace the placeholder below with a value unique to this deployment and treat it as a credential.",
+    "admin": "Superuser",
+
     "sp_id": "//your-domain.io",
     "cse_id": "/Mobius4",
     "csebase_rn": "Mobius",

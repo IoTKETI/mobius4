@@ -55,6 +55,178 @@ _(Accumulate items here for the next release.)_
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.6.1 (2026-08-05)
+
+Two conformance corrections. No configuration change and no DB migration.
+
+### Fixed
+
+- **UPDATE and DELETE of the `<CSEBase>` answer 4005 again, for every originator.**
+  The guards in `cse/reqPrim.js` that reject these two operations tested
+  `req_prim.ty`, the type of the resource to be *created*, which the HTTP binding
+  fills in for CREATE only. Over HTTP they therefore never fired, and the request
+  fell through to access control. That went unnoticed while the administrator
+  short-circuited access control and reached the 4005 in `delete_a_res`; once
+  v4.6.0 moved admin privileges into an ACP, a registered AE — which is what the
+  conformance suite uses — was refused earlier and got **4103** instead.
+  The guards now test `to_ty`, the type of the resource being addressed, so the
+  rejection happens before access control, where TS-0004:7.4.3.2.3 and 7.4.3.2.4
+  put it ("check the syntax of received message"). Restores
+  TP/oneM2M/CSE/REG/UPD/001 and TP/oneM2M/CSE/REG/DEL/001. Regression test in
+  `test/protocol.test.js`; the pre-existing case there only covered the
+  administrator, so the suite passed throughout.
+
+  **Why PATCH**: a bug fix that adds no capability.
+
+- **The group fanout response names its member `m2m:rsp` again.** `rsp` is
+  `m2m:responsePrimitive` in the TS-0004 symbol table, so inside the aggregated
+  response it is namespaced the same way the enclosing `m2m:agr` envelope is.
+  The member had been carried unprefixed for a time to accommodate an issue on the
+  conformance tester side; that issue is being followed up separately, and the
+  prefix is restored here so the implementation matches what the standard
+  specifies. `cse/resources/grp.js` produces the key and nothing else in the CSE
+  reads it, so the change is confined to the fanout response body; a client that
+  parsed `agr.rsp` should read `agr["m2m:rsp"]`. Covered by the fanout case in
+  `test/protocol.test.js`.
+
+  **Why PATCH**: a conformance correction that adds no capability.
+
+## v4.6.0 (2026-08-02)
+
+**Also breaking**, in two further ways, both deliberate:
+
+- The administrator no longer bypasses access control. See the second item below —
+  some resources the administrator could reach before are now refused.
+- `resourceName` is now checked against its ABNF. Names starting with `-`, `.` or
+  `_`, or containing `@`, are refused with 4000 where they used to be accepted.
+  See the last item below.
+
+**Why MINOR, deliberately, despite being a breaking change**: mobius4 now refuses
+to start until `cse.admin` is set to a value this deployment chose. Deployments
+that never overrode it will not boot until they do, and the identity recorded in
+the database has to be migrated as well. By the rule table above that is a
+"compatibility break requiring manual intervention" and would be MAJOR. It is
+released as MINOR by an explicit decision, so that the fix reaches deployments
+that track minor versions rather than waiting on a major upgrade — the exposure
+being closed is a full access-control bypass reachable over plain HTTP, and
+delaying it is the worse outcome. **Read the upgrade steps below before
+upgrading: this release does not start on an unchanged configuration.**
+
+- **`cse.admin` no longer has a default, and `SM` is refused.** A request whose
+  `From` parameter matches `cse.admin` is granted access to every resource:
+  `cse/hostingCSE.js` returns "granted" before any `<accessControlPolicy>` is
+  consulted, and that path is reached over plain HTTP exactly as over TLS. Up to
+  v4.5.1 the shipped default was `SM`, and `config/local.json.example` did not
+  mention the key at all — so a deployment that filled in the example kept a value
+  published in this repository. Anyone who could reach the port and send
+  `X-M2M-Origin: SM` had full control of the CSE, including DELETE.
+
+  `config/default.json` no longer carries the key, and a new startup check
+  (`config/validate.js`) exits with a fatal log when it is missing, blank, or `SM`.
+  Only `SM` is refused: it is the one value that actually shipped, and refusing a
+  value no deployment ever ran would break upgrades for no gain. The placeholder in
+  `config/local.json.example` (`Superuser`) is warned about rather than refused,
+  since anything printed in this repository is not secret either.
+
+  The admin comparisons in `cse/hostingCSE.js` and `cse/authorization.js` are now
+  guarded on the identity being set. That is not redundant: the `From` parameter is
+  optional, so `req_prim.fr` is `undefined` for a request with no `X-M2M-Origin`,
+  and an unset admin identity would have matched it — turning "no default" into a
+  worse hole than the one being closed.
+
+  **Upgrading**: set `cse.admin` in `config/local.json`, then run
+  `db/migrations/v4.6.0.sql`. Configuration alone is not enough — `db/init.js` writes
+  the admin identity into the database when it first creates the `<CSEBase>` and the
+  default `<accessControlPolicy>` and never rewrites them, so the old value survives
+  in every resource's `cr`/`int_cr` and in that ACP's `privileges`. Without the
+  migration the new admin cannot modify the default ACP through the standard path.
+  The migration is one transaction and is idempotent.
+
+- **The administrator's privileges now come from an `<accessControlPolicy>`.**
+  `cse/hostingCSE.js` used to grant the identity in `cse.admin` every operation
+  before any policy was read. oneM2M has no such concept — privileges are expressed
+  as `<accessControlPolicy>` resources — so `db/init.js` now creates an admin policy
+  (`cb.admin_acp.rn`, default `cb_admin_acp`) granting `acop` 63, attaches it to the
+  `<CSEBase>`, and the short-circuit is removed.
+
+  **What changes for you.** The administrator now reaches a resource only through a
+  policy that names it, or through the creator fallback when the resource carries no
+  `acpi`. Two consequences are worth checking before upgrading:
+
+  - A resource whose `acpi` names only the default policy is no longer deletable or
+    updatable by the administrator: that policy grants `acop` 35 (create, retrieve,
+    discovery) and nothing else.
+  - A resource created by someone else with no `acpi` at all is governed by the
+    creator fallback, and the administrator is not the creator.
+
+  `db/migrations/v4.6.0.sql` creates the policy on an existing database and adds it
+  to every resource that already carries an `acpi`. Resources with an **empty**
+  `acpi` are deliberately left alone: giving them one would switch them from the
+  creator fallback to policy evaluation, and their creator would lose the update and
+  delete rights it has today.
+
+  Also fixed while here: `create_cb` seeded the `<CSEBase>`'s `acpi` with the default
+  policy and `create_default_acp` then appended it again, so the `<CSEBase>` listed it
+  twice. New databases no longer do that, and the migration deduplicates existing ones.
+
+- **DELETE answered 2002 before the resource was actually gone, and a retrieve that
+  landed in the gap got RSC 5000.** Unrelated to the admin change above. It dates to
+  `4e977e0` (2026-04-09, on the 4.2.0 line), where the `await` was dropped from
+  `delete_resources()` in `cse/hostingCSE.js` as a performance optimization — the
+  comment on the line still said the deletion was waited for — so every tagged release
+  in this repository carries it. A client that deleted a resource and retrieved it
+  immediately could hit the window: `set_ri_sid` resolves the resource id and its type
+  in two separate queries against `lookup`, so a deletion committing between them
+  produced an id with type `0`; `retrieve_a_res` has no case for type `0` and left the
+  content empty while still labelling the answer OK; `access_decision` then threw
+  reading that content, and the failure surfaced as a server fault for a resource that
+  was merely absent. Reproduced at roughly one request in 300, on any Node version.
+
+  Three changes. `delete_a_res` now awaits the target's removal, so 2002 means gone —
+  measured cost on the DELETE response: none (p50 5.3 ms before and after, 1000
+  requests). `set_ri_sid` treats an id whose type will not resolve as an absent
+  resource rather than passing it on. `access_decision` reports empty content as
+  NOT_FOUND instead of throwing. **Descendants are still deleted asynchronously** — a
+  deliberate choice so that deleting a large subtree does not hold the response open,
+  and the reason `waitForSubtreeGone` exists in the test helpers.
+
+  Performance is unchanged by design; the `await` only orders work that was already
+  being done. `test/deletion.test.js` covers the contract, including a case that writes
+  the mid-deletion state directly and so checks the guard on every run rather than
+  waiting for the race to recur.
+
+- **A resource named with a leading `_` was created, then answered 4004 to every retrieve
+  and delete.** Reported by an integrating developer. Two defects met, and both are fixed.
+
+  *The path parser.* `TS-0009:6.2.2.1` defines `/~` and `/_` as **prefixes** of the HTTP path
+  component, marking the SP-Relative and Absolute forms of the *To* parameter; a server "shall
+  apply the reverse operations" to recover *To*. `bindings/http.js` tested for them with
+  `includes()` instead of at the start of the path, so any path holding a segment that begins
+  with `_` took the Absolute branch. There the replacement found no `/_/` to act on and — the
+  part that actually broke things — the leading slash was never stripped, because that happens
+  only in the final branch. *To* kept its leading slash while every `sid` in the lookup table is
+  stored without one, so the resource was unreachable by its hierarchical path. It stayed
+  reachable by its unstructured resource ID, which is what made the report look contradictory.
+  The prefixes are now matched at the start of the path.
+
+  *The validation.* `TS-0004:6.2.4` gives `resourceName` an ABNF of its own, resolved through
+  6.2.3: `resource-name = 1*unreserved`, `unreserved = (ALPHA / DIGIT) *(ALPHA / DIGIT / "-" /
+  "." / "_")`. A leading `_` was never valid. `cse/validation/res_schema.js` accepted it, and
+  also accepted `@`, which appears in no ABNF. Names are now checked against the ABNF and a
+  violation is refused with 4000 BAD_REQUEST.
+
+  **What changes for you.** `CREATE` now refuses a `resourceName` that starts with `-`, `.` or
+  `_`, or that contains `@`. Clients relying on any of those get 4000 where they previously got
+  2001. Existing resources are untouched and — thanks to the parser fix — are retrievable and
+  deletable again, so a deployment holding such names can clean them up. `TS-0001:7.2` describes
+  resource identifiers more loosely, via RFC 3986's unreserved set, which has no
+  first-character restriction; the two documents disagree on paper and this release follows the
+  protocol binding's ABNF as the one clause that names a `resource-name` production.
+
+  `test/addressing.test.js` covers all six *To*/path combinations of table 6.2.2.1-1, which is
+  what the defect slipped through; `test/resource-name.test.js` covers the ABNF and the
+  already-stored case.
+
 ## v4.5.1 (2026-08-02)
 
 **Why PATCH**: none of the below adds oneM2M capability — it's regression test

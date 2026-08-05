@@ -21,6 +21,128 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.6.1
+
+Nothing to do on the server: no configuration change, no DB migration. One thing
+to check on the **client** side.
+
+### Check: the group fanout response member is `m2m:rsp`
+
+A fanout retrieve (`.../<grp>/fopt`) returns the aggregated response as
+
+```jsonc
+{ "m2m:agr": { "m2m:rsp": [ /* one response primitive per member */ ] } }
+```
+
+The member used to be delivered as plain `rsp`, without the `m2m:` prefix, while
+an issue on the conformance tester side was being worked around. `rsp` is
+`m2m:responsePrimitive` in the TS-0004 symbol table, so it carries the prefix the
+same way the surrounding `m2m:agr` envelope does, and it is now emitted that way.
+
+A client that reads `agr.rsp` gets `undefined` and should read `agr["m2m:rsp"]`.
+Nothing inside the CSE consumes this key, so no server-side state is affected.
+
+---
+
+## v4.6.0
+
+Two required steps, and they have to be done together. **Mobius4 will not start
+until the first one is done**, by design.
+
+### Required: choose an administrator identity
+
+`cse.admin` names an identity that the administrator `<accessControlPolicy>`
+grants every operation to. Up to v4.5.1 it had a working default, `SM`, which is
+published in this repository — anyone who could reach the port and send
+`X-M2M-Origin: SM` had full control of the CSE, including DELETE, over plain HTTP
+as much as over TLS.
+
+There is now no default. Add the key to `config/local.json`:
+
+```jsonc
+{
+  "cse": {
+    "admin": "pick-something-unique-to-this-deployment"
+  }
+}
+```
+
+Treat the value as a credential, not a name. Startup refuses to continue when it
+is missing, blank, or `SM`, and warns when it is `Superuser` — the placeholder
+printed in `config/local.json.example`, which is no more secret than `SM` is.
+
+A refusal looks like this, and the process exits with status 1:
+
+```
+FATAL: cse.admin is not set. Set it to an identity unique to this deployment in
+config/local.json (see config/local.json.example).
+```
+
+### Required: DB migration
+
+Configuration alone is not enough. `db/init.js` writes the administrator identity
+into the database when it first creates the `<CSEBase>` and the default
+`<accessControlPolicy>`, and never rewrites them — so the old value survives in
+every resource's `creator` fields and in that policy's `privileges`. Without the
+migration the new administrator cannot modify the default policy through the
+standard path.
+
+Edit `new_admin` in **both** `DO` blocks of the migration to the value you just
+configured, then apply it:
+
+```bash
+psql -d mobius4 -v ON_ERROR_STOP=1 -f db/migrations/v4.6.0.sql
+```
+
+It runs as a single transaction and is idempotent — a second run reports zero
+rows changed rather than doing anything twice. If you miss the second block, the
+migration stops with a clear error and commits nothing.
+
+**A clean install needs neither step's migration** — only the configuration.
+`db/init.js` creates the administrator policy itself on an empty database.
+
+### What changes for you
+
+The administrator no longer bypasses access control. It reaches a resource
+through a policy that names it, or through the creator fallback when the resource
+carries no `accessControlPolicyIDs` at all. Two consequences are worth checking
+against your own data before upgrading:
+
+- A resource whose policy list names only the default policy is **no longer
+  deletable or updatable by the administrator**. That policy grants `acop` 35 —
+  create, retrieve, discovery — and nothing else.
+- A resource created by someone else with no policy list at all is governed by
+  the creator fallback, and the administrator is not the creator.
+
+The migration attaches the new administrator policy to every resource that
+already carries a policy list. Resources with an **empty** list are deliberately
+left alone: giving them one would switch them from the creator fallback to policy
+evaluation, and their creator would lose the update and delete rights it has
+today.
+
+### Known upgrade problem: resource names that are now invalid
+
+`resourceName` is now checked against its ABNF (`TS-0004:6.2.4`). A name must
+start with a letter or a digit; `-`, `.` and `_` are allowed from the second
+character onwards, and `@` is not allowed at all. Names that violate this are
+refused at CREATE with RSC 4000 where they previously returned 2001.
+
+**Existing resources are not touched** and stay readable. This release also fixes
+a defect that made a name beginning with `_` unreachable by its hierarchical path
+— created successfully, then answering 4004 to both retrieve and delete — so if
+you have such names, this is the version in which you can finally delete them.
+
+To find them before upgrading:
+
+```sql
+SELECT sid FROM lookup WHERE rn !~ '^[a-zA-Z0-9][-._a-zA-Z0-9]*$';
+```
+
+Clients that mint names from a template are the ones to check: a prefix like
+`_tmp` or an identifier containing `@` will start failing.
+
+---
+
 ## v4.5.1
 
 ### Test prerequisite: `mosquitto`
