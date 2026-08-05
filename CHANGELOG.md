@@ -55,6 +55,48 @@ _(Accumulate items here for the next release.)_
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.6.4 (2026-08-05)
+
+### Fixed — a name conflict is answered with 4105, not 4000
+
+`create_a_res` checks up front whether the `resourceName` is taken and answers 4105 CONFLICT
+(`TS-0001:9.6.1.3.1`, code from `TS-0004:6.6.3.5`). Requests that arrive together all pass that
+check before any of them commits, so the loser was stopped by the unique index on `lookup.sid`
+instead — and every create handler mapped any exception to 4000 BAD_REQUEST.
+
+Nothing was ever created twice; the defect was what the client was told. It matters because
+4000 says "your request was malformed", which an originator cannot tell apart from a payload it
+should stop sending, while 4105 says "try another name". Measured on a **single** instance: of
+24 losing requests, 21 got 4000. With two instances sharing a database it was every one of them.
+
+All ten create handlers now classify through `cse/create-error.js`, which recognises both
+Sequelize's `UniqueConstraintError` and PostgreSQL's raw `23505`.
+
+### Changed — MQTT subscription and expired-resource cleanup run on one instance
+
+Preparation for running more than one instance. Both are driven by something other than an
+inbound HTTP request, so every process was doing them.
+
+- **MQTT.** No client id is set, so each instance connects under its own and the broker
+  delivers every request message to all of them. Measured with two instances: one `<container>`
+  CREATE over MQTT was processed by both. Only one resource was stored — the unique index
+  caught the second — but the work and the response were duplicated.
+- **Cleanup.** `setInterval` fires in every process, so the same sweep ran N times. Deletes are
+  idempotent, but concurrent deletes of the same rows contend.
+
+Both now run only where `NODE_APP_INSTANCE` is `0` or absent (`cse/singleton-role.js`), so a
+development run, the test suite and PM2 fork mode are unaffected. Instances that do not
+subscribe keep their MQTT connection, which is what notifications are published through.
+
+Known weakness, written down rather than hidden: if instance 0 is down, nobody is subscribed to
+the MQTT request topic until PM2 restarts it. An MQTT 5 shared subscription (`$share/`) would
+spread the load instead, and is the better answer once the broker in use is known to support it.
+
+**This does not make cluster mode supported yet.** `ecosystem.config.js` still runs a single
+instance in fork mode. The remaining blocker is that `lookupCache` invalidation does not cross
+processes: after a resource is deleted and recreated under the same name on another instance, an
+instance holding the old mapping answers 4004 for up to five minutes.
+
 ## v4.6.3 (2026-08-05)
 
 ### Changed — `db.pool.max` now means what it says, and defaults to 20

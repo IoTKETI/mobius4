@@ -40,6 +40,48 @@ test("the con attribute round-trips as a JSON object", async () => {
   assert.deepEqual(back.body["m2m:cin"].con, payload);
 });
 
+test("a name that is already taken is refused with 4105, including under concurrency", async () => {
+  // TS-0001:9.6.1.3.1 — "The Hosting CSE shall use a provided resourceName as long as it does
+  // not already exist among child resources of the targeted parent resource. If the
+  // resourceName already exists, the Hosting CSE shall reject the request", and 4105 is
+  // CONFLICT (TS-0004:6.6.3.5).
+  //
+  // create_a_res checks the name up front and answers 4105, which covers the sequential case.
+  // Requests that arrive together all pass that check before any of them commits, and the one
+  // that loses is stopped by the unique index on lookup.sid instead — a database error that
+  // used to surface as 4000. Measured before the fix: of 24 losing requests, 21 got 4000 and
+  // only 3 were caught by the pre-check.
+  //
+  // Nothing is created twice either way; the defect is the code the client is told. It matters
+  // beyond tidiness because 4000 says "your request was malformed" — an originator retrying on
+  // conflict cannot distinguish it from a payload it should stop sending.
+  const rn = uniqueRn("dup");
+
+  const first = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn } });
+  assert.equal(first.rsc, "2001");
+
+  const sequential = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn } });
+  assert.equal(sequential.rsc, "4105", "the up-front check already handled this case");
+
+  // Concurrent rounds: every loser must also be 4105.
+  const seen = {};
+  for (let round = 0; round < 6; round++) {
+    const name = uniqueRn("race");
+    const results = await Promise.all(
+      Array.from({ length: 4 }, () => create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: name } }))
+    );
+    for (const r of results) seen[r.rsc] = (seen[r.rsc] || 0) + 1;
+
+    // and exactly one of them exists
+    const check = await retrieve(srv.baseUrl, `${root.sid}/${name}`);
+    assert.equal(check.rsc, "2000", "the winner must be readable");
+  }
+
+  assert.equal(seen["2001"], 6, `one winner per round: ${JSON.stringify(seen)}`);
+  assert.equal(seen["4105"], 18, `every loser should be 4105, got ${JSON.stringify(seen)}`);
+  assert.equal(seen["4000"], undefined, "a name conflict is not a malformed request");
+});
+
 test("UPDATE works with PUT plus a Content-Type that carries no ty", async () => {
   // op is derived from the Content-Type, not from the HTTP method (code map L-2).
   // With no ';' present the method decides op, so PUT -> op=3 (UPDATE).

@@ -42,11 +42,17 @@ async function main() {
         registree();
     }
 
-    // start expired resource cleanup
-    const { expired_resource_cleanup } = require('./cse/hostingCSE');
-    const cleanupIntervalMs = config.cse.expired_resource_cleanup_interval_days * 24 * 60 * 60 * 1000;
-    cleanupIntervalId = setInterval(expired_resource_cleanup, cleanupIntervalMs);
-    logger.info({ intervalDays: config.cse.expired_resource_cleanup_interval_days }, 'expired resource cleanup scheduled');
+    // start expired resource cleanup — on one instance only, since the sweep is global and
+    // running it in every process would repeat the same deletes (see cse/singleton-role.js)
+    const { isSingletonInstance } = require('./cse/singleton-role');
+    if (isSingletonInstance()) {
+        const { expired_resource_cleanup } = require('./cse/hostingCSE');
+        const cleanupIntervalMs = config.cse.expired_resource_cleanup_interval_days * 24 * 60 * 60 * 1000;
+        cleanupIntervalId = setInterval(expired_resource_cleanup, cleanupIntervalMs);
+        logger.info({ intervalDays: config.cse.expired_resource_cleanup_interval_days }, 'expired resource cleanup scheduled');
+    } else {
+        logger.info({ instance: process.env.NODE_APP_INSTANCE }, 'expired resource cleanup runs on instance 0; skipped here');
+    }
 }
 
 main().then(() => {

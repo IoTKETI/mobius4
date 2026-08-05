@@ -148,3 +148,4 @@ upgrade problems. A clean install needs none of it.
 | 4.6.1 | 2026-08-05 | Conformance: `<CSEBase>` UPDATE/DELETE answer 4005 for every originator; the group fanout member is named `m2m:rsp` | [client-side check](docs/upgrading.md#v461) |
 | 4.6.2 | 2026-08-05 | `<contentInstance>` creation and retention each become a single SQL statement — roughly 3.3× the write throughput, 2.5× with retention active; `stateTag` no longer collides under concurrent creates | — |
 | 4.6.3 | 2026-08-05 | `db.pool.max` is the connection total for the process rather than a figure each of two pools applied separately; default 30 → 20. Unblocks running more than one instance | [only if you overrode `db.pool.max`](docs/upgrading.md#v463) |
+| 4.6.4 | 2026-08-05 | A name that is already taken is refused with 4105 rather than 4000, including under concurrency; MQTT subscription and expired-resource cleanup run on one instance | — |
