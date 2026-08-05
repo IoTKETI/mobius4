@@ -196,17 +196,40 @@ test("net=4 — deleting a child whose type matches enc.chty (<container>) does 
   );
 });
 
-test("net=4 — also notifies on eviction caused by exceeding mni", { todo: true }, async () => {
-  // This is not unimplemented; it is pending a spec clarification (SQ-001): whether eviction
-  // (int_cr_req:true) should, as an indirect deletion, produce a notification is not settled
-  // in the oneM2M specification (DEC-039). check_and_send_noti deliberately excludes eviction
-  // via the int_cr_req !== true condition, so zero notifications is correct for now — once
-  // this is clarified, the condition gets adjusted and this test gets inverted.
+test("net=4 — eviction caused by exceeding mni notifies nobody", async () => {
+  // Previously carried as { todo: true } on the assumption that the specification had not
+  // settled whether eviction, being an indirect deletion, notifies. It has:
+  //
+  //   TS-0004:7.4.7.2.1 step 2 d) — "When removing the oldest <contentInstance> resources,
+  //   the Hosting CSE shall not generate notifications even if there exists a <subscription>
+  //   to the targeted <container> resource and this <subscription> is configured to generate
+  //   a notification on Delete_of_Direct_Child_Resource."
+  //
+  // So silence is not a gap awaiting a decision; it is what the specification requires, and
+  // the assertion is inverted accordingly. cse/noti.js implements it through the
+  // int_cr_req !== true condition — the guard this test now protects.
+  //
+  // The other half of SQ-001 remains open: whether a cascade delete (removing an ancestor)
+  // fires net=4 on the descendants' subscriptions is not covered by this clause.
   const { cntSid, subSid } = await cntWithSub({ net: [4] }, { mni: 3 });
   for (let i = 1; i <= 4; i++) {
     const r = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { seq: i } } });
     assert.equal(r.rsc, "2001");
   }
+  // The 4th create pushed cni past mni, so exactly one <contentInstance> was evicted here.
+  const notis = await sink.expectNone((i) => netOf(i) === 4 && i.body?.["m2m:sgn"]?.sur === subSid);
+  assert.deepEqual(notis.map(netOf), [], "eviction must not notify (step 2 d)");
+});
+
+test("net=4 — a client-issued DELETE of a <contentInstance> still notifies", async () => {
+  // The mirror of the test above, and the reason its guard cannot simply be "never notify on
+  // a <cin> deletion": an ordinary DELETE of the same resource type must still fire. What
+  // distinguishes them is that eviction is internal (int_cr_req), not the resource type.
+  const { cntSid, subSid } = await cntWithSub({ net: [4] }, { mni: 100 });
+  const res = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: "delete-me" } } });
+  assert.equal(res.rsc, "2001");
+
+  await remove(srv.baseUrl, `${cntSid}/${res.body["m2m:cin"].rn}`);
   const got = await sink.waitFor((i) => netOf(i) === 4 && i.body["m2m:sgn"].sur === subSid);
   assert.equal(got.body["m2m:sgn"].nev.net, 4);
 });

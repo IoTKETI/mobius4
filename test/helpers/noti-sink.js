@@ -63,9 +63,23 @@ async function startSink() {
     });
   }
 
+  // Throws when anything matched, rather than only reporting it. The earlier version returned
+  // the matches and left the assertion to the caller, which reads like an assertion and is not
+  // one: `await sink.expectNone(...)` on its own passes however many notifications arrive. That
+  // is exactly how a test written against the eviction guard came to pass while the guard was
+  // removed. Callers may still assert on the returned array — it is always empty here — but
+  // forgetting to no longer hides a failure.
   async function expectNone(pred, { graceMs = 2000 } = {}) {
     await new Promise((resolve) => setTimeout(resolve, graceMs));
-    return received.filter(pred);
+    const matched = received.filter(pred);
+    if (matched.length > 0) {
+      throw new Error(
+        `expected no matching notification, but ${matched.length} arrived: net=` +
+        JSON.stringify(matched.map(netOf)) +
+        ` sur=${JSON.stringify(matched.map((i) => i.body?.["m2m:sgn"]?.sur))}`
+      );
+    }
+    return matched;
   }
 
   return {
