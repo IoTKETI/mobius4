@@ -55,6 +55,42 @@ _(Accumulate items here for the next release.)_
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.6.1 (2026-08-05)
+
+Two conformance corrections. No configuration change and no DB migration.
+
+### Fixed
+
+- **UPDATE and DELETE of the `<CSEBase>` answer 4005 again, for every originator.**
+  The guards in `cse/reqPrim.js` that reject these two operations tested
+  `req_prim.ty`, the type of the resource to be *created*, which the HTTP binding
+  fills in for CREATE only. Over HTTP they therefore never fired, and the request
+  fell through to access control. That went unnoticed while the administrator
+  short-circuited access control and reached the 4005 in `delete_a_res`; once
+  v4.6.0 moved admin privileges into an ACP, a registered AE — which is what the
+  conformance suite uses — was refused earlier and got **4103** instead.
+  The guards now test `to_ty`, the type of the resource being addressed, so the
+  rejection happens before access control, where TS-0004:7.4.3.2.3 and 7.4.3.2.4
+  put it ("check the syntax of received message"). Restores
+  TP/oneM2M/CSE/REG/UPD/001 and TP/oneM2M/CSE/REG/DEL/001. Regression test in
+  `test/protocol.test.js`; the pre-existing case there only covered the
+  administrator, so the suite passed throughout.
+
+  **Why PATCH**: a bug fix that adds no capability.
+
+- **The group fanout response names its member `m2m:rsp` again.** `rsp` is
+  `m2m:responsePrimitive` in the TS-0004 symbol table, so inside the aggregated
+  response it is namespaced the same way the enclosing `m2m:agr` envelope is.
+  The member had been carried unprefixed for a time to accommodate an issue on the
+  conformance tester side; that issue is being followed up separately, and the
+  prefix is restored here so the implementation matches what the standard
+  specifies. `cse/resources/grp.js` produces the key and nothing else in the CSE
+  reads it, so the change is confined to the fanout response body; a client that
+  parsed `agr.rsp` should read `agr["m2m:rsp"]`. Covered by the fanout case in
+  `test/protocol.test.js`.
+
+  **Why PATCH**: a conformance correction that adds no capability.
+
 ## v4.6.0 (2026-08-02)
 
 **Also breaking**, in two further ways, both deliberate:

@@ -21,6 +21,29 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.6.1
+
+Nothing to do on the server: no configuration change, no DB migration. One thing
+to check on the **client** side.
+
+### Check: the group fanout response member is `m2m:rsp`
+
+A fanout retrieve (`.../<grp>/fopt`) returns the aggregated response as
+
+```jsonc
+{ "m2m:agr": { "m2m:rsp": [ /* one response primitive per member */ ] } }
+```
+
+The member used to be delivered as plain `rsp`, without the `m2m:` prefix, while
+an issue on the conformance tester side was being worked around. `rsp` is
+`m2m:responsePrimitive` in the TS-0004 symbol table, so it carries the prefix the
+same way the surrounding `m2m:agr` envelope does, and it is now emitted that way.
+
+A client that reads `agr.rsp` gets `undefined` and should read `agr["m2m:rsp"]`.
+Nothing inside the CSE consumes this key, so no server-side state is affected.
+
+---
+
 ## v4.6.0
 
 Two required steps, and they have to be done together. **Mobius4 will not start
