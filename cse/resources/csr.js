@@ -3,6 +3,7 @@ const { csr_create_schema, csr_update_schema } = require('../validation/res_sche
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
+const { classify_create_error } = require('../create-error');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
 
@@ -94,8 +95,10 @@ async function create_a_csr(req_prim, resp_prim) {
         resp_prim.pc = tmp_resp.pc;
     } catch (err) {
         logger.error({ err }, 'create_a_csr failed');
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': err.message };
+        // A name lost to a concurrent create is a conflict, not a bad request.
+        const { rsc, dbg } = classify_create_error(err);
+        resp_prim.rsc = rsc;
+        resp_prim.pc = { 'm2m:dbg': dbg };
     } finally {
         req_prim._pendingCreate?.resolve();
     }

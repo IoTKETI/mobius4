@@ -56,6 +56,18 @@ exports.init_client = async function () {
         isConnected = true;
         reconnectAttempts = 0;
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+        // Subscribing is what makes an instance handle inbound MQTT requests, and the broker
+        // delivers each message to every subscriber — so with several instances running, one
+        // request would be processed by all of them. Only instance 0 subscribes; the others
+        // keep their connection, which is what mqtt_transmitter publishes notifications
+        // through. See cse/singleton-role.js.
+        const { isSingletonInstance } = require('../cse/singleton-role');
+        if (!isSingletonInstance()) {
+            logger.info({ instance: process.env.NODE_APP_INSTANCE },
+                'mqtt request topics are served by instance 0; this instance publishes only');
+            return;
+        }
+
         try {
             await mqtt_client.subscribe(`/oneM2M/req/+${config.cse.cse_id}/json`);
             await mqtt_client.subscribe('self/datasetManager/#');

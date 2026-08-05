@@ -1,0 +1,43 @@
+const enums = require('../config/enums');
+
+// PostgreSQL's unique_violation. Sequelize wraps it as SequelizeUniqueConstraintError; the
+// hand-written SQL in cse/resources/cin.js goes through node-postgres and surfaces the raw
+// code, so both shapes are recognised here.
+const PG_UNIQUE_VIOLATION = '23505';
+
+/**
+ * Classifies an error thrown while creating a resource.
+ *
+ * create_a_res checks up front whether the resourceName is taken and answers 4105 CONFLICT
+ * (TS-0001:9.6.1.3.1, and 4105 in TS-0004:6.6.3.5). Requests that arrive together all pass
+ * that check before any of them commits, so the loser is stopped by the unique index on
+ * lookup.sid instead — and that arrived at the client as 4000 BAD_REQUEST, because every
+ * create handler mapped any exception to it.
+ *
+ * Nothing was ever created twice; the defect was what the client was told. It matters because
+ * 4000 means "your request was malformed", which an originator cannot distinguish from a
+ * payload it should stop sending, while 4105 is the answer that says "try another name". It
+ * shows up on a single instance under concurrent creates (measured: 21 of 24 losing requests)
+ * and on every one of them once more than one instance shares a database.
+ */
+function classify_create_error(err) {
+    const unique_violation =
+        err?.name === 'SequelizeUniqueConstraintError' ||
+        err?.code === PG_UNIQUE_VIOLATION ||
+        err?.original?.code === PG_UNIQUE_VIOLATION ||
+        err?.parent?.code === PG_UNIQUE_VIOLATION;
+
+    if (unique_violation) {
+        return {
+            rsc: enums.rsc_str['CONFLICT'],
+            dbg: "requested 'rn' is already used",
+        };
+    }
+
+    return {
+        rsc: enums.rsc_str['BAD_REQUEST'],
+        dbg: err?.message,
+    };
+}
+
+module.exports = { classify_create_error };

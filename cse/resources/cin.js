@@ -1,6 +1,7 @@
 const config = require('config');
 const { cin_create_schema } = require('../validation/res_schema');
 const enums = require('../../config/enums');
+const { classify_create_error } = require('../create-error');
 
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 
@@ -98,8 +99,10 @@ async function create_a_cin(req_prim, resp_prim) {
 
     } catch (err) {
         logger.error({ err }, 'create_a_cin failed');
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': err.message };
+        // A name lost to a concurrent create is a conflict, not a bad request.
+        const { rsc, dbg } = classify_create_error(err);
+        resp_prim.rsc = rsc;
+        resp_prim.pc = { 'm2m:dbg': dbg };
     }
 }
 

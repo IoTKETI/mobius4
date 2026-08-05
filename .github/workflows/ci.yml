@@ -109,10 +109,11 @@ jobs:
           # + 1 for <CSEBase> UPDATE/DELETE seen from a registered AE
           # + 9 for <container> retention invariants + 1 for the client-DELETE mirror of the
           #   eviction notification rule + 3 for the CIN write-path rewrite: loc round-trip,
-          #   addressing by both forms, and concurrent creates against a container at its limit).
+          #   addressing by both forms, and concurrent creates against a container at its limit
+          # + 1 for name-conflict RSC under concurrency).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=101
+          BASELINE=102
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."
