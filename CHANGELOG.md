@@ -25,6 +25,126 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 _(Accumulate items here for the next release.)_
 
+### Unresolved — pending spec clarification
+
+- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
+  standardization discussion, **indirect deletion** (a deletion that happens as a
+  side effect of deleting a different resource) is treated as not firing a
+  notification. Whether eviction falls under this needs confirmation — what
+  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
+  confirmation; the regression test is left as `todo` to keep the question visible.
+  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
+  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
+  must be stripped from the notification).
+- **Three questions about the MQTT binding, left open rather than guessed at
+  when its test coverage was designed.** Confirmed from TS-0010's topic-format
+  rule only, not from a full reading of the spec:
+  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
+    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
+    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
+    like an unimplemented feature, but confirming that needs the full spec
+    text, not a test suite.
+  - **QoS levels and retained-message handling** — not yet checked against
+    the spec at all.
+  - **MQTT-specific error mapping** — likewise unchecked.
+
+  Encoding a guess about any of these as a passing test would be worse than
+  leaving them untested: it would cement whatever mobius4 does today as
+  though it were the standard, the same reasoning that keeps the `net=4`
+  eviction question above as a `todo` rather than a silent choice.
+  `test/mqtt.test.js` (added below) is now the harness that a future pass
+  through the full TS-0010 text can use to settle them.
+
+## v4.6.2 (2026-08-05)
+
+### Performance — `<contentInstance>` creation is one statement, and `stateTag` no longer races
+
+The write path was four round trips: a SELECT for the parent's `maxByteSize` and
+`stateTag`, then `BEGIN`, three statements and `COMMIT`. It saturated at a
+concurrency of 8 because the ceiling was the round trips, not the work.
+
+It is now a single statement — the parent's counters, the `<contentInstance>`
+row and its lookup row in one `WITH`. A single statement is atomic without an
+explicit transaction, and three things follow from the shape rather than being
+arranged separately:
+
+- The size check **is** the `UPDATE`'s `WHERE`. When the content does not fit no
+  row is updated, so the two `INSERT`s, which select from that `UPDATE`, insert
+  nothing. A refusal cannot leave the counters advanced for a row that was never
+  written.
+- `stateTag` comes back from the `UPDATE` that incremented it, so the instance
+  carries the parent's post-increment value as `TS-0004:7.4.7.2.1` step 3
+  requires.
+- "Parent missing" and "content too large" are told apart by the statement's own
+  result rather than by an earlier read.
+
+**Fixed as a consequence**: `stateTag` collided under concurrent creates. The old
+path read the parent's `st` before opening its transaction, so concurrent creates
+copied the same value into several instances — measured at 20 concurrent creates
+producing 8 distinct values, 11 of them sharing 1. Besides violating step 3 this
+left eviction picking arbitrarily, since `evict_if_needed` orders by `st`. There
+is no longer a read to race. The regression test that carried this as `todo` is
+promoted to a real assertion.
+
+Measured on the development machine, 5s per run, before → after:
+
+| concurrency | 8 | 32 | 100 |
+|---|---|---|---|
+| CREATE `<cin>` | 1,025 → **2,723** | 903 → **3,366** | 882 → **3,383** |
+| CREATE with eviction active | 808 → **1,457** | 686 → **1,681** | 561 → **1,515** |
+
+The shape matters more than the multiple: throughput used to *fall* as
+concurrency rose past 8. It now climbs to 32 and holds at 100, and p50 at
+concurrency 32 went from 26 ms to 9 ms. Absolute numbers are specific to that
+machine.
+
+No API change. Eviction remains synchronous — the response is still only sent
+once the container is back within its limits.
+
+### Performance — eviction is also one statement
+
+Eviction runs on the write path, so with creation itself fixed it became the
+remaining cost: a container held at its limit ran at roughly half the throughput
+of one that was not. It went through `delete_a_res` per evicted instance, which
+retrieves the resource, deletes it, queries for descendants, deletes those, and
+offers the deletion to the notification path — for a `<contentInstance>`, which
+is always a leaf (no resource type accepts one as a parent) and whose eviction
+must not notify anyway (`TS-0004:7.4.7.2.1` step 2 d).
+
+It is now a single statement. What survives is expressed directly: ranking newest
+first, an instance is kept while its position is within `maxNrOfInstances` and the
+running total of sizes up to it is within `maxByteSize`; everything past either
+boundary goes. Nothing is decided in JavaScript.
+
+| concurrency | 8 | 32 | 100 |
+|---|---|---|---|
+| CREATE with eviction active | 808 → **1,774** | 686 → **1,571** | 561 → **1,606** |
+
+The tail matters more than the throughput here: p99 at concurrency 100 was
+3,006 ms and is now 108 ms.
+
+Two defects were introduced and fixed while writing it, both worth recording
+because neither is visible in ordinary use.
+
+**Deadlock.** The first version took its locks in the opposite order from the
+write — cin rows, then lookup rows, then the container, against the write's
+container first. Two requests interleaving on one container deadlock, and
+PostgreSQL fails one: a third of writes returned 4000 under sustained load. The
+statement now locks the container first, which also serialises eviction per
+container so two of them cannot choose overlapping victims. The write already
+serialises on that row, so no contention is added. A regression test covers it —
+a single burst of concurrent creates does not reproduce it, so the test applies
+successive waves.
+
+**Sequential scans.** The second version read the container's instances with
+`WHERE pi = (SELECT ri FROM locked)` and deleted with `ri IN (SELECT ...)`.
+Neither can use an index: the planner does not know the value until the CTE runs,
+and the `IN` form plans as a hash semi-join. On a table of 16,000 rows holding an
+11-row container that cost 14.5 ms per eviction against 0.58 ms, scaling with the
+whole table rather than with the container. The parameter is now passed directly
+and the deletes join with `USING`.
+
+
 ### Tests — `<container>` retention invariants (no behaviour change)
 
 Groundwork for rewriting the `<contentInstance>` write path for throughput. That
@@ -65,54 +185,6 @@ notify for this resource type".
 
 Still open: whether a cascade delete fires `net=4` on descendants' subscriptions.
 That clause does not cover it.
-
-### Known defect — `stateTag` collides under concurrent `<contentInstance>` creates
-
-Measured: 20 concurrent creates on one `<container>` produced 8 distinct
-`stateTag` values, 11 of them sharing 1, while the parent correctly reached 20.
-`cse/resources/cin.js` reads the parent's `st` before opening its transaction and
-writes `cin.st = that + 1`, while the transaction increments the parent
-atomically — so concurrent creates read the same value.
-
-This breaks step 3 ("increment the `stateTag` of the parent and copy the value
-into the `<contentInstance>`") and, more practically, makes eviction order
-ambiguous: `evict_if_needed` picks the oldest with `ORDER BY st ASC`, and ties
-resolve arbitrarily. `cni` and `cbs` are unaffected — they are maintained with
-SQL-side arithmetic.
-
-Left as a `todo` test rather than fixed here: the fix belongs with the write-path
-rewrite, where a single statement can return the new `st` and remove the
-read-before-write entirely.
-
-### Unresolved — pending spec clarification
-
-- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
-  standardization discussion, **indirect deletion** (a deletion that happens as a
-  side effect of deleting a different resource) is treated as not firing a
-  notification. Whether eviction falls under this needs confirmation — what
-  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
-  confirmation; the regression test is left as `todo` to keep the question visible.
-  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
-  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
-  must be stripped from the notification).
-- **Three questions about the MQTT binding, left open rather than guessed at
-  when its test coverage was designed.** Confirmed from TS-0010's topic-format
-  rule only, not from a full reading of the spec:
-  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
-    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
-    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
-    like an unimplemented feature, but confirming that needs the full spec
-    text, not a test suite.
-  - **QoS levels and retained-message handling** — not yet checked against
-    the spec at all.
-  - **MQTT-specific error mapping** — likewise unchecked.
-
-  Encoding a guess about any of these as a passing test would be worse than
-  leaving them untested: it would cement whatever mobius4 does today as
-  though it were the standard, the same reasoning that keeps the `net=4`
-  eviction question above as a `todo` rather than a silent choice.
-  `test/mqtt.test.js` (added below) is now the harness that a future pass
-  through the full TS-0010 text can use to settle them.
 
 ## v4.6.1 (2026-08-05)
 

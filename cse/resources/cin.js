@@ -5,6 +5,7 @@ const enums = require('../../config/enums');
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 
 const sequelize = require('../../db/sequelize');
+const pool = require('../../db/connection');
 const Lookup = require('../../models/lookup-model');
 const CNT = require('../../models/cnt-model');
 const CIN = require('../../models/cin-model');
@@ -36,26 +37,9 @@ async function create_a_cin(req_prim, resp_prim) {
         return;
     }
 
-    // [C2] read only fields needed for validation — avoid SELECT *
-    const cnt_res = await CNT.findByPk(cin_pi, {
-        attributes: ['mbs', 'st']
-    });
-    if (!cnt_res) {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': 'parent <cnt> resource not found' };
-        return;
-    }
-
     // compute content size
     const { get_mem_size } = require('../hostingCSE');
     const content_size = get_mem_size(prim_res.con);
-
-    // when mbs < cs, it is not acceptable
-    if (content_size > cnt_res.mbs) {
-        resp_prim.rsc = enums.rsc_str['NOT_ACCEPTABLE'];
-        resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs of the parent container' };
-        return;
-    }
 
     const ri = generate_ri();
     const now = get_cur_time();
@@ -81,51 +65,33 @@ async function create_a_cin(req_prim, resp_prim) {
         acpi: prim_res.acpi || null,
         lbl: prim_res.lbl || null,
         loc: prim_res.loc,
-        st: cnt_res.st + 1,
         cs: content_size,
         con: prim_res.con,
         cnf: prim_res.cnf || null,
     };
 
     try {
-        // [C7] CIN INSERT + CNT UPDATE + Lookup INSERT in a single transaction
-        const new_cnt = await sequelize.transaction(async (t) => {
-            await CIN.create(cin_res, { transaction: t });
+        const written = await write_a_cin(cin_res, req_prim.fr);
 
-            // [C2] atomic CNT UPDATE — avoids separate findByPk + update and prevents race conditions
-            const [, updated] = await CNT.update(
-                {
-                    cni: sequelize.literal('cni + 1'),
-                    cbs: sequelize.literal(`cbs + ${content_size}`),
-                    st:  sequelize.literal('st + 1'),
-                },
-                {
-                    where: { ri: cin_pi },
-                    returning: ['cni', 'cbs', 'mni', 'mbs'],
-                    transaction: t,
-                }
-            );
-
-            await Lookup.create({
-                ri,
-                ty: 4,
-                rn: prim_res.rn,
-                sid: cin_sid,
-                lvl: cin_sid.split('/').length,
-                pi: cin_pi,
-                cr: prim_res.cr === null ? req_prim.fr : null,
-                int_cr: req_prim.fr,
-                et: prim_res.et || et,
-                loc: prim_res.loc
-            }, { transaction: t });
-
-            return updated[0];
-        });
-
-        // eviction after transaction: delete oldest CIN(s) if mni or mbs exceeded
-        if (new_cnt) {
-            await evict_if_needed(new_cnt, cin_pi);
+        // The parent has to exist and has to accept the size. Both are decided by the same
+        // statement, so they are told apart by its result rather than by two earlier reads.
+        if (!written.parent_found) {
+            resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+            resp_prim.pc = { 'm2m:dbg': 'parent <cnt> resource not found' };
+            return;
         }
+        if (!written.stored) {
+            resp_prim.rsc = enums.rsc_str['NOT_ACCEPTABLE'];
+            resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs of the parent container' };
+            return;
+        }
+
+        // TS-0004:7.4.7.2.1 step 3 — the instance carries the parent's stateTag *after* the
+        // increment, which is why it comes back from the statement that performed it.
+        cin_res.st = written.st;
+
+        // eviction after the write: delete oldest CIN(s) if mni or mbs exceeded
+        await evict_if_needed(written, cin_pi);
 
         // [C1] build response directly from cin_res — no extra DB round trip
         resp_prim.pc = build_cin_response(cin_res);
@@ -135,6 +101,93 @@ async function create_a_cin(req_prim, resp_prim) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
+}
+
+// One statement for the whole write: the parent's counters, the <contentInstance> row, and
+// its lookup row.
+//
+// It used to be four round trips — a SELECT for the parent's mbs and st, then BEGIN, three
+// statements and COMMIT. Measured at roughly 1,000 creates per second and saturated at a
+// concurrency of 8, because the ceiling was the round trips rather than the work. Folding it
+// into one statement is what this function is for; a single statement is also atomic without
+// an explicit transaction.
+//
+// Three things fall out of the shape rather than being arranged separately:
+//
+//   - The size check is the UPDATE's own WHERE. If the content does not fit, no row is
+//     updated, so the two INSERTs — which select from that UPDATE — insert nothing. A refusal
+//     cannot leave the counters advanced for a row that was never written.
+//   - stateTag comes back from the UPDATE that incremented it, so the instance carries the
+//     parent's post-increment value (TS-0004:7.4.7.2.1 step 3). The previous code read st
+//     before opening its transaction, which let concurrent creates copy the same value into
+//     several instances and left eviction — which orders by st — picking arbitrarily.
+//   - "Parent missing" and "content too large" are distinguished by the parent CTE, since
+//     both otherwise present as an empty UPDATE.
+//
+// The final SELECT uses scalar subqueries so that exactly one row comes back in every case,
+// including the two failures.
+const WRITE_CIN_SQL = `
+WITH parent AS (
+    SELECT ri FROM cnt WHERE ri = $1
+), upd AS (
+    UPDATE cnt
+       SET cni = cni + 1, cbs = cbs + $2, st = st + 1
+     WHERE ri = $1 AND (mbs IS NULL OR $2 <= mbs)
+    RETURNING cni, cbs, mni, mbs, st
+), new_cin AS (
+    INSERT INTO cin (ri, ty, rn, pi, sid, et, ct, lt, cr, acpi, lbl, loc, st, cs, con, cnf)
+    SELECT $3, 4, $4, $1, $5, $6, $7, $7, $8, $9, $10,
+           CASE WHEN $11::text IS NULL THEN NULL
+                ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END,
+           upd.st, $2, $12::jsonb, $13
+      FROM upd
+    RETURNING ri
+), new_lookup AS (
+    INSERT INTO lookup (ri, ty, rn, sid, lvl, pi, cr, int_cr, et, loc)
+    SELECT $3, 4, $4, $5, $14, $1, $8, $15, $6,
+           CASE WHEN $11::text IS NULL THEN NULL
+                ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END
+      FROM upd
+    RETURNING ri
+)
+SELECT (SELECT count(*) FROM parent)      AS parent_found,
+       (SELECT count(*) FROM new_lookup)  AS stored,
+       (SELECT cni FROM upd)              AS cni,
+       (SELECT cbs FROM upd)              AS cbs,
+       (SELECT mni FROM upd)              AS mni,
+       (SELECT mbs FROM upd)              AS mbs,
+       (SELECT st  FROM upd)              AS st
+`;
+
+async function write_a_cin(cin_res, originator) {
+    const { rows } = await pool.query(WRITE_CIN_SQL, [
+        cin_res.pi,                                        // $1
+        cin_res.cs,                                        // $2
+        cin_res.ri,                                        // $3
+        cin_res.rn,                                        // $4
+        cin_res.sid,                                       // $5
+        cin_res.et,                                        // $6
+        cin_res.ct,                                        // $7
+        cin_res.cr,                                        // $8
+        cin_res.acpi,                                      // $9
+        cin_res.lbl,                                       // $10
+        cin_res.loc ? JSON.stringify(cin_res.loc) : null,  // $11
+        JSON.stringify(cin_res.con ?? null),               // $12
+        cin_res.cnf,                                       // $13
+        cin_res.sid.split('/').length,                     // $14
+        originator,                                        // $15
+    ]);
+
+    const r = rows[0];
+    return {
+        parent_found: Number(r.parent_found) > 0,
+        stored: Number(r.stored) > 0,
+        cni: r.cni,
+        cbs: r.cbs,
+        mni: r.mni,
+        mbs: r.mbs,
+        st:  r.st,
+    };
 }
 
 // [C1] build response object from in-memory cin_res (avoids re-reading from DB)
@@ -161,63 +214,97 @@ function build_cin_response(cin_res) {
     return cin_obj;
 }
 
-// [C4] evict oldest CIN(s) when mni or mbs is exceeded — runs after transaction commits
+// Eviction, also in one statement — TS-0004:7.4.7.2.1 step 2 a) and b).
+//
+// The clause is "remove the oldest ... until the conditions are met", so what survives is a
+// contiguous run of the newest instances: the newest maxNrOfInstances of them whose sizes
+// still add up to no more than maxByteSize. That is expressible directly. Ranking newest
+// first, an instance is kept while its position is within mni and the running total of sizes
+// up to and including it is within mbs; everything past either boundary is evicted, in one
+// pass, without deciding anything in JavaScript.
+//
+// Why not go through delete_a_res as before: it retrieves the resource, deletes it, queries
+// for descendants and deletes those, and offers the deletion to the notification path — for
+// a <contentInstance>, which is always a leaf (no resource type accepts one as a parent) and
+// whose eviction must not notify anyway (step 2 d). That is several round trips per evicted
+// instance, and eviction runs on the hot write path.
+//
+// The one thing delete_a_res did that still has to happen here is invalidating the lookup
+// cache, so the evicted sids come back from the statement.
+//
+// The leading SELECT ... FOR UPDATE on the parent is not incidental. Without it this statement
+// takes its locks in the opposite order from the write above — cin rows, then lookup rows,
+// then the container — while the write takes the container first. Two requests interleaving on
+// one container then deadlock, and PostgreSQL fails one of them: measured at a third of writes
+// returning 4000 under sustained load against a container held at its limit. Locking the
+// container first puts both statements in the same order, and has the side effect of
+// serialising evictions per container, so two of them can no longer choose overlapping victims.
+// The write already serialises on that same row, so this adds no contention that was not
+// there.
+//
+// Two details in the SQL are load-bearing and easy to undo by accident:
+//
+//   - `WHERE pi = $1` takes the parameter directly. Writing it as `pi = (SELECT ri FROM
+//     locked)` reads better and costs a sequential scan of the whole cin table — the planner
+//     cannot use idx_cin_pi against a value it only learns from a CTE. Measured on a table of
+//     16,000 rows holding an 11-row container: 14.5 ms against 0.58 ms, and the gap grows with
+//     the table rather than with the container.
+//   - The two DELETEs join `victims` with USING rather than `ri IN (SELECT ...)`. The IN form
+//     plans as a hash semi-join and sequentially scans cin and lookup in full; USING drives the
+//     primary key.
+//
+// The lock is instead tied in through victims, which cannot be evaluated until it is held.
+const EVICT_SQL = `
+WITH locked AS (
+    SELECT ri FROM cnt WHERE ri = $1 FOR UPDATE
+), ranked AS (
+    SELECT ri, cs, sid,
+           row_number() OVER (ORDER BY st DESC, ct DESC, ri DESC) AS pos,
+           sum(cs)      OVER (ORDER BY st DESC, ct DESC, ri DESC
+                              ROWS UNBOUNDED PRECEDING)           AS running_bytes
+      FROM cin
+     WHERE pi = $1
+), victims AS (
+    SELECT ri, cs, sid FROM ranked
+     WHERE (($2::int IS NOT NULL AND pos > $2)
+         OR ($3::int IS NOT NULL AND running_bytes > $3))
+       AND (SELECT count(*) FROM locked) = 1
+), del_cin AS (
+    DELETE FROM cin c    USING victims v WHERE c.ri = v.ri RETURNING c.cs
+), del_lookup AS (
+    DELETE FROM lookup l USING victims v WHERE l.ri = v.ri RETURNING l.ri
+), adj AS (
+    UPDATE cnt
+       SET cni = cni - (SELECT count(*) FROM del_cin),
+           cbs = cbs - COALESCE((SELECT sum(cs) FROM del_cin), 0)
+     WHERE ri = $1
+    RETURNING cni, cbs
+)
+SELECT COALESCE((SELECT array_agg(sid) FROM victims), ARRAY[]::varchar[]) AS sids,
+       (SELECT count(*) FROM del_lookup)                                 AS evicted,
+       a.cni, a.cbs
+  FROM adj a
+`;
+
 async function evict_if_needed(cnt, cin_pi) {
-    const { delete_a_res } = require('../hostingCSE');
+    const { cni, cbs, mni, mbs } = cnt.dataValues || cnt;
 
-    let { cni, cbs, mni, mbs } = cnt.dataValues || cnt;
+    // Nothing to do in the common case, and this keeps the statement off the hot path
+    // entirely for containers that are not at their limit.
+    if ((mni == null || cni <= mni) && (mbs == null || cbs <= mbs)) return;
 
-    const excess_mni = Math.max(0, cni - mni);
-    if (excess_mni === 0 && cbs <= mbs) return;
+    const { rows } = await pool.query(EVICT_SQL, [cin_pi, mni ?? null, mbs ?? null]);
+    const evicted = rows[0];
+    if (!evicted || Number(evicted.evicted) === 0) return;
 
-    // fetch enough oldest CINs to cover both mni and mbs eviction
-    const fetch_limit = Math.max(excess_mni + 10, 50);
-    const candidates = await CIN.findAll({
-        where: { pi: cin_pi },
-        order: [['st', 'ASC']],
-        limit: fetch_limit,
-        attributes: ['ri', 'cs'],
-    });
+    // delete_a_res used to do this. A stale entry would resolve an evicted instance's path to
+    // a resourceID whose row is gone; the answer would still be 4004, but by a route that
+    // depends on the cache rather than on the store.
+    const { invalidateLookupCache } = require('../hostingCSE');
+    for (const sid of evicted.sids || []) invalidateLookupCache(sid);
 
-    const to_delete = [];
-
-    // mni: remove oldest until within limit
-    let i = 0;
-    while (cni > mni && i < candidates.length) {
-        to_delete.push(candidates[i]);
-        cni--;
-        cbs -= candidates[i].cs;
-        i++;
-    }
-
-    // mbs: continue removing oldest until within size limit
-    while (cbs > mbs && i < candidates.length) {
-        to_delete.push(candidates[i]);
-        cbs -= candidates[i].cs;
-        i++;
-    }
-
-    if (to_delete.length === 0) return;
-
-    // delete each evicted CIN (int_cr_req=true skips the per-CIN CNT update in delete_a_res)
-    let cbs_reduction = 0;
-    for (const old_cin of to_delete) {
-        const tmp_resp = {};
-        await delete_a_res(
-            { fr: config.cse.admin, to: old_cin.ri, ri: old_cin.ri, rqi: 'evict_cin', to_ty: 4, int_cr_req: true },
-            tmp_resp
-        );
-        cbs_reduction += old_cin.cs;
-    }
-
-    // update CNT to reflect evicted CINs
-    await CNT.update(
-        {
-            cni: sequelize.literal(`cni - ${to_delete.length}`),
-            cbs: sequelize.literal(`cbs - ${cbs_reduction}`),
-        },
-        { where: { ri: cin_pi } }
-    );
+    logger.debug({ pi: cin_pi, evicted: Number(evicted.evicted), cni: evicted.cni, cbs: evicted.cbs },
+        'evicted oldest <cin>(s)');
 }
 
 async function retrieve_a_cin(req_prim, resp_prim) {
