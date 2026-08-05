@@ -304,6 +304,44 @@ test("concurrent creates leave cni and cbs exact", async () => {
   assert.equal(cnt.cbs, live.reduce((a, c) => a + c.cs, 0));
 });
 
+test("concurrent creates against a container at its limit all succeed", async () => {
+  // Eviction runs on the write path, so a container held at mni is the case where creates and
+  // evictions interleave. A rewrite that takes its locks in a different order from the write
+  // itself deadlocks here and nowhere else — this exact test was written after a
+  // single-statement eviction that passed every other assertion in this file failed a third of
+  // its requests with "deadlock detected" under sustained load.
+  //
+  // The assertion is that every create is accepted. A create refused because the database
+  // could not order two of its own statements is not a rejection the client can act on.
+  // Sustained rather than a single burst: one wave of concurrent creates tends to get
+  // serialised by the write's own lock on the container row and never overlaps two evictions.
+  // Successive waves keep evictions in flight against each other, which is what surfaces it.
+  const WAVES = 6, PER_WAVE = 24;
+  const cntSid = await container({ mni: 5, mbs: 1000000 });
+
+  // Fill to the limit first, so every one of the concurrent creates has to evict.
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await addCin(cntSid, { seed: i })).rsc, "2001");
+  }
+
+  const byRsc = {};
+  for (let w = 0; w < WAVES; w++) {
+    const results = await Promise.all(
+      Array.from({ length: PER_WAVE }, (_, i) => addCin(cntSid, { wave: w, seq: i }))
+    );
+    for (const r of results) byRsc[r.rsc] = (byRsc[r.rsc] || 0) + 1;
+  }
+  assert.deepEqual(byRsc, { 2001: WAVES * PER_WAVE },
+    `every create should be accepted while eviction runs; got ${JSON.stringify(byRsc)}`);
+
+  // And the container is still consistent afterwards.
+  const cnt = await readCnt(cntSid);
+  const live = await liveCins(cntSid);
+  assert.equal(cnt.cni, live.length, "cni must agree with the store after concurrent eviction");
+  assert.equal(cnt.cbs, live.reduce((a, c) => a + c.cs, 0));
+  assert.ok(cnt.cni <= 5, `cni (${cnt.cni}) must be back within mni`);
+});
+
 test("concurrent creates give each instance a distinct st", async () => {
   // Carried as a todo when this file was written, against a measurement: 20 concurrent
   // creates produced 8 distinct st values, 11 of them sharing 1, while the parent correctly

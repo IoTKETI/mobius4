@@ -69,6 +69,50 @@ machine.
 No API change. Eviction remains synchronous — the response is still only sent
 once the container is back within its limits.
 
+### Performance — eviction is also one statement
+
+Eviction runs on the write path, so with creation itself fixed it became the
+remaining cost: a container held at its limit ran at roughly half the throughput
+of one that was not. It went through `delete_a_res` per evicted instance, which
+retrieves the resource, deletes it, queries for descendants, deletes those, and
+offers the deletion to the notification path — for a `<contentInstance>`, which
+is always a leaf (no resource type accepts one as a parent) and whose eviction
+must not notify anyway (`TS-0004:7.4.7.2.1` step 2 d).
+
+It is now a single statement. What survives is expressed directly: ranking newest
+first, an instance is kept while its position is within `maxNrOfInstances` and the
+running total of sizes up to it is within `maxByteSize`; everything past either
+boundary goes. Nothing is decided in JavaScript.
+
+| concurrency | 8 | 32 | 100 |
+|---|---|---|---|
+| CREATE with eviction active | 808 → **1,774** | 686 → **1,571** | 561 → **1,606** |
+
+The tail matters more than the throughput here: p99 at concurrency 100 was
+3,006 ms and is now 108 ms.
+
+Two defects were introduced and fixed while writing it, both worth recording
+because neither is visible in ordinary use.
+
+**Deadlock.** The first version took its locks in the opposite order from the
+write — cin rows, then lookup rows, then the container, against the write's
+container first. Two requests interleaving on one container deadlock, and
+PostgreSQL fails one: a third of writes returned 4000 under sustained load. The
+statement now locks the container first, which also serialises eviction per
+container so two of them cannot choose overlapping victims. The write already
+serialises on that row, so no contention is added. A regression test covers it —
+a single burst of concurrent creates does not reproduce it, so the test applies
+successive waves.
+
+**Sequential scans.** The second version read the container's instances with
+`WHERE pi = (SELECT ri FROM locked)` and deleted with `ri IN (SELECT ...)`.
+Neither can use an index: the planner does not know the value until the CTE runs,
+and the `IN` form plans as a hash semi-join. On a table of 16,000 rows holding an
+11-row container that cost 14.5 ms per eviction against 0.58 ms, scaling with the
+whole table rather than with the container. The parameter is now passed directly
+and the deletes join with `USING`.
+
+
 ### Tests — `<container>` retention invariants (no behaviour change)
 
 Groundwork for rewriting the `<contentInstance>` write path for throughput. That

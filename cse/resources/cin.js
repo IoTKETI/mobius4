@@ -214,63 +214,97 @@ function build_cin_response(cin_res) {
     return cin_obj;
 }
 
-// [C4] evict oldest CIN(s) when mni or mbs is exceeded — runs after transaction commits
+// Eviction, also in one statement — TS-0004:7.4.7.2.1 step 2 a) and b).
+//
+// The clause is "remove the oldest ... until the conditions are met", so what survives is a
+// contiguous run of the newest instances: the newest maxNrOfInstances of them whose sizes
+// still add up to no more than maxByteSize. That is expressible directly. Ranking newest
+// first, an instance is kept while its position is within mni and the running total of sizes
+// up to and including it is within mbs; everything past either boundary is evicted, in one
+// pass, without deciding anything in JavaScript.
+//
+// Why not go through delete_a_res as before: it retrieves the resource, deletes it, queries
+// for descendants and deletes those, and offers the deletion to the notification path — for
+// a <contentInstance>, which is always a leaf (no resource type accepts one as a parent) and
+// whose eviction must not notify anyway (step 2 d). That is several round trips per evicted
+// instance, and eviction runs on the hot write path.
+//
+// The one thing delete_a_res did that still has to happen here is invalidating the lookup
+// cache, so the evicted sids come back from the statement.
+//
+// The leading SELECT ... FOR UPDATE on the parent is not incidental. Without it this statement
+// takes its locks in the opposite order from the write above — cin rows, then lookup rows,
+// then the container — while the write takes the container first. Two requests interleaving on
+// one container then deadlock, and PostgreSQL fails one of them: measured at a third of writes
+// returning 4000 under sustained load against a container held at its limit. Locking the
+// container first puts both statements in the same order, and has the side effect of
+// serialising evictions per container, so two of them can no longer choose overlapping victims.
+// The write already serialises on that same row, so this adds no contention that was not
+// there.
+//
+// Two details in the SQL are load-bearing and easy to undo by accident:
+//
+//   - `WHERE pi = $1` takes the parameter directly. Writing it as `pi = (SELECT ri FROM
+//     locked)` reads better and costs a sequential scan of the whole cin table — the planner
+//     cannot use idx_cin_pi against a value it only learns from a CTE. Measured on a table of
+//     16,000 rows holding an 11-row container: 14.5 ms against 0.58 ms, and the gap grows with
+//     the table rather than with the container.
+//   - The two DELETEs join `victims` with USING rather than `ri IN (SELECT ...)`. The IN form
+//     plans as a hash semi-join and sequentially scans cin and lookup in full; USING drives the
+//     primary key.
+//
+// The lock is instead tied in through victims, which cannot be evaluated until it is held.
+const EVICT_SQL = `
+WITH locked AS (
+    SELECT ri FROM cnt WHERE ri = $1 FOR UPDATE
+), ranked AS (
+    SELECT ri, cs, sid,
+           row_number() OVER (ORDER BY st DESC, ct DESC, ri DESC) AS pos,
+           sum(cs)      OVER (ORDER BY st DESC, ct DESC, ri DESC
+                              ROWS UNBOUNDED PRECEDING)           AS running_bytes
+      FROM cin
+     WHERE pi = $1
+), victims AS (
+    SELECT ri, cs, sid FROM ranked
+     WHERE (($2::int IS NOT NULL AND pos > $2)
+         OR ($3::int IS NOT NULL AND running_bytes > $3))
+       AND (SELECT count(*) FROM locked) = 1
+), del_cin AS (
+    DELETE FROM cin c    USING victims v WHERE c.ri = v.ri RETURNING c.cs
+), del_lookup AS (
+    DELETE FROM lookup l USING victims v WHERE l.ri = v.ri RETURNING l.ri
+), adj AS (
+    UPDATE cnt
+       SET cni = cni - (SELECT count(*) FROM del_cin),
+           cbs = cbs - COALESCE((SELECT sum(cs) FROM del_cin), 0)
+     WHERE ri = $1
+    RETURNING cni, cbs
+)
+SELECT COALESCE((SELECT array_agg(sid) FROM victims), ARRAY[]::varchar[]) AS sids,
+       (SELECT count(*) FROM del_lookup)                                 AS evicted,
+       a.cni, a.cbs
+  FROM adj a
+`;
+
 async function evict_if_needed(cnt, cin_pi) {
-    const { delete_a_res } = require('../hostingCSE');
+    const { cni, cbs, mni, mbs } = cnt.dataValues || cnt;
 
-    let { cni, cbs, mni, mbs } = cnt.dataValues || cnt;
+    // Nothing to do in the common case, and this keeps the statement off the hot path
+    // entirely for containers that are not at their limit.
+    if ((mni == null || cni <= mni) && (mbs == null || cbs <= mbs)) return;
 
-    const excess_mni = Math.max(0, cni - mni);
-    if (excess_mni === 0 && cbs <= mbs) return;
+    const { rows } = await pool.query(EVICT_SQL, [cin_pi, mni ?? null, mbs ?? null]);
+    const evicted = rows[0];
+    if (!evicted || Number(evicted.evicted) === 0) return;
 
-    // fetch enough oldest CINs to cover both mni and mbs eviction
-    const fetch_limit = Math.max(excess_mni + 10, 50);
-    const candidates = await CIN.findAll({
-        where: { pi: cin_pi },
-        order: [['st', 'ASC']],
-        limit: fetch_limit,
-        attributes: ['ri', 'cs'],
-    });
+    // delete_a_res used to do this. A stale entry would resolve an evicted instance's path to
+    // a resourceID whose row is gone; the answer would still be 4004, but by a route that
+    // depends on the cache rather than on the store.
+    const { invalidateLookupCache } = require('../hostingCSE');
+    for (const sid of evicted.sids || []) invalidateLookupCache(sid);
 
-    const to_delete = [];
-
-    // mni: remove oldest until within limit
-    let i = 0;
-    while (cni > mni && i < candidates.length) {
-        to_delete.push(candidates[i]);
-        cni--;
-        cbs -= candidates[i].cs;
-        i++;
-    }
-
-    // mbs: continue removing oldest until within size limit
-    while (cbs > mbs && i < candidates.length) {
-        to_delete.push(candidates[i]);
-        cbs -= candidates[i].cs;
-        i++;
-    }
-
-    if (to_delete.length === 0) return;
-
-    // delete each evicted CIN (int_cr_req=true skips the per-CIN CNT update in delete_a_res)
-    let cbs_reduction = 0;
-    for (const old_cin of to_delete) {
-        const tmp_resp = {};
-        await delete_a_res(
-            { fr: config.cse.admin, to: old_cin.ri, ri: old_cin.ri, rqi: 'evict_cin', to_ty: 4, int_cr_req: true },
-            tmp_resp
-        );
-        cbs_reduction += old_cin.cs;
-    }
-
-    // update CNT to reflect evicted CINs
-    await CNT.update(
-        {
-            cni: sequelize.literal(`cni - ${to_delete.length}`),
-            cbs: sequelize.literal(`cbs - ${cbs_reduction}`),
-        },
-        { where: { ri: cin_pi } }
-    );
+    logger.debug({ pi: cin_pi, evicted: Number(evicted.evicted), cni: evicted.cni, cbs: evicted.cbs },
+        'evicted oldest <cin>(s)');
 }
 
 async function retrieve_a_cin(req_prim, resp_prim) {
