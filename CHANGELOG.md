@@ -55,6 +55,38 @@ _(Accumulate items here for the next release.)_
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.6.3 (2026-08-05)
+
+### Changed — `db.pool.max` now means what it says, and defaults to 20
+
+`db.pool.max` was read separately by each of the two connection pools this process runs —
+Sequelize's for the models and the raw `pg` pool for the hand-written SQL — so the setting meant
+twice what it said. A third pool in `db/init.js` took `pg`'s default of 10 on top of that and was
+never closed. Measured: one process under load held **53 connections** with `max` set to 30.
+
+That is not a tidiness problem. PostgreSQL's default `max_connections` is 100, so a *second*
+instance already exceeded it: raising `max` to 60 produced `too many clients` and failed a fifth
+of requests in measurement. Any plan to run more than one instance has to start from a number
+that means what it says.
+
+- `db.pool.max` is now the **process-wide total**, split evenly between the two pools
+  (`db/pool-size.js`).
+- `db/init.js` shares the process pool instead of opening a third.
+- The default drops from 30 to **20**. Same process under the same load now holds **19**
+  connections.
+
+**No throughput cost.** At a concurrency of 100, 10 connections per pool reached 3,069 requests
+per second against 3,139 for 30 — 2% for three times the connections. Measured before and after
+the change back to back: 3,253/3,279 → 3,387/3,429 at concurrency 32, and the tail improved
+(p99 22–24 ms → 15 ms).
+
+**If you raised `db.pool.max` in `config/local.json`, halve it** — the old value now buys twice
+the connections it used to.
+
+Not changed, deliberately: `connectionTimeoutMs` (2000) and `statementTimeoutMs` (30000). Both
+are worth revisiting, but no measurement here showed either causing a failure, and changing them
+on that basis would be guessing.
+
 ## v4.6.2 (2026-08-05)
 
 ### Performance — `<contentInstance>` creation is one statement, and `stateTag` no longer races

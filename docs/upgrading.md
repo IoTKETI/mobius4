@@ -21,6 +21,34 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.6.3
+
+### Only if you raised `db.pool.max`: halve it
+
+`db.pool.max` used to be applied by each of the two connection pools this process runs
+separately, so the setting bought twice the connections it named — a process with `max: 30`
+was measured holding 53. It is now the **process-wide total**, split between the pools.
+
+If `config/local.json` overrides `db.pool.max`, the same value now opens **half** as many
+connections as before. Halve your override to keep the behaviour you had, or leave it and use
+the smaller number — the size buys very little either way: 10 connections per pool reached
+3,069 requests per second against 3,139 for 30.
+
+If you never overrode it there is nothing to do. The default moves from 30 to 20, which is
+fewer connections than the old default actually opened.
+
+### Worth knowing before you run more than one instance
+
+The number of instances a PostgreSQL server can carry is bounded by
+`max_connections / db.pool.max`. The default `max_connections` is 100, so at `db.pool.max: 20`
+that is five instances. Before this release the arithmetic was invisible — the setting said 30
+and opened 60, so a second instance already exceeded the default and failed with
+`too many clients`.
+
+Nothing else changes. No DB migration, no configuration is newly required.
+
+---
+
 ## v4.6.1
 
 Nothing to do on the server: no configuration change, no DB migration. One thing

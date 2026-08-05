@@ -91,7 +91,7 @@
     "pw": "",
     "port": 5432,
     "pool": {
-      "max": 30,
+      "max": 20,
       "idleTimeoutMs": 30000,
       "connectionTimeoutMs": 2000,
       "statementTimeoutMs": 30000
