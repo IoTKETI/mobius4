@@ -1,4 +1,3 @@
-const { Pool } = require('pg');
 const config = require('config');
 const moment = require('moment');
 const { generate_ri } = require('../cse/utils');
@@ -22,14 +21,13 @@ function build_insert(table, data) {
     };
 }
 
-// Create PostgreSQL connection pool
-const pool = new Pool({
-    user: config.get('db.user'),
-    host: config.get('db.host'),
-    database: config.get('db.name'),
-    password: config.get('db.pw'),
-    port: config.get('db.port'),
-});
+// Schema creation shares the process's pg pool rather than opening its own.
+//
+// It used to build a third Pool here, with no max, so it took pg's default of 10 and never
+// released them — connections that db.pool.max did not account for and that outlived the
+// startup they were opened for. Sharing db/connection.js keeps the process's total under the
+// one setting that is supposed to govern it.
+const pool = require('./connection');
 
 // Test PostgreSQL connection
 async function testConnection() {

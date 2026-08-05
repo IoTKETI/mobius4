@@ -77,6 +77,23 @@ cp config/local.json.example config/local.json
 | `cse.keep_alive_timeout` | HTTP keep-alive session timeout in seconds |
 
 
+
+> #### Sizing `db.pool.max` for more than one instance
+>
+> `db.pool.max` is the **total for the process**, not a per-pool figure. mobius4 runs two
+> connection pools — Sequelize's for the models and a raw `pg` pool for the hand-written SQL —
+> and the setting is divided between them.
+>
+> This matters when planning capacity. PostgreSQL's default `max_connections` is `100`, so the
+> number of instances you can run is bounded by `max_connections / db.pool.max`. At the default
+> of `20`, that is five instances before the server starts refusing connections with
+> `too many clients`.
+>
+> Raising it buys very little. Measured at a concurrency of 100 on the development machine:
+> 10 connections per pool reached 3,069 requests per second against 3,139 for 30 — a 2%
+> difference for three times the connections. Prefer spending the connection budget on
+> instances rather than on pool size.
+
 > #### ⚠️ `cse.admin` is a privileged identity
 >
 > `cse.admin` names the identity that the admin `<accessControlPolicy>`
@@ -144,6 +161,10 @@ cp config/local.json.example config/local.json
 | `db.name` | Database name (default: `mobius4`) |
 | `db.user` | Database user name |
 | `db.pw` | Database user password |
+| `db.pool.max` | **PostgreSQL connections one mobius4 process may open, in total** (default: `20`). Split evenly between the two pools this process runs — see below |
+| `db.pool.idleTimeoutMs` | How long an unused connection stays open before being closed (default: `30000`) |
+| `db.pool.connectionTimeoutMs` | How long a request waits for a free connection, and for a new one to be established, before failing (default: `2000`) |
+| `db.pool.statementTimeoutMs` | Server-side cap on a single statement (default: `30000`) |
 
 ### Logging
 

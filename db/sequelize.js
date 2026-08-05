@@ -1,5 +1,6 @@
 const { Sequelize } = require('sequelize');
 const config = require('config');
+const { perPoolMax } = require('./pool-size');
 
 const sequelize = new Sequelize(
   config.get('db.name'),
@@ -16,7 +17,8 @@ const sequelize = new Sequelize(
       statement_timeout: config.get('db.pool.statementTimeoutMs'),
     },
     pool: {
-      max: config.get('db.pool.max'),
+      // Half of db.pool.max — see db/pool-size.js. This process also runs a raw pg pool.
+      max: perPoolMax(),
       min: 2,
       acquire: config.get('db.pool.connectionTimeoutMs'),
       idle: config.get('db.pool.idleTimeoutMs'),
