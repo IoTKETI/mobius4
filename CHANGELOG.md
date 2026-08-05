@@ -23,7 +23,31 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
-_(Accumulate items here for the next release.)_
+### Changed — a deployment is told when its logging is costing it throughput
+
+`config/default.json` already ships what a deployment wants (`level: "info"`,
+`console.pretty: false`). The development settings live in
+`config/local.json.example`, which is correct for development — and is also the
+file every deployment is told to copy. Nothing said what carrying them over costs.
+
+Measured 2026-08-05 (concurrency 32, 5 s, RETRIEVE `<container>`, one instance,
+file logging off): pretty printing costs 18% (4,013 → 3,288 rps), `debug` a
+further 7% on top because the HTTP binding logs one line per successful request
+at that level. Together, 4,013 → 2,771 rps, i.e. −31%.
+
+`NODE_ENV` cannot be relied on to catch this. `pretty` is suppressed under
+`NODE_ENV=production`, but `ecosystem.config.js` sets `NODE_ENV=dev` unless PM2
+is started with `--env production` — so the deployment most likely to be
+misconfigured is the one `NODE_ENV` would not catch. `logger.js` therefore emits
+one `warn` at startup naming whichever of the two is active and what it costs.
+Suppressed under `NODE_ENV=test`.
+
+No change to the request path, and no change to any default. `docs/logging-guide.md`
+gains the measured table; `docs/configuration.md` had `logging.file.enabled`
+documented as defaulting to `false` when `default.json` has it `true` — corrected.
+
+**Why PATCH**: documentation, one startup log line, no capability and no behaviour
+change for a correctly configured deployment.
 
 ### Unresolved — pending spec clarification
 

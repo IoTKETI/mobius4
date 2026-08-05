@@ -36,6 +36,7 @@
     "pw": "your_db_password"
   },
 
+  "_comment_logging": "DEVELOPMENT VALUES — do not carry these into a deployment. default.json already ships what a deployment wants (level \"info\", console.pretty false, file logging on); the block below overrides it for a readable terminal, and it is measurably slower. Measured 2026-08-05, concurrency 32, RETRIEVE <container>, one instance: pretty printing costs 18% (4013 -> 3288 rps), level \"debug\" a further 7% because the HTTP binding then logs one line per successful request. Together 4013 -> 2771 rps, i.e. -31%. NODE_ENV does not save you: ecosystem.config.js sets it to 'dev' unless PM2 is started with --env production, so a deployment that skips that flag keeps paying. To deploy, delete this whole logging block.",
   "logging": {
     "level": "debug",
     "console": {

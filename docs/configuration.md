@@ -28,6 +28,11 @@ cp config/local.json.example config/local.json
 }
 ```
 
+> The `logging` block above is for development only. Pretty printing costs about
+> 18% of throughput and `debug` a further 7% (measured — see
+> [Logging guide → Throughput cost](logging-guide.md#throughput-cost)). Drop the
+> block when deploying; mobius4 warns at startup if it is still present.
+
 **Typical `config/local.json` for production deployment:**
 ```json
 {
@@ -172,8 +177,8 @@ cp config/local.json.example config/local.json
 | :--- | :--- |
 | `logging.level` | Log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` (default: `info`) |
 | `logging.console.enabled` | Enable console output (default: `true`) |
-| `logging.console.pretty` | Human-readable output for development (default: `false`; set `true` in `local.json`) |
-| `logging.file.enabled` | Enable file logging (default: `false`) |
+| `logging.console.pretty` | Human-readable output for development (default: `false`). Costs about 18% of throughput and is ignored when `NODE_ENV=production` |
+| `logging.file.enabled` | Enable file logging (default: `true`) |
 | `logging.file.path` | Log file path (default: `logs/mobius4.log`) |
 | `logging.file.rotate` | Rotation frequency: `daily` or `hourly` (default: `daily`) |
 | `logging.file.maxFiles` | Number of rotated files to keep (default: `14`) |

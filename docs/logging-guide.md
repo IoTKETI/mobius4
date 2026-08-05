@@ -91,6 +91,17 @@ In `config/default.json` (override in `config/local.json`):
 
 Start with `npm run dev` to get colorized, human-readable output.
 
+These two settings are the right choice for development and the wrong one for a
+deployment — see [Throughput cost](#throughput-cost) below. mobius4 logs a
+warning at startup whenever either is active, so a deployment that inherited
+them from a copied `local.json` says so in its own log:
+
+```
+WARN [logger.js] logging is configured for development, not for throughput
+    costly: ["console.pretty=true (about -18% throughput)",
+             "level=\"debug\" (about -7%, plus one log line per request)"]
+```
+
 ### Production (config/local.json)
 
 ```json
@@ -109,6 +120,34 @@ Start with `npm run dev` to get colorized, human-readable output.
 ```
 
 JSON output to both stdout and a rotating file. Compatible with log shippers (Filebeat, Fluentd, etc.).
+
+### Throughput cost
+
+The defaults in `config/default.json` (`level: "info"`, `console.pretty: false`)
+are already the ones a deployment wants. The development settings above are not,
+and the difference is large enough to be worth stating.
+
+Measured 2026-08-05 — concurrency 32, 5 s, RETRIEVE `<container>`, one instance,
+file logging off, same machine:
+
+| Setting | Requests/s | vs. default |
+|---|---:|---:|
+| `level: "warn"` | 4,361 | +9% |
+| **`level: "info"`, `pretty: false`** — default | **4,013** | — |
+| `level: "debug"`, `pretty: false` | 3,742 | −7% |
+| `level: "info"`, `pretty: true` | 3,288 | −18% |
+| `level: "debug"`, `pretty: true` | 2,771 | −31% |
+
+Two separate costs. `pino-pretty` runs as a stream in the request path (it has to,
+because the custom prettifiers are functions and functions cannot be passed to a
+transport worker) — that is the −18%. `debug` adds a second cost of its own: the
+HTTP binding logs one line per successful request at `debug` level
+(`customLogLevel` in `bindings/http.js`), so every request gains a log record.
+
+`NODE_ENV` is not a sufficient guard. `pretty` is suppressed when
+`NODE_ENV === 'production'`, but `ecosystem.config.js` sets `NODE_ENV=dev` unless
+PM2 is started with `--env production`, so a deployment that omits that flag keeps
+paying. The startup warning shown above exists for exactly that case.
 
 ---
 

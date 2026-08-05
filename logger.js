@@ -79,6 +79,37 @@ const logger = pino(
     dest
 );
 
+// Two logging choices cost throughput, and neither announces itself.
+//
+// Measured on this codebase 2026-08-05 (concurrency 32, 5s, RETRIEVE <container>, one instance,
+// file logging off): pino-pretty as a stream costs 18% at level "info" (4013 -> 3288 rps) and
+// 26% at "debug"; "debug" itself costs a further 7% on top, because bindings/http.js logs one
+// line per 2xx request at that level (customLogLevel). Both together: 4013 -> 2771, i.e. -31%.
+//
+// config/default.json ships neither — it has level "info" and console.pretty false. They arrive
+// from config/local.json, whose example file recommends them, correctly, for development. The
+// failure mode is that example being copied to a deployment.
+//
+// NODE_ENV cannot be the guard: ecosystem.config.js sets it to 'dev' unless PM2 is started with
+// --env production, so the deployment most likely to be misconfigured is also the one NODE_ENV
+// would not catch. Hence a line at startup instead of a silent condition. Suppressed under
+// NODE_ENV=test only, to keep the test output clean.
+if (process.env.NODE_ENV !== 'test') {
+    const costly = [];
+    if (logConfig.console.enabled && logConfig.console.pretty && process.env.NODE_ENV !== 'production') {
+        costly.push('console.pretty=true (about -18% throughput)');
+    }
+    if (logger.isLevelEnabled('debug')) {
+        costly.push(`level="${logConfig.level}" (about -7%, plus one log line per request)`);
+    }
+    if (costly.length > 0) {
+        logger.child({ module: 'logger.js' }).warn(
+            { costly, source: 'config/local.json' },
+            'logging is configured for development, not for throughput'
+        );
+    }
+}
+
 const PROJECT_ROOT = __dirname;
 
 module.exports = logger;
