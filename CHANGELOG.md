@@ -25,6 +25,65 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 _(Accumulate items here for the next release.)_
 
+### Tests — `<container>` retention invariants (no behaviour change)
+
+Groundwork for rewriting the `<contentInstance>` write path for throughput. That
+rewrite collapses the three statements of `create_a_cin`'s transaction into one,
+which is exactly the code that maintains `currentNrOfInstances`, `currentByteSize`
+and `stateTag` — and none of it had a test. The suite would have stayed green
+through a rewrite that stopped maintaining `cni`, evicted the wrong instance, or
+double-counted `cbs`. Counters fail quietly: nothing errors, the numbers drift.
+
+`test/container-retention.test.js` asserts what `TS-0004:7.4.7.2.1` requires —
+`maxByteSize` refusal (5207, and no partial application), `maxNrOfInstances`
+eviction of the oldest *by identity* rather than by count, `maxByteSize` eviction
+repeating until the condition is met, `cni`/`cbs` agreeing with the stored
+instances, `stateTag` propagation, and exactness under concurrent creates.
+Verified by mutation: dropping the `cbs` update, reversing the eviction order,
+removing eviction, and removing the size check each fail it.
+
+### Fixed — a test that asserted nothing
+
+`sink.expectNone` returned its matches instead of throwing, so
+`await sink.expectNone(...)` without a following assertion passed no matter how
+many notifications arrived. It now throws, reporting what did arrive. Found
+because a newly written eviction test passed with the guard it was protecting
+removed. The four pre-existing call sites were already asserting correctly and
+are unaffected.
+
+### Resolved — eviction notifications (was SQ-001, in part)
+
+`TS-0004:7.4.7.2.1` step 2 d) states that removing the oldest
+`<contentInstance>` **shall not** generate notifications, even where a
+`<subscription>` on the parent `<container>` asks for
+`Delete_of_Direct_Child_Resource`. mobius4 already behaved this way; what was
+missing was the citation. The regression test that carried this as `todo` — on
+the premise that the specification had not settled it — is inverted to assert the
+silence, and gains a mirror case proving an ordinary client-issued DELETE of a
+`<contentInstance>` still notifies, so the guard cannot be widened into "never
+notify for this resource type".
+
+Still open: whether a cascade delete fires `net=4` on descendants' subscriptions.
+That clause does not cover it.
+
+### Known defect — `stateTag` collides under concurrent `<contentInstance>` creates
+
+Measured: 20 concurrent creates on one `<container>` produced 8 distinct
+`stateTag` values, 11 of them sharing 1, while the parent correctly reached 20.
+`cse/resources/cin.js` reads the parent's `st` before opening its transaction and
+writes `cin.st = that + 1`, while the transaction increments the parent
+atomically — so concurrent creates read the same value.
+
+This breaks step 3 ("increment the `stateTag` of the parent and copy the value
+into the `<contentInstance>`") and, more practically, makes eviction order
+ambiguous: `evict_if_needed` picks the oldest with `ORDER BY st ASC`, and ties
+resolve arbitrarily. `cni` and `cbs` are unaffected — they are maintained with
+SQL-side arithmetic.
+
+Left as a `todo` test rather than fixed here: the fix belongs with the write-path
+rewrite, where a single statement can return the new `st` and remove the
+read-before-write entirely.
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
