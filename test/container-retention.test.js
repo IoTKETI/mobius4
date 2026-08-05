@@ -231,6 +231,57 @@ test("creating a <contentInstance> increments the parent's st and copies it into
     "and the instance carries that same value (TS-0004:7.4.7.2.1 step 3)");
 });
 
+// ── the rest of what a <contentInstance> create has to preserve ───────────────
+
+test("optional attributes survive the write path, loc included", async () => {
+  // Nothing else covers a <contentInstance> carrying loc, and it is the one attribute that
+  // does not simply round-trip: it arrives as {typ, crd}, is converted to GeoJSON, and is
+  // stored in a PostGIS geometry column. A write path rewritten to speak SQL directly has to
+  // reproduce that conversion, and would otherwise drop the attribute in silence.
+  const cntSid = await container({ mni: 1000, mbs: 1000000 });
+
+  const res = await create(srv.baseUrl, cntSid, 4, {
+    "m2m:cin": {
+      con: { v: "located" },
+      cnf: "application/json:0",
+      lbl: ["a", "b"],
+      loc: { typ: 1, crd: "[127.05,37.5]" },   // typ 1 is Point
+    },
+  });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+
+  const read = await retrieve(srv.baseUrl, `${cntSid}/${res.body["m2m:cin"].rn}`);
+  assert.equal(read.rsc, "2000");
+  const cin = read.body["m2m:cin"];
+
+  assert.deepEqual(cin.lbl, ["a", "b"]);
+  assert.equal(cin.cnf, "application/json:0");
+  assert.deepEqual(cin.con, { v: "located" });
+  assert.ok(cin.loc, "loc must come back");
+  assert.equal(cin.loc.typ, 1, "the geometry type enum must survive");
+  assert.deepEqual(JSON.parse(cin.loc.crd), [127.05, 37.5], "and so must the coordinates");
+});
+
+test("a <contentInstance> is discoverable by its own resourceID and by its parent", async () => {
+  // The lookup row is written by the same code as the cin row. If a rewrite were to keep one
+  // and lose the other, the resource would exist but be unreachable — the failure mode already
+  // seen once this cycle with leading-underscore names.
+  const cntSid = await container({ mni: 1000, mbs: 1000000 });
+  const res = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: 1 } } });
+  assert.equal(res.rsc, "2001");
+  const { ri, rn } = res.body["m2m:cin"];
+
+  const byRi = await retrieve(srv.baseUrl, ri);
+  assert.equal(byRi.rsc, "2000", "unstructured (resourceID) addressing must work");
+
+  const bySid = await retrieve(srv.baseUrl, `${cntSid}/${rn}`);
+  assert.equal(bySid.rsc, "2000", "and so must the hierarchical path");
+  assert.equal(bySid.body["m2m:cin"].ri, ri);
+
+  const disc = await discover(srv.baseUrl, cntSid, { ty: "4" });
+  assert.ok(urils(disc).includes(`${cntSid}/${rn}`), "and it must be discoverable");
+});
+
 // ── concurrency ───────────────────────────────────────────────────────────────
 
 test("concurrent creates leave cni and cbs exact", async () => {
@@ -253,19 +304,16 @@ test("concurrent creates leave cni and cbs exact", async () => {
   assert.equal(cnt.cbs, live.reduce((a, c) => a + c.cs, 0));
 });
 
-test("concurrent creates give each instance a distinct st", { todo: true }, async () => {
-  // Known defect, measured 2026-08-05: 20 concurrent creates produced 8 distinct st values,
-  // 11 of them sharing st=1, while the parent correctly reached st=20.
+test("concurrent creates give each instance a distinct st", async () => {
+  // Carried as a todo when this file was written, against a measurement: 20 concurrent
+  // creates produced 8 distinct st values, 11 of them sharing 1, while the parent correctly
+  // reached 20. The old write path read the parent's st before opening its transaction and
+  // wrote cin.st = that + 1, so concurrent creates copied the same value into several
+  // instances — breaking TS-0004:7.4.7.2.1 step 3 and, more practically, leaving eviction
+  // order ambiguous, since evict_if_needed picks the oldest with ORDER BY st ASC.
   //
-  // cse/resources/cin.js reads the parent's st before opening its transaction and writes
-  // cin.st = that + 1, while the transaction increments the parent atomically. Concurrent
-  // creates therefore read the same value and copy it into several instances, which breaks
-  // TS-0004:7.4.7.2.1 step 3 and, more practically, makes eviction order ambiguous:
-  // evict_if_needed picks the oldest with ORDER BY st ASC, and ties are resolved arbitrarily.
-  //
-  // Left as todo rather than fixed here because the fix belongs with the write-path rewrite
-  // this file is being written for — collapsing the three statements into one lets the new
-  // st come back from RETURNING, which removes the read-before-write entirely.
+  // The single-statement write dissolved it: st now comes back from the UPDATE that
+  // incremented it, so there is no read to race. Promoted from todo to a real assertion.
   const N = 20;
   const cntSid = await container({ mni: 1000, mbs: 1000000 });
 

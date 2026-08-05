@@ -5,6 +5,7 @@ const enums = require('../../config/enums');
 const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 
 const sequelize = require('../../db/sequelize');
+const pool = require('../../db/connection');
 const Lookup = require('../../models/lookup-model');
 const CNT = require('../../models/cnt-model');
 const CIN = require('../../models/cin-model');
@@ -36,26 +37,9 @@ async function create_a_cin(req_prim, resp_prim) {
         return;
     }
 
-    // [C2] read only fields needed for validation — avoid SELECT *
-    const cnt_res = await CNT.findByPk(cin_pi, {
-        attributes: ['mbs', 'st']
-    });
-    if (!cnt_res) {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': 'parent <cnt> resource not found' };
-        return;
-    }
-
     // compute content size
     const { get_mem_size } = require('../hostingCSE');
     const content_size = get_mem_size(prim_res.con);
-
-    // when mbs < cs, it is not acceptable
-    if (content_size > cnt_res.mbs) {
-        resp_prim.rsc = enums.rsc_str['NOT_ACCEPTABLE'];
-        resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs of the parent container' };
-        return;
-    }
 
     const ri = generate_ri();
     const now = get_cur_time();
@@ -81,51 +65,33 @@ async function create_a_cin(req_prim, resp_prim) {
         acpi: prim_res.acpi || null,
         lbl: prim_res.lbl || null,
         loc: prim_res.loc,
-        st: cnt_res.st + 1,
         cs: content_size,
         con: prim_res.con,
         cnf: prim_res.cnf || null,
     };
 
     try {
-        // [C7] CIN INSERT + CNT UPDATE + Lookup INSERT in a single transaction
-        const new_cnt = await sequelize.transaction(async (t) => {
-            await CIN.create(cin_res, { transaction: t });
+        const written = await write_a_cin(cin_res, req_prim.fr);
 
-            // [C2] atomic CNT UPDATE — avoids separate findByPk + update and prevents race conditions
-            const [, updated] = await CNT.update(
-                {
-                    cni: sequelize.literal('cni + 1'),
-                    cbs: sequelize.literal(`cbs + ${content_size}`),
-                    st:  sequelize.literal('st + 1'),
-                },
-                {
-                    where: { ri: cin_pi },
-                    returning: ['cni', 'cbs', 'mni', 'mbs'],
-                    transaction: t,
-                }
-            );
-
-            await Lookup.create({
-                ri,
-                ty: 4,
-                rn: prim_res.rn,
-                sid: cin_sid,
-                lvl: cin_sid.split('/').length,
-                pi: cin_pi,
-                cr: prim_res.cr === null ? req_prim.fr : null,
-                int_cr: req_prim.fr,
-                et: prim_res.et || et,
-                loc: prim_res.loc
-            }, { transaction: t });
-
-            return updated[0];
-        });
-
-        // eviction after transaction: delete oldest CIN(s) if mni or mbs exceeded
-        if (new_cnt) {
-            await evict_if_needed(new_cnt, cin_pi);
+        // The parent has to exist and has to accept the size. Both are decided by the same
+        // statement, so they are told apart by its result rather than by two earlier reads.
+        if (!written.parent_found) {
+            resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+            resp_prim.pc = { 'm2m:dbg': 'parent <cnt> resource not found' };
+            return;
         }
+        if (!written.stored) {
+            resp_prim.rsc = enums.rsc_str['NOT_ACCEPTABLE'];
+            resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs of the parent container' };
+            return;
+        }
+
+        // TS-0004:7.4.7.2.1 step 3 — the instance carries the parent's stateTag *after* the
+        // increment, which is why it comes back from the statement that performed it.
+        cin_res.st = written.st;
+
+        // eviction after the write: delete oldest CIN(s) if mni or mbs exceeded
+        await evict_if_needed(written, cin_pi);
 
         // [C1] build response directly from cin_res — no extra DB round trip
         resp_prim.pc = build_cin_response(cin_res);
@@ -135,6 +101,93 @@ async function create_a_cin(req_prim, resp_prim) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': err.message };
     }
+}
+
+// One statement for the whole write: the parent's counters, the <contentInstance> row, and
+// its lookup row.
+//
+// It used to be four round trips — a SELECT for the parent's mbs and st, then BEGIN, three
+// statements and COMMIT. Measured at roughly 1,000 creates per second and saturated at a
+// concurrency of 8, because the ceiling was the round trips rather than the work. Folding it
+// into one statement is what this function is for; a single statement is also atomic without
+// an explicit transaction.
+//
+// Three things fall out of the shape rather than being arranged separately:
+//
+//   - The size check is the UPDATE's own WHERE. If the content does not fit, no row is
+//     updated, so the two INSERTs — which select from that UPDATE — insert nothing. A refusal
+//     cannot leave the counters advanced for a row that was never written.
+//   - stateTag comes back from the UPDATE that incremented it, so the instance carries the
+//     parent's post-increment value (TS-0004:7.4.7.2.1 step 3). The previous code read st
+//     before opening its transaction, which let concurrent creates copy the same value into
+//     several instances and left eviction — which orders by st — picking arbitrarily.
+//   - "Parent missing" and "content too large" are distinguished by the parent CTE, since
+//     both otherwise present as an empty UPDATE.
+//
+// The final SELECT uses scalar subqueries so that exactly one row comes back in every case,
+// including the two failures.
+const WRITE_CIN_SQL = `
+WITH parent AS (
+    SELECT ri FROM cnt WHERE ri = $1
+), upd AS (
+    UPDATE cnt
+       SET cni = cni + 1, cbs = cbs + $2, st = st + 1
+     WHERE ri = $1 AND (mbs IS NULL OR $2 <= mbs)
+    RETURNING cni, cbs, mni, mbs, st
+), new_cin AS (
+    INSERT INTO cin (ri, ty, rn, pi, sid, et, ct, lt, cr, acpi, lbl, loc, st, cs, con, cnf)
+    SELECT $3, 4, $4, $1, $5, $6, $7, $7, $8, $9, $10,
+           CASE WHEN $11::text IS NULL THEN NULL
+                ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END,
+           upd.st, $2, $12::jsonb, $13
+      FROM upd
+    RETURNING ri
+), new_lookup AS (
+    INSERT INTO lookup (ri, ty, rn, sid, lvl, pi, cr, int_cr, et, loc)
+    SELECT $3, 4, $4, $5, $14, $1, $8, $15, $6,
+           CASE WHEN $11::text IS NULL THEN NULL
+                ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END
+      FROM upd
+    RETURNING ri
+)
+SELECT (SELECT count(*) FROM parent)      AS parent_found,
+       (SELECT count(*) FROM new_lookup)  AS stored,
+       (SELECT cni FROM upd)              AS cni,
+       (SELECT cbs FROM upd)              AS cbs,
+       (SELECT mni FROM upd)              AS mni,
+       (SELECT mbs FROM upd)              AS mbs,
+       (SELECT st  FROM upd)              AS st
+`;
+
+async function write_a_cin(cin_res, originator) {
+    const { rows } = await pool.query(WRITE_CIN_SQL, [
+        cin_res.pi,                                        // $1
+        cin_res.cs,                                        // $2
+        cin_res.ri,                                        // $3
+        cin_res.rn,                                        // $4
+        cin_res.sid,                                       // $5
+        cin_res.et,                                        // $6
+        cin_res.ct,                                        // $7
+        cin_res.cr,                                        // $8
+        cin_res.acpi,                                      // $9
+        cin_res.lbl,                                       // $10
+        cin_res.loc ? JSON.stringify(cin_res.loc) : null,  // $11
+        JSON.stringify(cin_res.con ?? null),               // $12
+        cin_res.cnf,                                       // $13
+        cin_res.sid.split('/').length,                     // $14
+        originator,                                        // $15
+    ]);
+
+    const r = rows[0];
+    return {
+        parent_found: Number(r.parent_found) > 0,
+        stored: Number(r.stored) > 0,
+        cni: r.cni,
+        cbs: r.cbs,
+        mni: r.mni,
+        mbs: r.mbs,
+        st:  r.st,
+    };
 }
 
 // [C1] build response object from in-memory cin_res (avoids re-reading from DB)

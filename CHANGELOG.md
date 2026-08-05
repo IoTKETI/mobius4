@@ -25,6 +25,50 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 _(Accumulate items here for the next release.)_
 
+### Performance — `<contentInstance>` creation is one statement, and `stateTag` no longer races
+
+The write path was four round trips: a SELECT for the parent's `maxByteSize` and
+`stateTag`, then `BEGIN`, three statements and `COMMIT`. It saturated at a
+concurrency of 8 because the ceiling was the round trips, not the work.
+
+It is now a single statement — the parent's counters, the `<contentInstance>`
+row and its lookup row in one `WITH`. A single statement is atomic without an
+explicit transaction, and three things follow from the shape rather than being
+arranged separately:
+
+- The size check **is** the `UPDATE`'s `WHERE`. When the content does not fit no
+  row is updated, so the two `INSERT`s, which select from that `UPDATE`, insert
+  nothing. A refusal cannot leave the counters advanced for a row that was never
+  written.
+- `stateTag` comes back from the `UPDATE` that incremented it, so the instance
+  carries the parent's post-increment value as `TS-0004:7.4.7.2.1` step 3
+  requires.
+- "Parent missing" and "content too large" are told apart by the statement's own
+  result rather than by an earlier read.
+
+**Fixed as a consequence**: `stateTag` collided under concurrent creates. The old
+path read the parent's `st` before opening its transaction, so concurrent creates
+copied the same value into several instances — measured at 20 concurrent creates
+producing 8 distinct values, 11 of them sharing 1. Besides violating step 3 this
+left eviction picking arbitrarily, since `evict_if_needed` orders by `st`. There
+is no longer a read to race. The regression test that carried this as `todo` is
+promoted to a real assertion.
+
+Measured on the development machine, 5s per run, before → after:
+
+| concurrency | 8 | 32 | 100 |
+|---|---|---|---|
+| CREATE `<cin>` | 1,025 → **2,723** | 903 → **3,366** | 882 → **3,383** |
+| CREATE with eviction active | 808 → **1,457** | 686 → **1,681** | 561 → **1,515** |
+
+The shape matters more than the multiple: throughput used to *fall* as
+concurrency rose past 8. It now climbs to 32 and holds at 100, and p50 at
+concurrency 32 went from 26 ms to 9 ms. Absolute numbers are specific to that
+machine.
+
+No API change. Eviction remains synchronous — the response is still only sent
+once the container is back within its limits.
+
 ### Tests — `<container>` retention invariants (no behaviour change)
 
 Groundwork for rewriting the `<contentInstance>` write path for throughput. That
