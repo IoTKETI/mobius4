@@ -710,14 +710,16 @@ async function discovery_core(req_prim) {
 		.map(ty => {
 			const { model } = TYPE_MODEL[ty];
 			const ty_where = where_per_ty[ty] ? { ...where, ...where_per_ty[ty] } : where;
-			return model.findAll({ where: ty_where, attributes: ['sid', 'ri', 'ty'], limit: fetch_lim })
+			// 'pi' is only needed to key the access-decision memo below, but every one of these
+			// tables is being read anyway, so the extra column is free.
+			return model.findAll({ where: ty_where, attributes: ['sid', 'ri', 'ty', 'pi'], limit: fetch_lim })
 				.then(rows => ({ ty, rows }));
 		});
 
 	const results = await Promise.all(query_tasks);
 
 	for (const { ty, rows } of results) {
-		const mapped = rows.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty }));
+		const mapped = rows.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty, pi: row.pi }));
 		ids_list = ids_list.concat(mapped);
 		ids_list_per_ty[enums.ty_str[ty.toString()]] = mapped;
 	}
@@ -726,11 +728,38 @@ async function discovery_core(req_prim) {
 		// console.log("discovery result without access control: ", ids_list);
 
 		// filter out discovered resource IDs when the originator has 'discovery' privilege
+		//
+		// Most of this loop is the same question asked again. A <contentInstance> has no
+		// accessControlPolicyIDs of its own, so access_decision resolves its parent and decides
+		// about the parent instead (Case B) -- meaning 150 CINs under one <container> produce 150
+		// identical parent decisions, each of them a handful of DB round trips. The container
+		// itself, when it is in the same result set, asks that very same question a 151st time.
+		//
+		// So the decision is memoized on what actually decides it: the parent's ri for a
+		// parent-governed type, the resource's own ri otherwise. Those two keyspaces are the same
+		// keyspace -- resourceIDs are unique across the CSE (TS-0001:9.6.1.3.1) -- which is why
+		// the container and its children collapse onto one entry rather than two.
+		//
+		// This Map lives and dies with one discovery request, and that is the whole reason it is
+		// sound. It is NOT a cache: promoting it to a TTL or to process lifetime would mean an
+		// <accessControlPolicy> whose privileges changed keeps granting the old answer, with no
+		// way to know it happened short of watching every <acp> and every acpi that references
+		// one. Within a single request there is no such exposure, and consistency in fact
+		// improves: today's loop reads policy state at 150 different instants and can put two
+		// different policy states into one response.
+		const decision_memo = new Map();
 		const filtered_ids_list = [];
 		for (const item of ids_list) {
-			const tmp_req = { fr: req_prim.fr, ri: item.ri, to_ty: item.ty, op: 6 };
-			const tmp_resp = {};
-			const access_grant = await access_decision(tmp_req, tmp_resp);
+			const ty_str = enums.ty_str[item.ty.toString()];
+			const decided_by = NORM_RES_WITHOUT_ACPI.includes(ty_str) && item.pi ? item.pi : item.ri;
+
+			let access_grant = decision_memo.get(decided_by);
+			if (access_grant === undefined) {
+				const tmp_req = { fr: req_prim.fr, ri: item.ri, to_ty: item.ty, op: 6 };
+				const tmp_resp = {};
+				access_grant = await access_decision(tmp_req, tmp_resp);
+				decision_memo.set(decided_by, access_grant);
+			}
 
 			if (access_grant) {
 				filtered_ids_list.push(item);
@@ -1168,9 +1197,26 @@ function get_mem_size(obj) {
 	return sizeOf(obj);
 }
 
+// Resource types whose access decision is their parent's. TS-0001:9.6.1.3.2 draws the line at
+// whether the *type* defines accessControlPolicyIDs at all: a type with no such definition is
+// "governed in a different way, for example, the accessControlPolicy associated with the parent
+// may apply". <contentInstance> is the explicit case (TS-0001:9.6.7: "inherits the same access
+// control policies of the parent <container> resource, and does not have its own
+// accessControlPolicyIDs attribute").
+//
+// <schedule> does not belong here: TS-0001:9.6.9 gives it accessControlPolicyIDs 0..1 RW, and a
+// type that has the definition but no value takes the default access policy (custodian, else the
+// creator) rather than the parent's. Left in place for now because moving it narrows access for
+// existing <schedule> resources and mobius4 has no custodian attribute to implement the rest of
+// the rule -- tracked separately rather than changed in passing.
+//
+// <acp> is deliberately absent: it answers from its own pvs (G-2).
+//
+// discovery_core memoizes its per-resource decisions by this list, so a type added here also
+// changes which discovered resources share a decision. Both readers must see the same list.
+const NORM_RES_WITHOUT_ACPI = ["cin", "sch"];
+
 async function access_decision(req_prim, resp_prim) {
-	// resource types in this array will use parent's aceess privileges, so this does not include 'acp'
-	const norm_res_without_acpi = ["cin", "sch"];
 	let access_grant = false;
 	const temp_resp = {};
 
@@ -1258,7 +1304,7 @@ async function access_decision(req_prim, resp_prim) {
 	// Case B.
 	// special handling for normal resources types that do not define 'acpi' attribute (e.g. cin)
 	// use acpi from the parent of the target resource
-	if (norm_res_without_acpi.includes(ty_str)) {
+	if (NORM_RES_WITHOUT_ACPI.includes(ty_str)) {
 		const pi = JSONPath("$..pi", temp_resp)[0];
 		const parent_ret_req = {};
 

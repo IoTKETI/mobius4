@@ -23,6 +23,37 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Performance — discovery decides access once per policy holder, not once per resource
+
+Discovery evaluates every matching resource with `access_decision` before paginating, so the
+cost scales with the number of matches rather than with `lim`. Most of those evaluations were
+the same question: a `<contentInstance>` has no `accessControlPolicyIDs` of its own, so the
+decision is really about its parent (`TS-0001:9.6.7`), and 150 CINs under one `<container>`
+produced 150 identical parent decisions, each several DB round trips. The container itself,
+when it appeared in the same result set, asked that question a 151st time.
+
+`discovery_core` now memoizes each decision by whatever actually decides it — the parent's `ri`
+for a parent-governed type, the resource's own `ri` otherwise. Those are one keyspace, because
+resourceIDs are unique across the CSE (`TS-0001:9.6.1.3.1`), so a container and its content
+instances collapse onto a single entry. The `pi` column needed for the key comes from the
+type queries that were already running.
+
+Measured against a `<container>` carrying an `<accessControlPolicy>` (acop 63), concurrency 16,
+one instance:
+
+| Resources | Before | After |
+|---|---|---|
+| 50 CINs | 52 rps, p50 306 ms | 748 rps, p50 21 ms |
+| 150 CINs | 18 rps, p50 886 ms | 632–671 rps, p50 24 ms |
+
+The map lives and dies with one request, and that is what makes it sound rather than a cache: a
+decision kept past the end of a request would keep granting the old answer after an
+`<accessControlPolicy>`'s privileges changed. Within a request there is no such exposure, and
+consistency improves — the old loop read policy state at 150 separate instants and could put
+two different policy states into one response. Two tests pin this: one that content instances
+under differently-policed parents do not bleed into each other, one that two originators asking
+back to back get their own answers.
+
 ### Fixed — a `<contentInstance>` under a policy-carrying `<container>` was refused to everyone
 
 `TS-0001:9.6.7`: "The `<contentInstance>` resource inherits the same access control policies of

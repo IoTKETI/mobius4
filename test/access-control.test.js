@@ -142,13 +142,15 @@ test("a resource with no acpi still falls back to its creator, and the administr
 // The third test is the one that distinguishes "op is carried" from "op is ignored": it needs
 // the retrieve bit to be honoured and the delete bit to be honoured separately.
 
-// An <accessControlPolicy> under the <CSEBase> granting acor the operations in acop.
-// selfPrivileges name the administrator so that after() can delete it again.
+// An <accessControlPolicy> under the <CSEBase> granting acor the operations in acop. The
+// administrator is named as well, in privileges so that it can set the resources up and in
+// selfPrivileges so that after() can delete the policy again. That extra rule never decides any
+// assertion below: the originator under test is always OTHER_AE or THIRD_AE.
 async function policyGranting(acor, acop) {
   const rn = uniqueRn("acp");
   const res = await create(srv.baseUrl, CSE_BASE, 1, { "m2m:acp": {
     rn,
-    pv:  { acr: [{ acor: [acor], acop }] },
+    pv:  { acr: [{ acor: [acor], acop }, { acor: [ADMIN], acop: 63 }] },
     pvs: { acr: [{ acor: [ADMIN], acop: 63 }] },
   }});
   assert.equal(res.rsc, "2001", `policy setup failed: ${res.raw.slice(0, 200)}`);
@@ -157,18 +159,17 @@ async function policyGranting(acor, acop) {
   return sid;
 }
 
-// A container under the test root carrying acpi, plus one <contentInstance> inside it. Both
-// are created by OTHER_AE, so nothing below can pass through the creator fallback by accident
-// when the originator under test is THIRD_AE.
+// A container under the test root carrying acpi, plus one <contentInstance> inside it, both put
+// there by the administrator. Who created them does not enter into any of these decisions — the
+// container has an acpi, so the creator fallback is not reached at all — and setting them up as
+// the administrator is what lets a policy that names nobody else still be testable.
 async function containerWithOneCin(acpi) {
   const rn = uniqueRn("c");
-  const cnt = await create(srv.baseUrl, parent, 3, { "m2m:cnt": { rn, acpi: [acpi] } },
-    { originator: OTHER_AE });
+  const cnt = await create(srv.baseUrl, parent, 3, { "m2m:cnt": { rn, acpi: [acpi] } });
   assert.equal(cnt.rsc, "2001", `container setup failed: ${cnt.raw.slice(0, 200)}`);
   const cntSid = `${parent}/${rn}`;
 
-  const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: "42" } },
-    { originator: OTHER_AE });
+  const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: "42" } });
   assert.equal(cin.rsc, "2001", `contentInstance setup failed: ${cin.raw.slice(0, 200)}`);
   return { cntSid, cinSid: `${cntSid}/${cin.body["m2m:cin"].rn}` };
 }
@@ -205,6 +206,43 @@ test("the operation is carried into the parent's decision, not assumed", async (
 
   const del = await remove(srv.baseUrl, cinSid, { originator: OTHER_AE });
   assert.equal(del.rsc, "4103", "the delete bit is not set, and the child must feel that too");
+});
+
+// discovery_core memoizes each access decision by whatever actually decides it — the parent's
+// ri for a parent-governed type, the resource's own ri otherwise — so that N content instances
+// under one container cost one decision instead of N. These two tests are what keeps that from
+// becoming "one decision for everybody".
+
+test("discovery keeps <contentInstance> decisions apart when their parents' policies differ", async () => {
+  const open = await policyGranting(OTHER_AE, 35);   // OTHER may discover
+  const shut = await policyGranting(THIRD_AE, 35);   // OTHER may not
+  const a = await containerWithOneCin(open);
+  const b = await containerWithOneCin(shut);
+
+  const res = await discover(srv.baseUrl, parent, {}, { originator: OTHER_AE });
+  assert.equal(res.rsc, "2000");
+  const found = urils(res);
+
+  assert.ok(found.includes(a.cinSid), `the permitted CIN is missing: ${JSON.stringify(found)}`);
+  assert.ok(!found.includes(b.cinSid),
+    `a CIN under a policy that does not name this originator leaked in: ${JSON.stringify(found)}`);
+});
+
+test("the discovery decision memo does not outlive the request", async () => {
+  // Two originators, opposite answers, back to back against the same resources. A memo promoted
+  // to module scope or given a TTL would hand the second request the first one's answers — the
+  // exact failure mode that makes cross-request caching of access decisions unsound.
+  const open = await policyGranting(OTHER_AE, 35);
+  const shut = await policyGranting(THIRD_AE, 35);
+  const a = await containerWithOneCin(open);
+  const b = await containerWithOneCin(shut);
+
+  const asOther = urils(await discover(srv.baseUrl, parent, {}, { originator: OTHER_AE }));
+  const asThird = urils(await discover(srv.baseUrl, parent, {}, { originator: THIRD_AE }));
+
+  assert.ok(asOther.includes(a.cinSid) && !asOther.includes(b.cinSid), "first request");
+  assert.ok(asThird.includes(b.cinSid) && !asThird.includes(a.cinSid),
+    `the second originator got the first one's answers: ${JSON.stringify(asThird)}`);
 });
 
 test("discovery lists a <contentInstance> that its parent's policy makes discoverable", async () => {
