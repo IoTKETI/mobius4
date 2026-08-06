@@ -14,7 +14,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
-const { create, remove, retrieve, discover, urils, createRoot, uniqueRn, CSE_BASE, ADMIN } =
+const { create, remove, retrieve, update, discover, urils, createRoot, uniqueRn, CSE_BASE, ADMIN } =
   require("./helpers/onem2m");
 
 const ADMIN_ACP = `${CSE_BASE}/cb_admin_acp`;      // config.cb.admin_acp.rn
@@ -226,6 +226,53 @@ test("discovery keeps <contentInstance> decisions apart when their parents' poli
   assert.ok(found.includes(a.cinSid), `the permitted CIN is missing: ${JSON.stringify(found)}`);
   assert.ok(!found.includes(b.cinSid),
     `a CIN under a policy that does not name this originator leaked in: ${JSON.stringify(found)}`);
+});
+
+test("a change to an <accessControlPolicy>'s privileges takes effect on the very next request", async () => {
+  // The question the memo has to answer for: nothing in access control keys off acpi, so an
+  // <acp> whose pv changes must be felt immediately. Two originators disagreeing (the test
+  // below) only shows the memo is per-originator; this one changes the policy itself, which is
+  // the case a cache with any lifetime beyond one request would get wrong.
+  //
+  // It covers both paths that read privileges: the <container> decides for itself (Case D) and
+  // the <contentInstance> inherits that decision through its parent (Case B). Discovery is
+  // included because that is where the memo lives.
+  const rn = uniqueRn("acp");
+  const made = await create(srv.baseUrl, CSE_BASE, 1, { "m2m:acp": {
+    rn,
+    pv:  { acr: [{ acor: [OTHER_AE], acop: 35 }, { acor: [ADMIN], acop: 63 }] },
+    pvs: { acr: [{ acor: [ADMIN], acop: 63 }] },
+  }});
+  assert.equal(made.rsc, "2001", `policy setup failed: ${made.raw.slice(0, 200)}`);
+  const acpSid = `${CSE_BASE}/${rn}`;
+  acpsToClean.push(acpSid);
+
+  const { cntSid, cinSid } = await containerWithOneCin(acpSid);
+
+  // granted
+  assert.equal((await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE })).rsc, "2000");
+  assert.ok(urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE })).includes(cinSid));
+
+  // revoke: OTHER_AE drops out of privileges entirely
+  const revoked = await update(srv.baseUrl, acpSid, { "m2m:acp": {
+    pv: { acr: [{ acor: [ADMIN], acop: 63 }] },
+  }});
+  assert.equal(revoked.rsc, "2004", `pv update failed: ${revoked.raw.slice(0, 200)}`);
+
+  assert.equal((await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE })).rsc, "4103",
+    "the revocation must be felt on the next request, with no cache to wait out");
+  assert.ok(!urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE })).includes(cinSid),
+    "a revoked originator must stop seeing the CIN in discovery immediately");
+
+  // and back again, so this cannot pass by way of something that only ever denies
+  const restored = await update(srv.baseUrl, acpSid, { "m2m:acp": {
+    pv: { acr: [{ acor: [OTHER_AE], acop: 35 }, { acor: [ADMIN], acop: 63 }] },
+  }});
+  assert.equal(restored.rsc, "2004", `pv restore failed: ${restored.raw.slice(0, 200)}`);
+
+  assert.equal((await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE })).rsc, "2000",
+    "a re-grant must be felt just as immediately");
+  assert.ok(urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE })).includes(cinSid));
 });
 
 test("the discovery decision memo does not outlive the request", async () => {

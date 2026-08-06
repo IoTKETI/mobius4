@@ -50,9 +50,17 @@ The map lives and dies with one request, and that is what makes it sound rather 
 decision kept past the end of a request would keep granting the old answer after an
 `<accessControlPolicy>`'s privileges changed. Within a request there is no such exposure, and
 consistency improves — the old loop read policy state at 150 separate instants and could put
-two different policy states into one response. Two tests pin this: one that content instances
-under differently-policed parents do not bleed into each other, one that two originators asking
-back to back get their own answers.
+two different policy states into one response.
+
+Three tests pin this down. One asserts that content instances under differently-policed parents
+do not bleed into each other; one that two originators asking back to back get their own
+answers; and one that revoking an originator from an `<accessControlPolicy>`'s `pv`, and
+granting it back, is felt on the very next request — through the `<container>` that names the
+policy and through the `<contentInstance>` that inherits it, in retrieval and in discovery
+alike. That third one is the case that matters for anything cache-shaped in this path: it fails
+both when the memo is promoted to process lifetime and when the `<acp>`'s `pv` itself is cached
+on the assumption that an unchanged `acpi` means unchanged privileges. Nothing in mobius4
+caches a privilege or a decision beyond a single request, and this is what keeps it that way.
 
 ### Fixed — a `<contentInstance>` under a policy-carrying `<container>` was refused to everyone
 
