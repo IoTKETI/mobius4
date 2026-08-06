@@ -43,8 +43,8 @@ one instance:
 
 | Resources | Before | After |
 |---|---|---|
-| 50 CINs | 52 rps, p50 306 ms | 748 rps, p50 21 ms |
-| 150 CINs | 18 rps, p50 886 ms | 632–671 rps, p50 24 ms |
+| 50 CINs | 52 rps, p50 306 ms | 681 rps, p50 23 ms |
+| 150 CINs | 18 rps, p50 886 ms | 614 rps, p50 25 ms |
 
 The map lives and dies with one request, and that is what makes it sound rather than a cache: a
 decision kept past the end of a request would keep granting the old answer after an
@@ -52,15 +52,27 @@ decision kept past the end of a request would keep granting the old answer after
 consistency improves — the old loop read policy state at 150 separate instants and could put
 two different policy states into one response.
 
-Three tests pin this down. One asserts that content instances under differently-policed parents
+Sharing a decision also skips the read that produced it, and that read was quietly doing a
+second job: `access_decision` answers false for a resource that is no longer there. With
+decisions shared, only the first resource behind each key is confirmed to exist, so one deleted
+between the type queries and the filter could stay in the URI list. The race is not new — a
+resource deleted just after its check was always going to be listed, and a discovery result is
+a snapshot either way — but the window went from per-resource to per-request, so the check is
+put back explicitly: one indexed query over the survivors, asked of the lookup table because
+discovery returns addresses and a row with no lookup entry has none. It answers with a count
+first, since the answer is almost always "all of them". Measured cost of the guard: 652 → 614
+rps at 150 CINs, about 6%.
+
+Four tests pin this down. One asserts that content instances under differently-policed parents
 do not bleed into each other; one that two originators asking back to back get their own
 answers; and one that revoking an originator from an `<accessControlPolicy>`'s `pv`, and
 granting it back, is felt on the very next request — through the `<container>` that names the
 policy and through the `<contentInstance>` that inherits it, in retrieval and in discovery
-alike. That third one is the case that matters for anything cache-shaped in this path: it fails
-both when the memo is promoted to process lifetime and when the `<acp>`'s `pv` itself is cached
-on the assumption that an unchanged `acpi` means unchanged privileges. Nothing in mobius4
-caches a privilege or a decision beyond a single request, and this is what keeps it that way.
+alike; and one that a resource whose lookup row is gone is not returned. That third one is the
+case that matters for anything cache-shaped in this path: it fails both when the memo is
+promoted to process lifetime and when the `<acp>`'s `pv` itself is cached on the assumption that
+an unchanged `acpi` means unchanged privileges. Nothing in mobius4 caches a privilege or a
+decision beyond a single request, and this is what keeps it that way.
 
 ### Fixed — a `<contentInstance>` under a policy-carrying `<container>` was refused to everyone
 

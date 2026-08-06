@@ -653,6 +653,26 @@ async function delete_resources(res_list) {
 	}
 }
 
+// Keeps only the entries that still have a lookup row, in one query. Used by discovery_core
+// after the access filter -- see the comment there for why the check is needed at all.
+async function drop_vanished(items) {
+	const ris = items.map(i => i.ri);
+
+	// Raw query rather than Lookup.findAll: building a model instance per row costs more than
+	// the query does, and nothing here needs a model. The count comes back first because the
+	// answer is almost always "all of them" -- one integer instead of a row per survivor -- and
+	// only a short count makes it worth asking which ones. ri is the primary key, so both are
+	// index lookups and neither can return duplicates.
+	const counted = await pool.query(
+		'SELECT count(*)::int AS n FROM lookup WHERE ri = ANY($1::text[])', [ris]);
+	if (counted.rows[0].n === ris.length) return items;
+
+	const alive = await pool.query(
+		'SELECT ri FROM lookup WHERE ri = ANY($1::text[])', [ris]);
+	const alive_ri = new Set(alive.rows.map(r => r.ri));
+	return items.filter(i => alive_ri.has(i.ri));
+}
+
 async function discovery_core(req_prim) {
 	let ids_list = []; // this is for discovery response
 	let ids_list_per_ty = {}; // this is for rcn = 4 or rcn = 8 response
@@ -765,7 +785,24 @@ async function discovery_core(req_prim) {
 				filtered_ids_list.push(item);
 			}
 		}
-		ids_list = filtered_ids_list;
+
+		// Reusing a decision also skips the read that produced it, and that read was doing a
+		// second job: access_decision answers false for a resource that is no longer there
+		// (its NOT_FOUND guard), so the old loop confirmed every single resource still existed.
+		// With decisions shared, only the first resource behind each key is confirmed, and one
+		// deleted between the type queries above and this point could stay in the URI list.
+		//
+		// That race is not new -- a resource deleted just after its check was always going to be
+		// listed, and a discovery result is a snapshot either way -- but the window went from
+		// per-resource to per-request, so the existence check is put back explicitly. One indexed
+		// query over the survivors replaces the N reads it stands in for.
+		//
+		// Existence is asked of the lookup table rather than of each type table, because that is
+		// what the answer is about: discovery returns addresses (m2m:uril), and a row with no
+		// lookup entry has no address to return. It also costs one query instead of up to 15.
+		ids_list = filtered_ids_list.length > 0
+			? await drop_vanished(filtered_ids_list)
+			: filtered_ids_list;
 	}
 
 	// apply offset and limit to aggregated result

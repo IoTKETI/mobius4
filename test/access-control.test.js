@@ -13,7 +13,9 @@
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { startServer } = require("./helpers/server");
+const { Client } = require("pg");
+const config = require("config");
+const { startServer, TEST_DB } = require("./helpers/server");
 const { create, remove, retrieve, update, discover, urils, createRoot, uniqueRn, CSE_BASE, ADMIN } =
   require("./helpers/onem2m");
 
@@ -24,7 +26,7 @@ const DEFAULT_ACP = `${CSE_BASE}/cb_default_acp`;  // config.cb.default_acp.rn
 const OTHER_AE = "CAE-other";
 const THIRD_AE = "CAE-third";
 
-let srv, root, parent;
+let srv, root, parent, db;
 
 // <accessControlPolicy> resources created by the CIN tests below. They have to live under the
 // <CSEBase> (a container is not a permitted parent for ty=1), so the test root's own deletion
@@ -44,6 +46,12 @@ before(async () => {
   const res = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn, acpi: [DEFAULT_ACP] } });
   assert.equal(res.rsc, "2001", `setup failed: ${res.raw.slice(0, 200)}`);
   parent = `${root.sid}/${rn}`;
+
+  // The test database by name; config/default.json points at the development one and it is
+  // test/helpers/server.js that overrides db.name for the child process.
+  const { user, pw, host, port } = config.get("db");
+  db = new Client({ user, password: pw, host, port, database: TEST_DB });
+  await db.connect();
 });
 
 // One after() for the whole file: node:test runs them in registration order, so a second one
@@ -52,6 +60,7 @@ after(async () => {
   for (const sid of acpsToClean) await remove(srv.baseUrl, sid);
   if (root) await root.remove();
   if (srv) await srv.stop();
+  if (db) await db.end();
 });
 
 // A container created by someone other than the administrator, carrying the policies named.
@@ -273,6 +282,31 @@ test("a change to an <accessControlPolicy>'s privileges takes effect on the very
   assert.equal((await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE })).rsc, "2000",
     "a re-grant must be felt just as immediately");
   assert.ok(urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE })).includes(cinSid));
+});
+
+test("discovery does not list a resource that no longer has an address", async () => {
+  // Sharing a decision also skips the read that produced it, and that read used to double as an
+  // existence check — access_decision answers false for a resource that is gone. With decisions
+  // shared, only the first resource behind each key gets read, so discovery_core checks the
+  // survivors against the lookup table before returning them.
+  //
+  // The race that motivates it (a resource deleted between the type queries and the filter)
+  // cannot be staged from outside, so the test produces the state it leaves behind instead:
+  // the lookup row removed while the type row remains. That is also the state left by the
+  // pre-existing DELETE_MODEL gap in the code map, and either way the answer is the same — a
+  // row with no lookup entry has no address, and discovery returns addresses.
+  const acp = await policyGranting(OTHER_AE, 35);
+  const { cntSid, cinSid } = await containerWithOneCin(acp);
+
+  const before = urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE }));
+  assert.ok(before.includes(cinSid), `setup: the CIN should start out discoverable: ${JSON.stringify(before)}`);
+
+  const del = await db.query("DELETE FROM lookup WHERE sid = $1", [cinSid]);
+  assert.equal(del.rowCount, 1, "the lookup row for the CIN should have been there to delete");
+
+  const after = urils(await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE }));
+  assert.ok(!after.includes(cinSid),
+    `a resource with no lookup row must not be returned: ${JSON.stringify(after)}`);
 });
 
 test("the discovery decision memo does not outlive the request", async () => {
