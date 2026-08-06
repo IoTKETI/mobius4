@@ -38,5 +38,8 @@
     "oneM2M"
   ],
   "author": "KETI",
-  "license": "BSD-3-Clause"
+  "license": "BSD-3-Clause",
+  "overrides": {
+    "brace-expansion": "1.1.16"
+  }
 }
