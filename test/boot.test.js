@@ -5,7 +5,9 @@ const { startServer } = require("./helpers/server");
 const { ADMIN } = require("./helpers/onem2m");
 
 let srv;
-before(async () => { srv = await startServer(); });
+// logLevel "info" so that the startup lines the third test reads are actually emitted;
+// the helper drops to "error" by default.
+before(async () => { srv = await startServer({ logLevel: "info" }); });
 after(async () => { if (srv) await srv.stop(); });
 
 test("the test-only instance starts up and serves the <CSEBase>", async () => {
@@ -25,9 +27,17 @@ test("uses a dynamic port, not the development port (7599)", () => {
   assert.ok(srv.port > 1024);
 });
 
-test("the HTTPS listener also uses a dynamic port, clear of the development port (7580)", () => {
-  // bindings/http.js has no enabled flag for the https listener, so it always comes up —
-  // without isolation it collides with 7580, which the development instance holds.
-  assert.notEqual(srv.httpsPort, 7580);
-  assert.notEqual(srv.httpsPort, srv.port);
+test("no HTTPS listener comes up unless it is asked for", () => {
+  // Until v4.7.0 the https listener started unconditionally, reading certs/ca.crt, certs/wdc.key
+  // and certs/wdc.crt at module load with no condition and no try/catch. A checkout without
+  // those files could not start at all, which is what stopped `docker compose up` from being a
+  // single command, and these tests had to allocate a second free port purely to keep the
+  // listener off 7580.
+  //
+  // This asserts the new default from the outside: the startup log says the listener is off.
+  // The suite as a whole is the wider proof — CI has no certs/ directory, so every one of these
+  // tests only runs because starting no longer depends on one.
+  assert.match(srv.diagnostics(), /HTTPS is disabled/,
+    "the default configuration should start without TLS material");
+  assert.doesNotMatch(srv.diagnostics(), /HTTPS server listening/);
 });

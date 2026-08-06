@@ -121,6 +121,8 @@ Full configuration reference: [docs/configuration.md](docs/configuration.md)
 
 For deployment details (health check, metrics endpoint, PM2, resource browser): [docs/operations.md](docs/operations.md)
 
+To serve the HTTP binding over TLS — obtaining a certificate, installing it, replacing it before it expires, and what it does and does not prove about the client: **[docs/tls.md](docs/tls.md)**
+
 
 # Contact
 

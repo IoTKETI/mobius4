@@ -141,7 +141,15 @@ cp config/local.json.example config/local.json
 | :--- | :--- |
 | `request.max_body_size` | Max HTTP request body size (default: `1mb`) |
 | `http.port` | HTTP server port (default: `7599`) |
+| `https.enabled` | Start the TLS listener (default: `false`). When `true` and a file below cannot be read, Mobius4 stops rather than serving plain HTTP |
 | `https.port` | HTTPS server port (default: `7580`) |
+| `https.key` | PEM private key for the server certificate (default: `certs/server.key`) |
+| `https.cert` | PEM server certificate (default: `certs/server.crt`) |
+| `https.chain` | PEM intermediate CA bundle, when the issuer provides one (default: empty) |
+
+> Obtaining, installing and replacing a certificate — including what TLS here does and
+> does not prove about the client — is **[docs/tls.md](tls.md)**. TLS material is read
+> once at startup, so a renewed certificate needs a restart.
 
 ### MQTT
 

@@ -23,6 +23,50 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Changed — HTTPS is optional, serves server authentication only, and no longer ships certificates
+
+Three changes to one listener, and all three can surprise an existing deployment. The upgrade
+steps are in [docs/upgrading.md](docs/upgrading.md#v470); the procedures for obtaining,
+installing and replacing a certificate are a new document, [docs/tls.md](docs/tls.md), which
+`docs/configuration.md`, `config/local.json.example` and the README now point at.
+
+**It is optional, and off by default.** `bindings/http.js` read `certs/ca.crt`, `certs/wdc.key`
+and `certs/wdc.crt` at module load, with no condition and no error handling. There was no
+setting to turn the listener off, and a checkout without those three files could not start at
+all — which is what stopped `docker compose up` from being a single command. `https.enabled`
+now governs it, and `https.key`, `https.cert` and `https.chain` say where the material lives
+instead of three hardcoded paths.
+
+Enabling it with an unreadable file **stops startup** rather than falling back to plain HTTP,
+and the message names the setting rather than only the file. A silent downgrade is not
+detectable from the client side either.
+
+**Client certificates are no longer requested.** The listener set `requestCert: true` and
+`rejectUnauthorized: true`, which reads as mutual TLS. Nothing ever looked at the certificate
+that arrived: there is no `getPeerCertificate` call anywhere in this source, so the identity
+proved by the handshake was never compared against the `X-M2M-Origin` the request claimed. Any
+holder of a certificate signed by the configured CA could act as any originator, the
+administrator included. The requirement is gone rather than left standing, because an assurance
+that is not delivered is worse than a missing one — deployments plan around it. Clients that
+present certificates still work; the certificate is ignored. Binding a certificate to the
+originator it may claim is worth doing and is tracked as future work.
+
+**The certificates in this repository were deleted**, `certs/wdc.key` and `certs/SAE1.key`
+among them, and `certs/` is now gitignored. They remain in the git history, so both private keys
+must be treated as disclosed: any deployment still serving `wdc.crt` should issue a new
+certificate, and any client still holding `SAE1.key` should be reissued.
+
+Two tests cover the listener: that enabling it serves oneM2M over TLS to a client presenting no
+certificate, and that enabling it with an unreadable key exits with a message naming
+`https.key`. The certificate is generated during the run rather than committed — committing one
+is how this repository acquired a private key in its history. A third, in `test/boot.test.js`,
+asserts the default: no listener, and the startup log saying so. The suite as a whole is the
+wider proof, since CI has no `certs/` directory and every test now starts without one.
+
+**Why MINOR**: no oneM2M capability changes, but an existing deployment that wants TLS must set
+`https.enabled` and supply its own paths, and one that relied on the client-certificate
+requirement loses it.
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M

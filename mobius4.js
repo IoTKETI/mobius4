@@ -76,7 +76,10 @@ async function shutdown(signal) {
         // 2. Close the HTTP servers — refuse new connections + drop keep-alive connections at once
         const { server, https_server } = require('./bindings/http');
         await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
-        await new Promise((resolve) => { https_server.close(resolve); https_server.closeAllConnections(); });
+        // https_server is undefined when https.enabled is false, which is the default.
+        if (https_server) {
+            await new Promise((resolve) => { https_server.close(resolve); https_server.closeAllConnections(); });
+        }
 
         // 3. Disconnect MQTT
         await mqtt.disconnect();

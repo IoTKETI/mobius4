@@ -111,6 +111,8 @@ jobs:
           #   eviction notification rule + 3 for the CIN write-path rewrite: loc round-trip,
           #   addressing by both forms, and concurrent creates against a container at its limit
           # + 1 for name-conflict RSC under concurrency
+          # + 2 for the optional HTTPS listener: TLS served to a client with no certificate,
+          #   and a clear refusal when https.enabled is true but the key is unreadable
           # + 9 for <contentInstance> access control through the parent policy: 4 for the
           #   decision itself (reachability, refusal, the operation being carried, discovery)
           #   and 5 for the discovery decision memo -- parents with different policies not
@@ -119,7 +121,7 @@ jobs:
           #   and a resource with no lookup row not being returned).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=111
+          BASELINE=113
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."

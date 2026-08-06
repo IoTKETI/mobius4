@@ -69,7 +69,11 @@
     "port": 7599
   },
   "https": {
-    "port": 7580
+    "enabled": false,
+    "port": 7580,
+    "key": "certs/server.key",
+    "cert": "certs/server.crt",
+    "chain": ""
   },
   "mqtt": {
     "enabled": true,

@@ -2,6 +2,11 @@ node_modules/
 CLAUDE.md
 .claude/
 config/local*.json
+
+# TLS material. The private key for the HTTPS listener lives here and must never be committed;
+# earlier versions of this repository did commit one, so treat any key from before v4.7.0 as
+# disclosed and issue a new one (see docs/tls.md).
+certs/
 logs/
 docs/superpowers/
 .DS_Store
