@@ -32,11 +32,16 @@ decision is really about its parent (`TS-0001:9.6.7`), and 150 CINs under one `<
 produced 150 identical parent decisions, each several DB round trips. The container itself,
 when it appeared in the same result set, asked that question a 151st time.
 
-`discovery_core` now memoizes each decision by whatever actually decides it — the parent's `ri`
-for a parent-governed type, the resource's own `ri` otherwise. Those are one keyspace, because
-resourceIDs are unique across the CSE (`TS-0001:9.6.1.3.1`), so a container and its content
-instances collapse onto a single entry. The `pi` column needed for the key comes from the
-type queries that were already running.
+`discovery_core` now memoizes each decision under the three things a decision is a function of:
+the originator, the operation, and what decides for the resource. Only the third varies inside
+one discovery — the originator and DISCOVERY are fixed for the whole request — but all three are
+named, so the key is not correct merely for as long as that stays true.
+
+The third component is not the resource itself: it is the parent's `ri` for a parent-governed
+type and the resource's own `ri` otherwise. Those are one keyspace, because resourceIDs are
+unique across the CSE (`TS-0001:9.6.1.3.1`), so a container and its content instances collapse
+onto a single entry. The `pi` column the key needs comes from the type queries that were already
+running.
 
 Measured against a `<container>` carrying an `<accessControlPolicy>` (acop 63), concurrency 16,
 one instance:
@@ -63,9 +68,10 @@ discovery returns addresses and a row with no lookup entry has none. It answers 
 first, since the answer is almost always "all of them". Measured cost of the guard: 652 → 614
 rps at 150 CINs, about 6%.
 
-Four tests pin this down. One asserts that content instances under differently-policed parents
-do not bleed into each other; one that two originators asking back to back get their own
-answers; and one that revoking an originator from an `<accessControlPolicy>`'s `pv`, and
+Five tests pin this down. One asserts that content instances under differently-policed parents
+do not bleed into each other; one that two originators get mirror-image answers over the same
+containers, which is what the originator in the key is for; one that two originators asking back
+to back get their own answers; and one that revoking an originator from an `<accessControlPolicy>`'s `pv`, and
 granting it back, is felt on the very next request — through the `<container>` that names the
 policy and through the `<contentInstance>` that inherits it, in retrieval and in discovery
 alike; and one that a resource whose lookup row is gone is not returned. That third one is the

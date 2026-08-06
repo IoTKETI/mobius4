@@ -653,6 +653,14 @@ async function delete_resources(res_list) {
 	}
 }
 
+// The operation discovery evaluates each of its results under. access_decision switches on this
+// number; the matching accessControlOperations bit is 32 = DISCOVERY (TS-0004:6.3.4.2.29).
+const DISCOVERY_OP = 6;
+
+// Separates the components of a decision-memo key. A control character, so it cannot occur in an
+// originator (an AE-ID or CSE-ID) or in a resourceID, and two different tuples cannot collide.
+const MEMO_KEY_SEP = String.fromCharCode(0);
+
 // Keeps only the entries that still have a lookup row, in one query. Used by discovery_core
 // after the access filter -- see the comment there for why the check is needed at all.
 async function drop_vanished(items) {
@@ -760,25 +768,38 @@ async function discovery_core(req_prim) {
 		// keyspace -- resourceIDs are unique across the CSE (TS-0001:9.6.1.3.1) -- which is why
 		// the container and its children collapse onto one entry rather than two.
 		//
-		// This Map lives and dies with one discovery request, and that is the whole reason it is
-		// sound. It is NOT a cache: promoting it to a TTL or to process lifetime would mean an
-		// <accessControlPolicy> whose privileges changed keeps granting the old answer, with no
-		// way to know it happened short of watching every <acp> and every acpi that references
-		// one. Within a single request there is no such exposure, and consistency in fact
-		// improves: today's loop reads policy state at 150 different instants and can put two
+		// An access decision is a function of three things: who is asking, which operation, and what
+		// is being asked about. The key names all three. Only the third varies in this loop -- the
+		// originator and DISCOVERY are fixed for the whole request -- but naming them costs a string
+		// concat and stops the key from being correct only by accident. Someone reusing this loop for
+		// more than one originator would otherwise get silently wrong answers.
+		//
+		// The third component is not the resource itself: it is whatever decides for it, which is the
+		// parent's ri for a parent-governed type and the resource's own ri otherwise. Those are one
+		// keyspace, since resourceIDs are unique across the CSE (TS-0001:9.6.1.3.1), so a container
+		// and its content instances collapse onto a single entry rather than two.
+		//
+		// The Map lives and dies with one discovery request, and that is what makes it sound. It is
+		// deliberately not a cache with a lifetime: promoting it to a TTL or to process scope would
+		// mean an <accessControlPolicy> whose privileges changed keeps granting the old answer, with
+		// no way to notice short of watching every <acp> and every acpi referencing one -- and the
+		// full tuple in the key would not save it, because the privileges themselves are not part of
+		// the tuple. Within a single request there is no such exposure, and consistency in fact
+		// improves: the loop used to read policy state at 150 different instants and could put two
 		// different policy states into one response.
 		const decision_memo = new Map();
 		const filtered_ids_list = [];
 		for (const item of ids_list) {
 			const ty_str = enums.ty_str[item.ty.toString()];
 			const decided_by = NORM_RES_WITHOUT_ACPI.includes(ty_str) && item.pi ? item.pi : item.ri;
+			const memo_key = `${req_prim.fr}${MEMO_KEY_SEP}${DISCOVERY_OP}${MEMO_KEY_SEP}${decided_by}`;
 
-			let access_grant = decision_memo.get(decided_by);
+			let access_grant = decision_memo.get(memo_key);
 			if (access_grant === undefined) {
-				const tmp_req = { fr: req_prim.fr, ri: item.ri, to_ty: item.ty, op: 6 };
+				const tmp_req = { fr: req_prim.fr, ri: item.ri, to_ty: item.ty, op: DISCOVERY_OP };
 				const tmp_resp = {};
 				access_grant = await access_decision(tmp_req, tmp_resp);
-				decision_memo.set(decided_by, access_grant);
+				decision_memo.set(memo_key, access_grant);
 			}
 
 			if (access_grant) {

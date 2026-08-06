@@ -309,6 +309,31 @@ test("discovery does not list a resource that no longer has an address", async (
     `a resource with no lookup row must not be returned: ${JSON.stringify(after)}`);
 });
 
+test("the memo key names the originator, not only the target", async () => {
+  // An access decision is a function of (originator, operation, target). The memo key carries
+  // all three even though only the target varies inside one discovery loop, and this is the
+  // test that says so: two originators with opposite rights over the *same* two containers,
+  // asked in the same process, must each get their own answer.
+  //
+  // It differs from "does not outlive the request" below in what it would catch. That one fails
+  // if the Map is shared across requests. This one fails if the Map is per-request but keyed on
+  // the target alone and the loop is ever reused for more than one originator — the shape a
+  // future change could introduce without touching anything that looks like a cache.
+  const forOther = await policyGranting(OTHER_AE, 35);
+  const forThird = await policyGranting(THIRD_AE, 35);
+  const a = await containerWithOneCin(forOther);
+  const b = await containerWithOneCin(forThird);
+
+  const other = urils(await discover(srv.baseUrl, parent, {}, { originator: OTHER_AE }));
+  const third = urils(await discover(srv.baseUrl, parent, {}, { originator: THIRD_AE }));
+
+  // Same two containers, two originators, mirror-image answers.
+  assert.ok(other.includes(a.cinSid) && !other.includes(b.cinSid),
+    `OTHER_AE should see only its own: ${JSON.stringify(other)}`);
+  assert.ok(third.includes(b.cinSid) && !third.includes(a.cinSid),
+    `THIRD_AE should see only its own: ${JSON.stringify(third)}`);
+});
+
 test("the discovery decision memo does not outlive the request", async () => {
   // Two originators, opposite answers, back to back against the same resources. A memo promoted
   // to module scope or given a TTL would hand the second request the first one's answers — the
