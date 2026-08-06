@@ -21,6 +21,66 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.7.0
+
+### Required if you serve HTTPS: turn it on and say where the files are
+
+The listener is now optional and **off by default**. Before this release it started
+unconditionally, reading `certs/ca.crt`, `certs/wdc.key` and `certs/wdc.crt` at module
+load with no condition and no error handling — a deployment without those files could
+not start, and one with them had no way to turn TLS off.
+
+After upgrading, a deployment that was serving HTTPS serves **only plain HTTP** until
+`config/local.json` says otherwise:
+
+```jsonc
+{
+  "https": {
+    "enabled": true,
+    "port": 7580,
+    "key":  "certs/server.key",     // your own key
+    "cert": "certs/server.crt",     // your own certificate
+    "chain": ""                     // intermediate CA bundle, if your issuer gives one
+  }
+}
+```
+
+The old hardcoded paths are gone, so the values above are the defaults rather than
+what you had. Point them wherever your files are; absolute paths work.
+
+If `https.enabled` is true and a file cannot be read, Mobius4 **stops** instead of
+serving plain HTTP, naming the setting that pointed at it. Check the startup log after
+the first restart — `HTTPS server listening` or `HTTPS is disabled`.
+
+Full procedure for obtaining, installing and replacing a certificate: [docs/tls.md](tls.md).
+
+### Your clients are no longer asked for a certificate
+
+The listener used to set `requestCert: true` and `rejectUnauthorized: true`. Clients
+that present a certificate still connect — it is simply ignored now.
+
+If you were treating that requirement as authentication, it was not: nothing in
+Mobius4 ever read the certificate, so the handshake proved possession of a CA-signed
+certificate and never that the holder was the originator named in `X-M2M-Origin`. Any
+client with a certificate from your CA could act as any AE, including the
+administrator. Replace that assumption with network-level access control (firewall,
+reverse proxy, or mTLS terminated in front of Mobius4) together with oneM2M
+`<accessControlPolicy>` resources.
+
+### Treat the keys this repository used to ship as disclosed
+
+`certs/` is deleted from the source tree and gitignored. Two private keys were in it —
+`certs/wdc.key` (the server key) and `certs/SAE1.key` (a sample client key) — and both
+remain in the git history, where anyone with a clone can read them.
+
+- If your deployment serves `wdc.crt`, issue a new certificate and key ([docs/tls.md](tls.md)).
+- If any client still holds `SAE1.key` and it is used for anything, reissue it.
+
+Nothing else changes. No DB migration, no configuration is newly required for a
+deployment that does not use HTTPS.
+
+---
+
 ## v4.6.5
 
 Nothing is required. No DB migration, no new configuration. Two things are worth

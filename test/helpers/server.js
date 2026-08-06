@@ -50,14 +50,12 @@ function killChild(child) {
 
 async function startServer({ mqttPort, logLevel = "error" } = {}) {
   const port = await freePort();
-  // bindings/http.js has no enabled flag for the https listener and unconditionally listens
-  // on config.https.port (7580 by default). The development instance already holds that
-  // port, so we pick a separate free port here too and avoid the clash (HTTPS itself is not
-  // what these tests set out to verify).
-  const httpsPort = await freePort();
+  // The https listener is off unless https.enabled is set (v4.7.0), so nothing here has to
+  // reserve a port for it. Before that it came up unconditionally on config.https.port, and
+  // these tests had to allocate a second free port purely to stay clear of the development
+  // instance sitting on 7580. The listener has its own file, test/https.test.js.
   const overrides = {
     http: { port },
-    https: { port: httpsPort },
     db: { name: TEST_DB },
     // Required since v4.6.0: config/default.json no longer ships an admin identity and
     // config/validate.js refuses to start without one. The value is deliberately not "SM" --
@@ -131,7 +129,7 @@ async function startServer({ mqttPort, logLevel = "error" } = {}) {
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  return { child, port, httpsPort, baseUrl, diagnostics: () => diag, stop: () => stopServer(child) };
+  return { child, port, baseUrl, diagnostics: () => diag, stop: () => stopServer(child) };
 }
 
 function stopServer(child) {

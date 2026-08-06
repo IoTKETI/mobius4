@@ -115,21 +115,54 @@ if (server) {
 }
 
 // https server setup
-const ca = fs.readFileSync("certs/ca.crt");
-const https_options = {
-  key: fs.readFileSync("certs/wdc.key"),
-  cert: fs.readFileSync("certs/wdc.crt"),
-  ca: [ca],
-  requestCert: true,
-  rejectUnauthorized: true,
-};
+//
+// Optional, and off by default. It used to be neither: the three readFileSync calls below ran at
+// module load with no condition and no try/catch, so a deployment without certs/ could not start
+// at all -- which is also why `docker compose up` could not work until this became a flag.
+//
+// Server authentication only. Until v4.7.0 this listener also set requestCert and
+// rejectUnauthorized, which reads as mutual TLS, but nothing ever looked at the certificate the
+// client presented: there is no getPeerCertificate call anywhere in this source, so the identity
+// proved by the handshake was never compared with the X-M2M-Origin the request claimed. Any
+// holder of a certificate signed by the configured CA could act as any originator, including the
+// administrator. Keeping the mechanism would have meant keeping an assurance that was not there.
+// Binding a certificate to an originator is worth doing (TS-0003 territory) and is tracked
+// separately; this listener now claims only what it delivers, which is an encrypted channel and
+// an authenticated server.
+let https_server;
 
-const https_server = https
-  .createServer(https_options, app)
-  .listen(config.https.port);
+if (config.https.enabled) {
+  // Turning HTTPS on and leaving the files unreadable is a misconfiguration, not a reason to
+  // serve plain HTTP silently: whoever set the flag meant to encrypt. So it stops, the way
+  // config/validate.js stops for a missing cse.admin, and says which path failed -- an ENOENT
+  // stack trace names the file but not the setting that asked for it.
+  const read = (label, key) => {
+    const path = config.get(key);
+    try {
+      return fs.readFileSync(path);
+    } catch (err) {
+      logger.fatal({ err, path, setting: key },
+        `https.enabled is true but the ${label} at "${path}" could not be read. Point ${key} ` +
+        'at a readable file or set https.enabled to false. See docs/tls.md.');
+      process.exit(1);
+    }
+  };
 
-if (https_server) {
+  const https_options = {
+    key: read('private key', 'https.key'),
+    cert: read('certificate', 'https.cert'),
+  };
+
+  // A chain file is optional: it is needed when the server certificate is issued by an
+  // intermediate CA that clients may not already hold.
+  if (config.has('https.chain') && config.get('https.chain')) {
+    https_options.ca = read('certificate chain', 'https.chain');
+  }
+
+  https_server = https.createServer(https_options, app).listen(config.https.port);
   logger.info({ port: config.https.port }, 'HTTPS server listening');
+} else {
+  logger.info('HTTPS is disabled (https.enabled is false); serving HTTP only');
 }
 
 // Prometheus metrics endpoint (always registered to prevent /metrics falling through to oneM2M handler)

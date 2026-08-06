@@ -121,6 +121,8 @@ Full configuration reference: [docs/configuration.md](docs/configuration.md)
 
 For deployment details (health check, metrics endpoint, PM2, resource browser): [docs/operations.md](docs/operations.md)
 
+To serve the HTTP binding over TLS — obtaining a certificate, installing it, replacing it before it expires, and what it does and does not prove about the client: **[docs/tls.md](docs/tls.md)**
+
 
 # Contact
 
@@ -150,3 +152,4 @@ upgrade problems. A clean install needs none of it.
 | 4.6.3 | 2026-08-05 | `db.pool.max` is the connection total for the process rather than a figure each of two pools applied separately; default 30 → 20. Unblocks running more than one instance | [only if you overrode `db.pool.max`](docs/upgrading.md#v463) |
 | 4.6.4 | 2026-08-05 | A name that is already taken is refused with 4105 rather than 4000, including under concurrency; MQTT subscription and expired-resource cleanup run on one instance | — |
 | 4.6.5 | 2026-08-06 | **Conformance**: a `<contentInstance>` under a `<container>` carrying an `<accessControlPolicy>` was refused to every originator, the administrator included, and was missing from discovery results — it now follows the parent's policy as `TS-0001:9.6.7` requires. Discovery decides access once per policy holder instead of once per resource: 18 → 614 requests per second over 150 content instances. Development logging settings carried into a deployment now say so at startup | [workarounds you can undo](docs/upgrading.md#v465) |
+| 4.7.0 | 2026-08-07 | **HTTPS is now optional and off by default** — an existing deployment must set `https.enabled` and point `https.key`/`https.cert` at its own files to keep serving TLS. The listener no longer asks clients for certificates: it set `requestCert` but nothing ever read the certificate, so it never proved the originator. The certificates this repository shipped are deleted and must be treated as disclosed | [**Set `https.enabled` to keep TLS; reissue the shipped keys**](docs/upgrading.md#v470) |

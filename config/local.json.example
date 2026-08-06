@@ -25,6 +25,15 @@
     "port": 7599
   },
 
+  "_comment_https": "Optional, off by default. Set enabled true and point key/cert at your own PEM files to serve the HTTP binding over TLS as well; chain is for an intermediate CA bundle when your issuer provides one. Mobius4 refuses to start if enabled is true and a file cannot be read, rather than quietly serving plain HTTP. Never commit the private key. Full procedure -- obtaining a certificate, replacing it, and what TLS here does not prove about the client -- is in docs/tls.md.",
+  "https": {
+    "enabled": false,
+    "port": 7580,
+    "key": "certs/server.key",
+    "cert": "certs/server.crt",
+    "chain": ""
+  },
+
   "mqtt": {
     "enabled": true,
     "ip": "localhost",
