@@ -110,10 +110,16 @@ jobs:
           # + 9 for <container> retention invariants + 1 for the client-DELETE mirror of the
           #   eviction notification rule + 3 for the CIN write-path rewrite: loc round-trip,
           #   addressing by both forms, and concurrent creates against a container at its limit
-          # + 1 for name-conflict RSC under concurrency).
+          # + 1 for name-conflict RSC under concurrency
+          # + 9 for <contentInstance> access control through the parent policy: 4 for the
+          #   decision itself (reachability, refusal, the operation being carried, discovery)
+          #   and 5 for the discovery decision memo -- parents with different policies not
+          #   bleeding into each other, two originators getting mirror-image answers, an <acp>
+          #   pv change taking effect on the next request, the memo not outliving the request,
+          #   and a resource with no lookup row not being returned).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=102
+          BASELINE=111
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."

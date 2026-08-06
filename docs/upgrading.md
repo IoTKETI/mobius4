@@ -21,6 +21,49 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.6.5
+
+Nothing is required. No DB migration, no new configuration. Two things are worth
+checking, both of them workarounds you may now be able to undo.
+
+### If you worked around `<contentInstance>` resources being unreadable
+
+Before this release, a `<contentInstance>` under a `<container>` carrying an
+`accessControlPolicyIDs` was refused to **every** originator, the administrator
+included, and was dropped from discovery results without an error. Deployments
+hit by this tended to work around it in one of two ways:
+
+- **Leaving `acpi` off the containers** that hold content instances, so that the
+  creator-comparison fallback governed them instead. Those containers can now
+  carry a policy. Note the consequence of adding one: a resource with a policy is
+  no longer governed by its creator, so whoever was reaching it through the
+  creator fallback needs to be named in the policy.
+- **Setting `cse.allow_discovery_for_any: true`**, which skips access control for
+  discovery entirely. See below — there is now a better reason to turn it off.
+
+If you were not affected — no `<accessControlPolicy>` on the containers holding
+content instances — nothing about your deployment changes.
+
+### If you set `cse.allow_discovery_for_any: true` for speed
+
+That setting exists to skip discovery's access-control filter, and skipping it
+used to be worth a great deal: the filter evaluated every matching resource
+one at a time, which measured 18 requests per second over a container holding
+150 content instances.
+
+The filter now decides once per policy holder rather than once per resource, and
+the same measurement is 614 requests per second. The speed argument for turning
+access control off has largely gone.
+
+The setting is a conformance decision, not a performance knob: `TS-0004:6.3.4.2.29`
+defines 32 = DISCOVERY, so with it on, the DISCOVERY bit in every
+`<accessControlPolicy>` stops meaning anything and any originator can enumerate
+the resource tree (identifiers and structure — `fu=1` returns `m2m:uril` only, so
+content is still protected). If it is on purely for throughput, this is the
+release to turn it back off. The default is, and remains, `false`.
+
+---
+
 ## v4.6.3
 
 ### Only if you raised `db.pool.max`: halve it
