@@ -23,6 +23,29 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Fixed — a `<contentInstance>` under a policy-carrying `<container>` was refused to everyone
+
+`TS-0001:9.6.7`: "The `<contentInstance>` resource inherits the same access control policies of
+the parent `<container>` resource, and does not have its own `accessControlPolicyIDs`
+attribute." `access_decision` implements this by resolving the parent and asking the same
+question about it (Case B) — but the request it built for that recursive call carried
+`to_ty`, `ri` and `fr` and not `op`. Both `access_decision_acpi` and
+`access_decision_privileges` switch on the operation to pick the acop bit, so an undefined
+operation matched no case and every rule evaluated to false.
+
+The effect, reproduced against a container carrying a policy that grants acop 63: RETRIEVE of
+the container 2000, RETRIEVE of a `<contentInstance>` inside it **4103 — for the administrator
+as well**, and discovery answering 2000 with the CIN silently absent from the URI list. Any
+deployment that puts an `<accessControlPolicy>` on its containers could not read back its own
+content instances.
+
+It stayed hidden because a container created *without* an `acpi` takes the creator-comparison
+branch instead, and `fr` was carried — so the ordinary shape, an AE reading back what it wrote
+into its own container, kept working. No test covered a `<contentInstance>` under a policy at
+all; four now do, three of which fail without the fix. The one that distinguishes "the
+operation is carried" from "the operation is ignored" uses acop 35 (create + retrieve +
+discovery, no delete bit) and asserts retrieve 2000 and delete 4103 on the same CIN.
+
 ### Changed — a deployment is told when its logging is costing it throughput
 
 `config/default.json` already ships what a deployment wants (`level: "info"`,

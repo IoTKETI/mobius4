@@ -14,7 +14,8 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
-const { create, remove, retrieve, createRoot, uniqueRn, CSE_BASE, ADMIN } = require("./helpers/onem2m");
+const { create, remove, retrieve, discover, urils, createRoot, uniqueRn, CSE_BASE, ADMIN } =
+  require("./helpers/onem2m");
 
 const ADMIN_ACP = `${CSE_BASE}/cb_admin_acp`;      // config.cb.admin_acp.rn
 const DEFAULT_ACP = `${CSE_BASE}/cb_default_acp`;  // config.cb.default_acp.rn
@@ -24,6 +25,11 @@ const OTHER_AE = "CAE-other";
 const THIRD_AE = "CAE-third";
 
 let srv, root, parent;
+
+// <accessControlPolicy> resources created by the CIN tests below. They have to live under the
+// <CSEBase> (a container is not a permitted parent for ty=1), so the test root's own deletion
+// does not reach them and the after() hook clears them explicitly.
+const acpsToClean = [];
 
 before(async () => {
   srv = await startServer();
@@ -40,7 +46,10 @@ before(async () => {
   parent = `${root.sid}/${rn}`;
 });
 
+// One after() for the whole file: node:test runs them in registration order, so a second one
+// declared further down would fire after srv.stop() and every request in it would fail.
 after(async () => {
+  for (const sid of acpsToClean) await remove(srv.baseUrl, sid);
   if (root) await root.remove();
   if (srv) await srv.stop();
 });
@@ -108,4 +117,105 @@ test("a resource with no acpi still falls back to its creator, and the administr
   // ...and the creator itself is still able to delete it, which is what the fallback protects.
   const byCreator = await remove(srv.baseUrl, sid, { originator: OTHER_AE });
   assert.equal(byCreator.rsc, "2002");
+});
+
+// ---------------------------------------------------------------------------
+// A <contentInstance> is governed by its parent's policy.
+//
+// TS-0001:9.6.7: "The <contentInstance> resource inherits the same access control policies of
+// the parent <container> resource, and does not have its own accessControlPolicyIDs
+// attribute." TS-0001:9.6.1.3.2 states the general rule these fall under — a resource type
+// with no accessControlPolicyIDs definition is governed some other way, the parent's policy
+// being the named example.
+//
+// access_decision implements this as Case B: resolve the parent, then ask the same question
+// about the parent instead. Until 2026-08-06 the request it built for that recursive call
+// carried to_ty, ri and fr but *not* op, and access_decision_acpi switches on the operation —
+// so an undefined op matched no case and every rule evaluated to false. The effect was that a
+// <contentInstance> under a container carrying any acpi was unreachable by everyone, the
+// administrator included, and vanished from discovery results.
+//
+// It stayed hidden because a container created without an acpi falls through to the creator
+// comparison instead, and fr *was* carried — so the common shape (an AE reading back what it
+// wrote into its own container) worked, and every test here predates the CIN cases below.
+//
+// The third test is the one that distinguishes "op is carried" from "op is ignored": it needs
+// the retrieve bit to be honoured and the delete bit to be honoured separately.
+
+// An <accessControlPolicy> under the <CSEBase> granting acor the operations in acop.
+// selfPrivileges name the administrator so that after() can delete it again.
+async function policyGranting(acor, acop) {
+  const rn = uniqueRn("acp");
+  const res = await create(srv.baseUrl, CSE_BASE, 1, { "m2m:acp": {
+    rn,
+    pv:  { acr: [{ acor: [acor], acop }] },
+    pvs: { acr: [{ acor: [ADMIN], acop: 63 }] },
+  }});
+  assert.equal(res.rsc, "2001", `policy setup failed: ${res.raw.slice(0, 200)}`);
+  const sid = `${CSE_BASE}/${rn}`;
+  acpsToClean.push(sid);
+  return sid;
+}
+
+// A container under the test root carrying acpi, plus one <contentInstance> inside it. Both
+// are created by OTHER_AE, so nothing below can pass through the creator fallback by accident
+// when the originator under test is THIRD_AE.
+async function containerWithOneCin(acpi) {
+  const rn = uniqueRn("c");
+  const cnt = await create(srv.baseUrl, parent, 3, { "m2m:cnt": { rn, acpi: [acpi] } },
+    { originator: OTHER_AE });
+  assert.equal(cnt.rsc, "2001", `container setup failed: ${cnt.raw.slice(0, 200)}`);
+  const cntSid = `${parent}/${rn}`;
+
+  const cin = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: "42" } },
+    { originator: OTHER_AE });
+  assert.equal(cin.rsc, "2001", `contentInstance setup failed: ${cin.raw.slice(0, 200)}`);
+  return { cntSid, cinSid: `${cntSid}/${cin.body["m2m:cin"].rn}` };
+}
+
+test("a <contentInstance> is reachable through the policy on its parent <container>", async () => {
+  const acp = await policyGranting(OTHER_AE, 63);
+  const { cinSid } = await containerWithOneCin(acp);
+
+  const res = await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE });
+  assert.equal(res.rsc, "2000",
+    "the parent's policy grants retrieve, and the child inherits it (TS-0001:9.6.7)");
+  assert.equal(res.body["m2m:cin"].con, "42");
+});
+
+test("the parent's policy decides for the child: an originator it does not name is refused", async () => {
+  // The mirror of the test above. Carrying the operation into the parent's decision must not
+  // turn into granting the operation.
+  const acp = await policyGranting(OTHER_AE, 63);
+  const { cinSid } = await containerWithOneCin(acp);
+
+  const res = await retrieve(srv.baseUrl, cinSid, { originator: THIRD_AE });
+  assert.equal(res.rsc, "4103", "THIRD_AE is named by neither the policy nor the creator");
+});
+
+test("the operation is carried into the parent's decision, not assumed", async () => {
+  // acop 35 = create(1) + retrieve(2) + discovery(32), no delete bit. If the recursive call
+  // dropped op, both of these would be 4103; if it substituted a permissive one, both would
+  // succeed. Only carrying the real operation gives 2000 then 4103.
+  const acp = await policyGranting(OTHER_AE, 35);
+  const { cinSid } = await containerWithOneCin(acp);
+
+  const read = await retrieve(srv.baseUrl, cinSid, { originator: OTHER_AE });
+  assert.equal(read.rsc, "2000", "the retrieve bit is set");
+
+  const del = await remove(srv.baseUrl, cinSid, { originator: OTHER_AE });
+  assert.equal(del.rsc, "4103", "the delete bit is not set, and the child must feel that too");
+});
+
+test("discovery lists a <contentInstance> that its parent's policy makes discoverable", async () => {
+  // Discovery evaluates each discovered resource with op=6, so it travels the same Case B
+  // path. With op dropped, the CIN was silently filtered out of every result — a 2000 with an
+  // empty list, which is far quieter than a 4103.
+  const acp = await policyGranting(OTHER_AE, 35);
+  const { cntSid, cinSid } = await containerWithOneCin(acp);
+
+  const res = await discover(srv.baseUrl, cntSid, {}, { originator: OTHER_AE });
+  assert.equal(res.rsc, "2000");
+  assert.ok(urils(res).includes(cinSid),
+    `the CIN should appear in the discovery result: ${JSON.stringify(urils(res))}`);
 });

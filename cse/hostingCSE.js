@@ -1284,9 +1284,22 @@ async function access_decision(req_prim, resp_prim) {
 			return false;
 		}
 		// access decision for the parent of the target resource
+		//
+		// 'op' is load-bearing. access_decision_acpi and access_decision_privileges both switch
+		// on the operation to pick the acop bit, so an undefined op matches no case and every
+		// rule evaluates to false. Until 2026-08-06 this object carried to_ty, ri and fr only,
+		// which meant a <contentInstance> under a container carrying any acpi was refused to
+		// everyone -- the administrator included -- and dropped from every discovery result,
+		// contradicting TS-0001:9.6.7 ("inherits the same access control policies of the parent
+		// <container>"). It went unnoticed because a container created without an acpi falls
+		// through to the creator comparison instead, and fr was carried, so the ordinary shape
+		// of an AE reading back its own writes kept working.
+		// Pinned by test/access-control.test.js "the operation is carried into the parent's
+		// decision, not assumed".
 		const parent_access_req = {
 			to_ty: parent_ret_req.to_ty,
 			ri: parent_ret_req.ri,
+			op: req_prim.op,
 			fr: req_prim.fr
 		}
 		const parent_access = await access_decision(parent_access_req, temp_resp);
