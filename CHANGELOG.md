@@ -23,16 +23,63 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Unresolved — pending spec clarification
+
+- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
+  standardization discussion, **indirect deletion** (a deletion that happens as a
+  side effect of deleting a different resource) is treated as not firing a
+  notification. Whether eviction falls under this needs confirmation — what
+  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
+  confirmation; the regression test is left as `todo` to keep the question visible.
+  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
+  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
+  must be stripped from the notification).
+- **Three questions about the MQTT binding, left open rather than guessed at
+  when its test coverage was designed.** Confirmed from TS-0010's topic-format
+  rule only, not from a full reading of the spec:
+  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
+    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
+    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
+    like an unimplemented feature, but confirming that needs the full spec
+    text, not a test suite.
+  - **QoS levels and retained-message handling** — not yet checked against
+    the spec at all.
+  - **MQTT-specific error mapping** — likewise unchecked.
+
+  Encoding a guess about any of these as a passing test would be worse than
+  leaving them untested: it would cement whatever mobius4 does today as
+  though it were the standard, the same reasoning that keeps the `net=4`
+  eviction question above as a `todo` rather than a silent choice.
+  `test/mqtt.test.js` (added below) is now the harness that a future pass
+  through the full TS-0010 text can use to settle them.
+
+
 ## v4.10.0 (2026-08-07)
 
-### ⚠️ Breaking for clients that parse `rcn=4` / `rcn=8` responses
+### ⚠️ Breaking: `rcn=4` and `rcn=8` change shape *and* pagination
 
-**The shape of child-resource results changed.** Descendants are now nested inside their own
-parent instead of being grouped by type at the top level. A client that read the old flat shape
-will find no children — it gets an empty result, not an error.
+**This is a MINOR release that breaks clients.** The version number is not the warning — this
+entry is. Major versions are reserved because `mobius4` is the product name and moving to 5 would
+collide with it, so a compatibility break has to be announced here instead. Read this before
+upgrading.
 
-The version is a MINOR because this project's release numbers are tied to the product name
-(`mobius4`), not because the change is compatible. Read this entry before upgrading.
+Two independent changes, either of which can break you:
+
+1. **Response shape.** Descendants are now nested inside their own parent instead of being
+   grouped by type at the top level.
+2. **Pagination.** `lim` now cuts on subtree boundaries and `ofst` counts direct children, not
+   resources.
+
+**Both fail silently.** A client reading the old flat shape finds no children — an empty result,
+not an error. A client computing its own `ofst` skips or repeats subtrees without any error
+either.
+
+**Are you affected?** Grep your client for `rcn=4`, `rcn=8`, `rcn%3D4`, or a plain
+`resultContent` of 4 or 8. If nothing matches, this release is safe for you.
+
+**Not affected**: plain retrieves (`rcn=1` or no `rcn`), discovery (`fu=1`, which still returns a
+flat `m2m:uril`), notifications, and CREATE/UPDATE/DELETE responses. `rcn=5`/`rcn=6` are new in
+this release, so nothing can depend on their old behaviour — they did not work at all before.
 
 Before (what 4.9.0 and earlier returned):
 
@@ -62,7 +109,19 @@ construction. `TS-0004:8.4.3` EXAMPLE 3 shows the resulting JSON and states it p
 subscription resource (sub1) appears nested inside its parent (container2)". `TS-0001:8.1.2`
 requires "proper nesting representation" and parents listed before children.
 
-### Also changed in `rcn=4` / `rcn=8`
+### ⚠️ Pagination of `rcn=4` / `rcn=8` also changed
+
+**Existing requests can start returning fewer children than before — including none.** The
+default `lim` is `cse.discovery_limit` (200). Where a request previously got 200 resources cut at
+an arbitrary point, it now gets only the whole subtrees that fit within 200.
+
+The case to watch for is **one direct child whose own subtree is larger than `lim`**. Retrieving
+an `<AE>` that has a `<container>` holding 250 `<contentInstance>`s makes that container's subtree
+251 resources, so it does not fit and is dropped whole — the `<AE>` comes back with **no children
+at all**, where 4.9.0 returned 200 of them. Raising `ofst` does not help; only a larger `lim`
+does. Nothing in the response body says why, so check the server log for the warning described
+below. (Retrieving that `<container>` directly is fine: its 250 children are 250 separate
+subtrees of one resource each, and 200 of them fit.)
 
 - **`lim` now cuts on subtree boundaries.** `TS-0001:8.1.2` requires that if a direct child and
   all its descendants cannot be included, the direct child is left out entirely — half a subtree
@@ -104,36 +163,6 @@ the top of this entry instead of being signalled by the number.
   "The offset shall start at 1" while the Filter Criteria table describes it as a count of
   resources to skip over. Mobius4 treats it as 0-based, matching the table. Pending clarification.
 
-
-### Unresolved — pending spec clarification
-
-- **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M
-  standardization discussion, **indirect deletion** (a deletion that happens as a
-  side effect of deleting a different resource) is treated as not firing a
-  notification. Whether eviction falls under this needs confirmation — what
-  triggers eviction is CREATE, not DELETE. Excluded conservatively pending
-  confirmation; the regression test is left as `todo` to keep the question visible.
-  If the answer is "yes, notify," removing the `int_cr_req !== true` condition in
-  `cse/noti.js` turns it on (at which point `int_cr`, carried by `retrieve_a_cin`,
-  must be stripped from the notification).
-- **Three questions about the MQTT binding, left open rather than guessed at
-  when its test coverage was designed.** Confirmed from TS-0010's topic-format
-  rule only, not from a full reading of the spec:
-  - **Registration topics.** TS-0010 defines `/oneM2M/reg_req/...` for an AE
-    that does not yet have an ID. `bindings/mqtt.js` subscribes only to
-    `/oneM2M/req/+/<cse_id>/json` and `self/datasetManager/#` — this looks
-    like an unimplemented feature, but confirming that needs the full spec
-    text, not a test suite.
-  - **QoS levels and retained-message handling** — not yet checked against
-    the spec at all.
-  - **MQTT-specific error mapping** — likewise unchecked.
-
-  Encoding a guess about any of these as a passing test would be worse than
-  leaving them untested: it would cement whatever mobius4 does today as
-  though it were the standard, the same reasoning that keeps the `net=4`
-  eviction question above as a `todo` rather than a silent choice.
-  `test/mqtt.test.js` (added below) is now the harness that a future pass
-  through the full TS-0010 text can use to settle them.
 
 ## v4.9.0 (2026-08-07)
 
