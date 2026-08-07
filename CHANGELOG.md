@@ -53,6 +53,60 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
   `test/mqtt.test.js` (added below) is now the harness that a future pass
   through the full TS-0010 text can use to settle them.
 
+## v4.8.0 (2026-08-07)
+
+### Added — `docker compose up` brings up the CSE, its database and a broker
+
+Until now the only way to run Mobius4 was from source, which meant installing Node,
+PostgreSQL 17, PostGIS 3.6 and an MQTT broker, and creating the database by hand. A `Dockerfile`
+and a `docker-compose.yml` now do it in one command: `cp .env.example .env && docker compose up
+-d`. One image is built here; PostgreSQL and Mosquitto are official images. Full documentation is
+[docs/docker.md](docs/docker.md), and the README and `docs/installation.md` point at it.
+
+The database and the broker are not published to the host — they are reachable on the compose
+network and nowhere else. The image runs as an unprivileged user, contains no `certs/` and no
+`config/local*.json`, and carries no test or documentation files. TLS material, when HTTPS is
+enabled, is mounted read-only rather than built in.
+
+**Configuration comes from `.env`**, which `docker/entrypoint.js` assembles into `NODE_CONFIG`.
+Assembling it there rather than in the compose file means values do not have to survive two
+levels of YAML quoting, and anything left out of `.env` keeps what `config/default.json` says
+instead of being overridden with an empty string. `security.helmet` and `security.rateLimit`
+default to on here and off in `config/default.json`, whose defaults suit a developer running
+from source.
+
+**The administrator identity is the part with a trap in it.** `config/validate.js` will not start
+without `cse.admin`, so a container has to have one — but it also has to be the *same* one every
+time, because `db/init.js` writes it into the admin `<accessControlPolicy>` on first boot and
+skips the step forever after. An identity regenerated on the second start would leave the
+deployment locked out of its own CSE: the policy would still name the first one and every
+administrator request would come back 4103, with nothing in the log to say why.
+
+So `CSE_ADMIN` in `.env` is the intended path, and when it is blank the container generates an
+identity once, prints it, and keeps it on a Docker volume that later starts read back. Generated
+identities are 12 characters beginning with `S` — `TS-0001:7.2` gives that first character the
+meaning "assigned by the M2M-SP", which is what a deployment-chosen identity is; the length is a
+security choice, since the value is a bearer credential, and is settable.
+
+Because losing the identity volume while keeping the database is a real way to arrive at the
+locked-out state, the entrypoint compares the identity it is about to use against the one the
+admin policy records and **refuses to start** on a mismatch, naming both and the two ways out.
+
+Ten tests cover the identity logic: the order of the three sources, that a blank `CSE_ADMIN`
+from compose is not taken literally, that the file survives repeated starts, that an unreadable
+file is an error rather than a reason to generate a second identity, the file mode, and that
+generated values stay inside the character set `TS-0001:7.2` allows for an AE-ID-Stem. The stack
+itself was verified by hand — CRUD round trip, `<flexContainer>` creation, an MQTT request
+round trip, restart and `down`/`up` persistence, graceful shutdown, and that the image contains
+neither certificates nor local configuration.
+
+`config/production.js` is new and deliberately empty: node-config warns on every start when
+`NODE_ENV` names an environment it has no file for, and the image sets `NODE_ENV=production`
+while getting its configuration from `NODE_CONFIG`.
+
+**Why MINOR**: a new way to deploy, no change to what Mobius4 does. Nothing changes for an
+existing source deployment.
+
 ## v4.7.0 (2026-08-07)
 
 ### Changed — HTTPS is optional, serves server authentication only, and no longer ships certificates

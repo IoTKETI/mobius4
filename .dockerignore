@@ -1,0 +1,21 @@
+# Belt and braces: the Dockerfile copies named paths rather than the whole tree, so nothing here
+# is load-bearing on its own. It matters for what reaches the build context at all -- anything
+# sent there can end up in an intermediate layer or a cache export, so the two secrets are
+# excluded here as well as never being copied.
+
+certs/
+config/local*.json
+.env
+
+node_modules/
+logs/
+.git/
+.github/
+.gitignore
+test/
+docs/
+*.md
+.claude/
+.superpowers/
+.nvmrc
+ecosystem.config.js

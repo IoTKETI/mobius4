@@ -1,0 +1,148 @@
+# mobius4, its database and an MQTT broker, in one command.
+#
+#   cp .env.example .env      # edit CSE_POA at least
+#   docker compose up -d
+#
+# One instance. Running more than one against this database is not supported yet: the resource-ID
+# cache in each process is not invalidated across instances, so a resource deleted and recreated
+# elsewhere can read as missing for up to five minutes. `docker compose up --scale mobius4=N`
+# also gives every replica the same identity, which would duplicate the MQTT subscription and the
+# expired-resource sweep. See docs/docker.md.
+
+services:
+  postgres:
+    # PostGIS, not plain postgres: db/init.js runs `CREATE EXTENSION IF NOT EXISTS postgis` and
+    # location filtering in discovery is a geometry query.
+    #
+    # The default is the official image, which publishes linux/amd64 only. On an arm64 host --
+    # Apple Silicon, Graviton -- it fails to pull with "no matching manifest". Set POSTGRES_IMAGE
+    # in .env to a multi-architecture build there; .env.example names one. Overriding the image
+    # rather than pinning a community one for everybody keeps the default on what the PostGIS
+    # project publishes.
+    image: ${POSTGRES_IMAGE:-postgis/postgis:17-3.5}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-mobius4}
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PW:?set DB_PW in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Deliberately no `ports:`. The database is reachable from the other services on the compose
+    # network and from nowhere else. Publishing 5432 to the host is how a development database
+    # ends up on the internet.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    # eclipse-mosquitto:2 defaults to listening on localhost only and refusing anonymous clients,
+    # so it needs a configuration file to be usable at all from another container.
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      # A publish that the broker accepts, rather than a check that the port is open: mobius4
+      # needs a broker that answers CONNECT and PUBLISH, and an open socket does not prove either.
+      # mosquitto_pub ships in this image; /dev/tcp does not work here, since the shell is
+      # busybox rather than bash.
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -t healthcheck -m up -q 0 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    logging: *logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  mobius4:
+    build:
+      context: .
+    image: mobius4:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    environment:
+      # Individual values rather than one NODE_CONFIG blob: docker/entrypoint.js assembles the
+      # JSON, which keeps quoting out of YAML and lets an unset variable fall through to
+      # config/default.json instead of overriding it with an empty string.
+      CSE_ADMIN: ${CSE_ADMIN:-}
+      CSE_ADMIN_LENGTH: ${CSE_ADMIN_LENGTH:-12}
+      CSE_ID: ${CSE_ID:-}
+      CSE_SP_ID: ${CSE_SP_ID:-}
+      CSE_BASE_RN: ${CSE_BASE_RN:-}
+      CSE_POA: ${CSE_POA:-}
+
+      HTTP_PORT: 7599
+      HTTPS_ENABLED: ${HTTPS_ENABLED:-false}
+      HTTPS_PORT: 7580
+      HTTPS_KEY: ${HTTPS_KEY:-}
+      HTTPS_CERT: ${HTTPS_CERT:-}
+      HTTPS_CHAIN: ${HTTPS_CHAIN:-}
+
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-mobius4}
+      DB_USER: ${DB_USER:?set DB_USER in .env}
+      DB_PW: ${DB_PW:?set DB_PW in .env}
+
+      MQTT_ENABLED: ${MQTT_ENABLED:-true}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+
+      # config/default.json has both of these off, which suits a developer running from source
+      # and does not suit a deployment.
+      HELMET_ENABLED: ${HELMET_ENABLED:-true}
+      RATELIMIT_ENABLED: ${RATELIMIT_ENABLED:-true}
+      RATELIMIT_MAX: ${RATELIMIT_MAX:-500}
+
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${HTTP_PUBLISH_PORT:-7599}:7599"
+      - "${HTTPS_PUBLISH_PORT:-7580}:7580"
+    volumes:
+      # Where the generated administrator identity lives, when CSE_ADMIN is not set. A named
+      # volume rather than a bind mount: the container runs as an unprivileged user, and a host
+      # directory created by Docker arrives owned by root, so a bind mount would not be writable
+      # without either running as root or matching uids by hand. This survives `docker compose
+      # down`, `restart` and an image rebuild; `down -v` removes it, in the same breath as the
+      # database it has to agree with. docs/docker.md says how to read it out and back it up.
+      - identity:/var/lib/mobius4
+      # TLS material, when HTTPS_ENABLED is true. Read-only, and mounted rather than built in:
+      # a private key does not belong in an image layer.
+      - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:7599/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *logging
+    # mobius4 is single-threaded; more than one CPU buys nothing, and the memory ceiling is there
+    # to make a leak visible as a restart rather than as a host running out of memory.
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+volumes:
+  pgdata:
+  identity:

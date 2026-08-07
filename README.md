@@ -84,6 +84,10 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 - PostGIS v3.6 — **required, not optional.** `db/init.js` declares `GEOMETRY(GEOMETRY, 4326)` columns on the resource tables, so schema creation fails without the extension even if you never issue a geo-query. Developed on 3.6.4; CI runs the `postgis/postgis:17-3.6-alpine` image. 3.x releases below 3.6 are expected to work but are not tested here. Enable it per database with `CREATE EXTENSION postgis;`.
 - MQTT broker (e.g. Mosquitto)
 
+**With Docker, there is nothing on this list to install** and no database to create by hand:
+`cp .env.example .env && docker compose up -d` brings up Mobius4, PostgreSQL with PostGIS and an
+MQTT broker together — see **[docs/docker.md](docs/docker.md)**.
+
 For OS-specific installation instructions (Windows, macOS, Linux): [docs/installation.md](docs/installation.md)
 
 ## Installation
@@ -153,3 +157,4 @@ upgrade problems. A clean install needs none of it.
 | 4.6.4 | 2026-08-05 | A name that is already taken is refused with 4105 rather than 4000, including under concurrency; MQTT subscription and expired-resource cleanup run on one instance | — |
 | 4.6.5 | 2026-08-06 | **Conformance**: a `<contentInstance>` under a `<container>` carrying an `<accessControlPolicy>` was refused to every originator, the administrator included, and was missing from discovery results — it now follows the parent's policy as `TS-0001:9.6.7` requires. Discovery decides access once per policy holder instead of once per resource: 18 → 614 requests per second over 150 content instances. Development logging settings carried into a deployment now say so at startup | [workarounds you can undo](docs/upgrading.md#v465) |
 | 4.7.0 | 2026-08-07 | **HTTPS is now optional and off by default** — an existing deployment must set `https.enabled` and point `https.key`/`https.cert` at its own files to keep serving TLS. The listener no longer asks clients for certificates: it set `requestCert` but nothing ever read the certificate, so it never proved the originator. The certificates this repository shipped are deleted and must be treated as disclosed | [**Set `https.enabled` to keep TLS; reissue the shipped keys**](docs/upgrading.md#v470) |
+| 4.8.0 | 2026-08-07 | `docker compose up` brings up mobius4, PostgreSQL/PostGIS and an MQTT broker in one command — see [docs/docker.md](docs/docker.md). No change for an existing source deployment | — |

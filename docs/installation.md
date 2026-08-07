@@ -11,6 +11,12 @@ This guide covers installing all prerequisites for Mobius4 on each supported OS.
 
 ---
 
+> **Or skip all of it.** Everything below installs the things Mobius4 needs in order to run
+> from source. [Running Mobius4 with Docker Compose](docker.md) needs none of them — Node,
+> PostgreSQL, PostGIS and the MQTT broker come up as containers, and the database is created
+> on first start rather than by hand. Follow this guide if you want to run from source, or if
+> Docker is not an option where you are deploying.
+
 ## Windows
 
 ### Node.js v22 or v24
