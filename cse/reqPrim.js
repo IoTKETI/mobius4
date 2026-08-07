@@ -289,8 +289,9 @@ async function prim_handling(req_prim) {
               break;
             }
             if (req_prim.rcn === 4 || req_prim.rcn === 8) {
-              // to-do: rcn8 implementation is different from the spec, the spec would be updated
               await hostingCSE.rcn48_retrieve(req_prim, resp_prim);
+            } else if (req_prim.rcn === 5 || req_prim.rcn === 6) {
+              await hostingCSE.rcn56_retrieve(req_prim, resp_prim);
             } else {
               await hostingCSE.retrieve_a_res(req_prim, resp_prim);
             }

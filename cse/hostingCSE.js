@@ -300,6 +300,115 @@ async function retrieve_a_res(req_prim, resp_prim) {
 	return;
 }
 
+// Resource types whose representations aggr_reses_per_ty knows how to fetch. Anything else
+// discovery finds is skipped here rather than silently returned half-built.
+const AGGREGATABLE_TYPES = ["acp", "ae", "cnt", "cin", "grp", "sub", "flx"];
+
+/**
+ * Fetches the representation of every discovered descendant and indexes it by ri, keeping the
+ * envelope key each resource actually carries.
+ *
+ * The key is not always "m2m:<type>": a <flexContainer> specialization may use a namespace other
+ * than m2m (TS-0004:7.4.37.1), so flx returns its whole pc and the key is read off it. Hardcoding
+ * "m2m:" here would make every specialization disappear from the response.
+ */
+async function fetch_nodes_by_ri(req_prim, ids_list_per_ty) {
+	const node_by_ri = new Map();
+
+	for (const ty_str of Object.keys(ids_list_per_ty)) {
+		if (!AGGREGATABLE_TYPES.includes(ty_str)) continue;
+		const items = ids_list_per_ty[ty_str];
+		const reses = await aggr_reses_per_ty(req_prim, items.map((i) => i.ri), ty_str);
+
+		reses.forEach((res, idx) => {
+			if (!res) return; // vanished between discovery and retrieval
+			const item = items[idx];
+			const is_flx = ty_str === "flx";
+			const key = is_flx ? Object.keys(res)[0] : `m2m:${ty_str}`;
+			const body = is_flx ? res[Object.keys(res)[0]] : res;
+			node_by_ri.set(item.ri, { key, body, sid: item.sid, pi: item.pi });
+		});
+	}
+
+	return node_by_ri;
+}
+
+/**
+ * Nests the fetched descendants under their own parents and returns the direct children of the
+ * target, in a stable order.
+ *
+ * TS-0004:8.4.3 EXAMPLE 3 is the shape being built:
+ *     "m2m:cnt":[{"rn":"container1", ...},
+ *                {"rn":"container2", ..., "m2m:sub":[{"rn":"sub1", ...}]}]
+ * with the accompanying prose — "the subscription resource (sub1) appears nested inside its
+ * parent (container2)". The XSD backs it: CDT-<resourceType>.xsd refers to child resources by
+ * *global* element reference, so a child carries its own Child Resources block.
+ *
+ * A node whose pi is not among the fetched nodes is a direct child of the target (the target
+ * itself is never in the discovery result). Ordering is by sid so that a resumed request sees
+ * the same sequence — JSON member order itself is immaterial (TS-0004:8.4.2), but pagination
+ * needs a deterministic sequence to offset into.
+ */
+function build_nested(node_by_ri) {
+	const attach = (parent_body, child) => {
+		if (!parent_body[child.key]) parent_body[child.key] = [];
+		parent_body[child.key].push(child.body);
+	};
+
+	const direct_children = [];
+	for (const node of node_by_ri.values()) {
+		const parent = node_by_ri.get(node.pi);
+		if (parent) attach(parent.body, node);
+		else direct_children.push(node);
+	}
+
+	direct_children.sort((a, b) => (a.sid < b.sid ? -1 : a.sid > b.sid ? 1 : 0));
+	return direct_children;
+}
+
+/** How many resources a subtree occupies, counting the direct child itself. */
+function subtree_size(node) {
+	let n = 1;
+	for (const [k, v] of Object.entries(node.body)) {
+		if (!k.includes(":") || !Array.isArray(v)) continue;
+		for (const child of v) n += subtree_size({ body: child });
+	}
+	return n;
+}
+
+/**
+ * Applies offset and limit to whole subtrees.
+ *
+ * TS-0001:8.1.2: "If a direct child resource and all its descendants cannot be included in the
+ * returned content due to size limitations imposed by the hosting CSE then the direct child
+ * resource shall not be included in the response." So a subtree goes in whole or not at all —
+ * half a subtree is not a legal answer.
+ *
+ * Units (DEC-076, DEC-078): limit counts resources, offset counts *direct children*. The clause
+ * texts disagree with each other here (see SQ-005); direct children is the only unit that can be
+ * resumed, because restarting in the middle of a subtree would orphan nodes from a parent that
+ * was already sent in the previous page.
+ *
+ * Returns the subtrees to include plus the resume point, or null when nothing is left over.
+ */
+function paginate_subtrees(direct_children, ofst, lim) {
+	const included = [];
+	let used = 0;
+
+	for (let i = ofst; i < direct_children.length; i++) {
+		const size = subtree_size(direct_children[i]);
+		if (used + size > lim) {
+			// Deliberately no "skip this one and try the next": the offset a client sends back
+			// must mean "everything before this is done", which only holds if we stop here.
+			return { included, next_ofst: i };
+		}
+		included.push(direct_children[i]);
+		used += size;
+	}
+
+	return { included, next_ofst: null };
+}
+
 async function rcn48_retrieve(req_prim, resp_prim) {
 	const tmp_resp = {};
 
@@ -309,99 +418,113 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 
 	let aggr_res = {};
 
+	// rcn=8 keeps the envelope but drops the target's own attributes — TS-0001:8.1.2, "The
+	// attributes of the parent resource are not returned, but all the attributes of the children
+	// are returned". Table 7.5.2-2 still names m2m:<resourceType> as the element for R/8.
 	if (4 == req_prim.rcn) aggr_res = target_res;
-
 	if (8 == req_prim.rcn) aggr_res[res_key] = {};
 
-	const { ids_list_per_ty: ids_list } = await discovery_core(req_prim);
+	// Pagination is done here, on whole subtrees, so discovery must not pre-cut the flat list.
+	const { ids_list_per_ty } = await discovery_core(req_prim, { paginate: false });
 
-	if (ids_list == []) {
-		return [];
-	} else {
-		for (const ty_str in ids_list) {
-			const ri_list = ids_list[ty_str].map((ids) => {
-				return ids.ri;
-			});
-			// new resource type guide
-			// add new resource type handling here
-			let temp_reses = [];
+	const node_by_ri = await fetch_nodes_by_ri(req_prim, ids_list_per_ty);
+	const direct_children = build_nested(node_by_ri);
 
-			if ("acp" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "acp");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:acp"] = [...temp_reses];
-			}
-			if ("ae" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "ae");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:ae"] = [...temp_reses];
-			}
-			if ("cnt" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "cnt");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:cnt"] = [...temp_reses];
-			}
-			if ("cin" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "cin");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:cin"] = [...temp_reses];
-			}
-			if ("grp" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "grp");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:grp"] = [...temp_reses];
-			}
-			if ("sub" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "sub");
-				if (temp_reses.length)
-					aggr_res[res_key]["m2m:sub"] = [...temp_reses];
-			}
-			// if ("smd" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "smd");
-			//   if (temp_reses.length)
-			//     aggr_res[target_res_key]["m2m:smd"] = [...temp_reses];
-			// }
-			if ("flx" === ty_str) {
-				temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "flx");
-				// Unlike the other types, each <flexContainer> specialization has its own
-				// envelope key (TS-0004:7.4.37.1 permits a non-m2m: namespace prefix), so the
-				// results are grouped by the key each resource actually carries rather than
-				// collected under one fixed key.
-				for (const flx_obj of temp_reses) {
-					if (!flx_obj) continue;
-					const obj_key = Object.keys(flx_obj)[0];
-					if (aggr_res[res_key][obj_key] === undefined) {
-						aggr_res[res_key][obj_key] = [];
-					}
-					aggr_res[res_key][obj_key].push(flx_obj[obj_key]);
-				}
-			}
-			// if ("mrp" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "mrp");
-			//   if (temp_reses.length)
-			//     aggr_res[target_res_key]["m2m:mrp"] = [...temp_reses];
-			// }
-			// if ("mmd" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "mmd");
-			//   if (temp_reses.length)
-			//     aggr_res[target_res_key]["m2m:mmd"] = [...temp_reses];
-			// }
-			// if ("mdp" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "mdp");
-			//   if (temp_reses.length)
-			//     aggr_res[target_res_key]["m2m:mdp"] = [...temp_reses];
-			// }
-			// if ("dpm" === ty_str) {
-			//   temp_reses = await aggr_reses_per_ty(req_prim, ri_list, "dpm");
-			//   if (temp_reses.length)
-			//     aggr_res[target_res_key]["m2m:dpm"] = [...temp_reses];
-			// }
-		}
+	const ofst = req_prim.fc.ofst || 0;
+	const lim = req_prim.fc.lim || config.cse.discovery_limit;
+	const { included, next_ofst } = paginate_subtrees(direct_children, ofst, lim);
+
+	if (included.length === 0 && next_ofst !== null) {
+		// The first subtree alone is bigger than lim, so nothing fits and raising ofst cannot
+		// help — only a larger lim can. cnst below tells the client the result is partial, but
+		// not why, and this is the one case an operator cannot diagnose from the response.
+		logger.warn(
+			{ to: req_prim.to, lim, subtree_size: subtree_size(direct_children[next_ofst]) },
+			'rcn=4/8 returned no children: the first subtree is larger than lim'
+		);
 	}
+
+	for (const child of included) {
+		if (!aggr_res[res_key][child.key]) aggr_res[res_key][child.key] = [];
+		aggr_res[res_key][child.key].push(child.body);
+	}
+
 	resp_prim.pc = aggr_res;
+	if (next_ofst !== null) {
+		resp_prim.cnst = 1;
+		resp_prim.cnot = next_ofst;
+	}
 
 	return resp_prim;
-};
+}
+
+
+/**
+ * rcn = 5 (attributes and child resource references) / 6 (child resource references).
+ *
+ * Both return *references* to the children rather than their representations, and the two forms
+ * are mutually exclusive with the inline form by construction: CDT-<resourceType>.xsd wraps
+ * "childResource" (m2m:childResourceRef) and the inlined child elements in the same xs:choice,
+ * so a representation carries one or the other, never both.
+ *
+ * Serialization follows TS-0004:8.4.2 rule 10 — childResourceRef is a simple type carrying XML
+ * attributes, so each entry becomes an object whose XML attributes appear under their short names
+ * (nm, typ) and whose element value appears under the special name "val". TS-0004:8.4.3 EXAMPLE 2
+ * shows exactly this shape for rcn = 5:
+ *     "ch": [{"nm":"container1", "typ":3, "val":"mn-cse/appname/container1"}, ...]
+ *
+ * rcn = 6 drops the target's own attributes entirely (TS-0001:8.1.2 "without any representation of
+ * the actual requested resource"), so the content is m2m:resourceRefList instead of the resource
+ * element — Table 7.5.2-2 gives m2m:listOfChildResourceRef as its data type, whose repeated member
+ * is "resourceRef" (rrf).
+ */
+async function rcn56_retrieve(req_prim, resp_prim) {
+	const { ids_list, is_partial } = await discovery_core(req_prim);
+
+	// drt selects the address format of the reference, the same choice discovery makes for
+	// m2m:uril (TS-0004:7.5.2 note 2). Unset means structured, matching discovery's own default.
+	const use_unstructured = req_prim.drt === 2;
+	const refs = ids_list.map((item) => ({
+		nm: item.sid.split('/').pop(),
+		typ: item.ty,
+		val: use_unstructured ? item.ri : item.sid,
+	}));
+
+	if (6 === req_prim.rcn) {
+		resp_prim.pc = { 'm2m:rrl': { rrf: refs } };
+	} else {
+		const tmp_resp = {};
+		await retrieve_a_res(req_prim, tmp_resp);
+		if (!tmp_resp.pc) return resp_prim; // retrieve_a_res already set rsc (e.g. NOT_FOUND)
+		const res_key = Object.keys(tmp_resp.pc)[0];
+		// An empty ch would assert "this resource has no children", which is a different claim
+		// from "the reference list is absent". The XSD makes the whole block optional, so leave
+		// it out when there is nothing to reference.
+		if (refs.length) tmp_resp.pc[res_key].ch = refs;
+		resp_prim.pc = tmp_resp.pc;
+	}
+
+	set_partial_content(req_prim, resp_prim, is_partial);
+
+	return resp_prim;
+}
+
+/**
+ * TS-0001:8.1.2 requires child-resource results to carry an indication when the returned content
+ * is partial, and 8.1.3 names the two response parameters that carry it: Content Status (cnst,
+ * 1 = PARTIAL_CONTENT per TS-0004:6.3.4.2.44) and Content Offset (cnot), the point where a
+ * subsequent request should resume via the offset filter condition.
+ *
+ * Without this a truncated result is indistinguishable from a complete one, and the client stops
+ * early believing it saw everything.
+ */
+function set_partial_content(req_prim, resp_prim, is_partial) {
+	if (!is_partial) return;
+	const ofst = req_prim.fc.ofst || 0;
+	const lim = req_prim.fc.lim || config.cse.discovery_limit;
+	resp_prim.cnst = 1;
+	resp_prim.cnot = ofst + lim;
+}
 
 async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 	return await Promise.all(
@@ -681,7 +804,14 @@ async function drop_vanished(items) {
 	return items.filter(i => alive_ri.has(i.ri));
 }
 
-async function discovery_core(req_prim) {
+/**
+ * @param opts.paginate  When false, the flat offset/limit slice at the end is skipped and the
+ *   whole matching set is returned. rcn=4/8 needs this: it paginates over *subtrees*, and a list
+ *   already cut in the middle of one cannot be regrouped (TS-0001:8.1.2 subtree atomicity).
+ *   The per-type DB fetch cap (cse.discovery_limit) still applies either way.
+ */
+async function discovery_core(req_prim, opts = {}) {
+	const paginate = opts.paginate !== false;
 	let ids_list = []; // this is for discovery response
 	let ids_list_per_ty = {}; // this is for rcn = 4 or rcn = 8 response
 
@@ -698,8 +828,12 @@ async function discovery_core(req_prim) {
 	const ofst = req_prim.fc.ofst || 0;
 	const ty_list = req_prim.fc.ty || Object.keys(enums.ty_str);
 
-	// fetch enough per-type to cover offset + limit + 1 (for partial detection)
-	const fetch_lim = Math.min(ofst + lim + 1, config.cse.discovery_limit);
+	// fetch enough per-type to cover offset + limit + 1 (for partial detection).
+	// With paginate=false the caller slices by subtree instead, so the only bound left is the
+	// protective cap — a subtree can hold more rows than ofst+lim would suggest.
+	const fetch_lim = paginate
+		? Math.min(ofst + lim + 1, config.cse.discovery_limit)
+		: config.cse.discovery_limit;
 
 	// model registry: type code → { model, no_geo }
 	const TYPE_MODEL = {
@@ -827,9 +961,9 @@ async function discovery_core(req_prim) {
 	}
 
 	// apply offset and limit to aggregated result
-	const paged = ids_list.slice(ofst);
-	const is_partial = paged.length > lim;
-	const final_list = paged.slice(0, lim);
+	const paged = paginate ? ids_list.slice(ofst) : ids_list;
+	const is_partial = paginate ? paged.length > lim : false;
+	const final_list = paginate ? paged.slice(0, lim) : paged;
 
 	// reconstruct ids_list_per_ty from final paginated list
 	const final_per_ty = {};
@@ -1695,6 +1829,7 @@ module.exports = {
 	create_a_res,
 	retrieve_a_res,
 	rcn48_retrieve,
+	rcn56_retrieve,
 	update_a_res,
 	delete_a_res,
 	delete_resources,
