@@ -84,6 +84,10 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 - PostGIS v3.6 — **required, not optional.** `db/init.js` declares `GEOMETRY(GEOMETRY, 4326)` columns on the resource tables, so schema creation fails without the extension even if you never issue a geo-query. Developed on 3.6.4; CI runs the `postgis/postgis:17-3.6-alpine` image. 3.x releases below 3.6 are expected to work but are not tested here. Enable it per database with `CREATE EXTENSION postgis;`.
 - MQTT broker (e.g. Mosquitto)
 
+**With Docker, there is nothing on this list to install** and no database to create by hand:
+`cp .env.example .env && docker compose up -d` brings up Mobius4, PostgreSQL with PostGIS and an
+MQTT broker together — see **[docs/docker.md](docs/docker.md)**.
+
 For OS-specific installation instructions (Windows, macOS, Linux): [docs/installation.md](docs/installation.md)
 
 ## Installation

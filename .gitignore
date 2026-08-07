@@ -7,6 +7,9 @@ config/local*.json
 # earlier versions of this repository did commit one, so treat any key from before v4.7.0 as
 # disclosed and issue a new one (see docs/tls.md).
 certs/
+
+# Deployment values for docker compose. .env.example is the committed template.
+.env
 logs/
 docs/superpowers/
 .DS_Store
