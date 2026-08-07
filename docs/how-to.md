@@ -65,13 +65,37 @@ There is another way of doing the same. The `group` resource creation request be
 
 ### _Result Content_ parameter
 
-_Result Content_ (`rcn`) request parameter specifies what content will be included in a response. Mobius4 supports the following `rcn` values.
-- 4: attributes + child resources
-- 8: child resources
+_Result Content_ (`rcn`) request parameter specifies what content will be included in a response. Mobius4 supports the following `rcn` values for child resources.
 
-`rcn=4` is used to retrieve the target and its child/decendant resources while `rcn=8` retrieves only child/decendant resources.
+| `rcn` | Returns | Target's own attributes |
+|-------|---------|-------------------------|
+| 4 | child resources inline | included |
+| 8 | child resources inline | omitted |
+| 5 | child resource *references* (`ch`) | included |
+| 6 | child resource *references* (`m2m:rrl`) | omitted |
+
+The two families are mutually exclusive by schema: `CDT-<resourceType>.xsd` puts the reference
+form and the inline form in the same `xs:choice`, so a response carries one or the other.
 
 For better performance, it is suggested to limit the level and resource type (e.g. `lvl=1&ty=4` in HTTP query string). 
+
+**Descendants are nested under their own parent** when `lvl` reaches beyond the direct children
+(`TS-0004:8.4.3` EXAMPLE 3). Retrieving `Mobius/sensors?rcn=4&lvl=2` over a tree of
+`sensors > {humid01 > h1, temp01 > (t1, t2), sub-a}` gives:
+
+```jsonc
+{"m2m:cnt": {"rn": "sensors", /* ... */
+   "m2m:cnt": [{"rn": "humid01", /* ... */ "m2m:cin": [{"rn": "h1"}]},
+               {"rn": "temp01",  /* ... */ "m2m:cin": [{"rn": "t1"}, {"rn": "t2"}]}],
+   "m2m:sub": [{"rn": "sub-a"}]}}
+```
+
+**Pagination.** `lim` bounds the number of resources returned and cuts only on subtree
+boundaries — a direct child whose descendants do not all fit is left out whole, as
+`TS-0001:8.1.2` requires. When that happens the response carries `X-M2M-CTS: 1` (partial) and
+`X-M2M-CTO`, the index of the next unprocessed **direct child**; send that value back as `ofst`
+to continue. If a single direct child's subtree is larger than `lim` the response has no children
+at all and only a larger `lim` helps — the server logs a warning in that case.
 
 Check the response format with the following examples.
 

@@ -21,6 +21,80 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.10.0
+
+### Required if any client sends `rcn=4` or `rcn=8`: update the response parser
+
+Child resources are now nested inside their own parent. A parser written for the old flat shape
+finds no children and reports an empty result — it does not raise.
+
+```jsonc
+// 4.9.0 and earlier — every descendant at the top level, grouped by type
+{"m2m:cnt": {"rn": "sensors",
+   "m2m:cnt": [{"rn": "humid01"}, {"rn": "temp01"}],
+   "m2m:cin": [{"rn": "h1"}, {"rn": "t1"}, {"rn": "t2"}]}}
+
+// 4.10.0 — each resource under the parent that owns it
+{"m2m:cnt": {"rn": "sensors",
+   "m2m:cnt": [{"rn": "humid01", "m2m:cin": [{"rn": "h1"}]},
+               {"rn": "temp01",  "m2m:cin": [{"rn": "t1"}, {"rn": "t2"}]}]}}
+```
+
+Walk the tree recursively instead of reading one flat array per type. The parent-child
+relationship no longer has to be reconstructed from `pi`.
+
+**Nothing else is affected.** Plain retrieves (`rcn=1` or no `rcn`), discovery (`fu=1`, still a
+flat `m2m:uril`), notifications and CREATE/UPDATE/DELETE responses are unchanged. To find out
+whether this applies to you, grep your client for `rcn=4`, `rcn=8`, `rcn%3D4`, or a
+`resultContent` of 4 or 8.
+
+### Required if you paginate `rcn=4`/`rcn=8`: stop computing `ofst` yourself
+
+`ofst` now counts **direct children** for these two values (it still counts resources for `fu=1`
+discovery), because a nested result cannot be resumed in the middle of a subtree without
+duplicating the parent or orphaning its children.
+
+Send back the `X-M2M-CTO` value from the previous response rather than adding `lim` to your own
+counter. Computing it yourself now skips or repeats whole subtrees, silently.
+
+### Worth knowing: a large subtree can make a request return no children
+
+`lim` now cuts on subtree boundaries, because `TS-0001:8.1.2` requires that a direct child whose
+descendants cannot all be included is left out entirely.
+
+The consequence to plan for is **one direct child whose own subtree is larger than `lim`**.
+Retrieving an `<AE>` that has a `<container>` holding 250 `<contentInstance>`s makes that
+container's subtree 251 resources; it does not fit in the default `lim` of 200, so it is dropped
+whole and the `<AE>` comes back with no children at all — where 4.9.0 returned 200 of them.
+Raising `ofst` does not help; only a larger `lim` does.
+
+Retrieving that `<container>` directly is fine: its 250 children are 250 subtrees of one resource
+each, and 200 of them fit.
+
+The response body gives no clue when this happens, so the server logs a warning:
+
+```
+rcn=4/8 returned no children: the first subtree is larger than lim
+```
+
+### Worth knowing: `rcn=5` and `rcn=6` do something now
+
+Both used to be ignored — they returned the target's attributes with RSC 2000, exactly like
+`rcn=1`, so a client asking which children existed was told "none", successfully. If you worked
+around that by falling back to `fu=1` discovery, the fallback is no longer needed:
+
+- `rcn=5` adds a `ch` array of `{"nm", "typ", "val"}` to the target's representation. The member
+  is omitted, not empty, when there are no children.
+- `rcn=6` returns `m2m:rrl` with an `rrf` array and no representation of the target.
+- `drt=2` makes `val` an unstructured ID.
+
+### Worth knowing: truncated child-resource results now say so
+
+`X-M2M-CTS` (Content Status; `1` means partial) and `X-M2M-CTO` (Content Offset) are set whenever
+`lim` truncates an `rcn=4/5/6/8` result. Previously a truncated result was indistinguishable from
+a complete one. A client that inferred "fewer than `lim` means done" can keep working, but reading
+these headers is both cheaper and correct.
+
 ## v4.9.0
 
 ### Required if you have an existing database: add the `mbis` column

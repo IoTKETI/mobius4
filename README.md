@@ -37,7 +37,9 @@ oneM2M resource types (oneM2M TR-0071, next release):
 Other features:
 - discovery with _Filter Criteria_ parameter
 - geo-query with _location_ common attribute (Rel-4 feature)
-- children resources retrieval with _Result Content_ parameter
+- children resources retrieval with _Result Content_ parameter — nested representations
+  (`rcn=4`/`rcn=8`) and child resource references (`rcn=5`/`rcn=6`), paginated with
+  _Filter Criteria_ `lvl`/`lim`/`ofst`
 
 ## Platform features
 
@@ -159,3 +161,4 @@ upgrade problems. A clean install needs none of it.
 | 4.7.0 | 2026-08-07 | **HTTPS is now optional and off by default** — an existing deployment must set `https.enabled` and point `https.key`/`https.cert` at its own files to keep serving TLS. The listener no longer asks clients for certificates: it set `requestCert` but nothing ever read the certificate, so it never proved the originator. The certificates this repository shipped are deleted and must be treated as disclosed | [**Set `https.enabled` to keep TLS; reissue the shipped keys**](docs/upgrading.md#v470) |
 | 4.8.0 | 2026-08-07 | `docker compose up` brings up mobius4, PostgreSQL/PostGIS and an MQTT broker in one command — see [docs/docker.md](docs/docker.md). No change for an existing source deployment | — |
 | 4.9.0 | 2026-08-07 | A `<container>`'s `maxInstanceAge` now actually caps its `<contentInstance>` children's `expirationTime` (`TS-0004:7.4.7.2.1` step 2 e), and its default widens from 30 to 365 days so a default container keeps behaving as before; new `maxByteSizePerInstance` (`mbis`) refuses oversized content independently of `maxByteSize` | [**DB migration required**](docs/upgrading.md#v490) |
+| 4.10.0 | 2026-08-07 | **Breaking for `rcn=4`/`rcn=8` clients**: child resources are now nested inside their own parent instead of grouped by type at the top level (`TS-0004:8.4.3` EXAMPLE 3), and `lim` cuts on subtree boundaries while `ofst` counts direct children. Both fail silently against an old client. `rcn=5`/`rcn=6` are implemented — they previously returned attributes only, with RSC 2000. Truncated child-resource results now set `X-M2M-CTS`/`X-M2M-CTO` | [**Client-side changes required**](docs/upgrading.md#v4100) |
