@@ -133,9 +133,12 @@ async function create_a_cin(req_prim, resp_prim) {
 //     both otherwise present as an empty UPDATE.
 //   - et is capped to the parent's maxInstanceAge, computed in the same statement (step 2 e):
 //     et_calc reads mia off the row the UPDATE already touched, so no extra read is needed to
-//     learn it before deciding what to insert. The cap is a floor under whatever et was
-//     requested (client-supplied or the deployment default), never a raise — a client asking
-//     for something shorter than mia keeps what it asked for.
+//     learn it before deciding what to insert. The cap is a ceiling over whatever et was
+//     requested (client-supplied or the deployment default), never a floor — a client asking
+//     for something shorter than mia keeps what it asked for. config.default.container.mia
+//     (365 days) is chosen to track the deployment's default et (12 months, moment-calendar),
+//     so a <container> left at its defaults behaves the same as before mia was enforced, to
+//     within the day or so that "365 days" and "12 calendar months" can differ.
 //
 // The final SELECT uses scalar subqueries so that exactly one row comes back in every case,
 // including the two failures.

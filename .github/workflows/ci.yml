@@ -111,8 +111,9 @@ jobs:
           #   eviction notification rule + 3 for the CIN write-path rewrite: loc round-trip,
           #   addressing by both forms, and concurrent creates against a container at its limit
           # + 1 for name-conflict RSC under concurrency
-          # + 7 for <container>.maxByteSizePerInstance and maxInstanceAge -> et capping
-          #   (TS-0004:7.4.7.2.1 steps 1 and 2 e)
+          # + 8 for <container>.maxByteSizePerInstance and maxInstanceAge -> et capping
+          #   (TS-0004:7.4.7.2.1 steps 1 and 2 e), including that the default mia (365 days)
+          #   keeps a default container's content instances alive for about a year, not 30 days
           # + 10 for the container's administrator identity: the order of its three sources,
           #   that it survives repeated starts, and that generated values stay inside the
           #   character set TS-0001:7.2 allows
@@ -126,7 +127,7 @@ jobs:
           #   and a resource with no lookup row not being returned).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=130
+          BASELINE=131
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."

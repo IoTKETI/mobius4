@@ -199,6 +199,29 @@ test("a <container> with no mbis accepts content of any size mbs allows", async 
 
 // ── step 2 e: maxInstanceAge caps expirationTime ───────────────────────────────
 
+test("a <container> left at its default mia keeps content instances for about a year, not 30 days", async () => {
+  // The deployment default for mia (config.default.container.mia) is what most containers get,
+  // since cse/resources/cnt.js fills it in whenever a client does not send one. Before mia was
+  // enforced at all, that default (once 2,592,000 seconds = 30 days) was inert: every instance
+  // still got the far-future et default regardless. Enforcing mia without also revisiting that
+  // default would have quietly cut every unconfigured container's content down to 30 days --
+  // a real data-loss risk for anything that treats the container as its only copy. The default
+  // now tracks the deployment's et default (12 months) instead, so this asserts the two stay in
+  // step: not narrowed to anywhere near 30 days, and not so far off the 12-month et default that
+  // the "track it" intent has drifted.
+  const cntSid = await container({}); // no mia — takes the deployment default
+  const res = await addCin(cntSid, { v: "default-lifetime" });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+
+  const cin = res.body["m2m:cin"];
+  const diff = (parseTs(cin.et) - parseTs(cin.ct)) / 1000;
+  const DAY = 24 * 3600;
+  assert.ok(diff > 300 * DAY,
+    `default mia must not shrink et anywhere near 30 days; got ${diff / DAY} days`);
+  assert.ok(diff >= 365 * DAY - DAY && diff <= 366 * DAY + DAY,
+    `default mia should track the ~12-month et default (365-366 days); got ${diff / DAY} days`);
+});
+
 test("maxInstanceAge caps et to ct + mia, overriding the deployment's far-future default", async () => {
   // With no client-supplied et, the default (get_default_et) is months out — see
   // config.default.common.et_month. mia has to win that comparison for this test to mean
@@ -248,7 +271,9 @@ test("a <container> whose mia is actually absent in storage does not cap et", as
 
   const cin = res.body["m2m:cin"];
   const diff = (parseTs(cin.et) - parseTs(cin.ct)) / 1000;
-  assert.ok(diff > 3600 * 24 * 30, // comfortably more than the container mia default (30 days)
+  // Well past a year: with no mia to cap against at all, et must keep the deployment's
+  // far-future default (12 calendar months) undisturbed, not merely stay under some cap.
+  assert.ok(diff > 3600 * 24 * 300,
     `with no mia to cap against, et should keep its far-future default; got ${diff}s past ct`);
 });
 
