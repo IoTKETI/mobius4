@@ -313,7 +313,7 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 
 	if (8 == req_prim.rcn) aggr_res[res_key] = {};
 
-	const { ids_list_per_ty: ids_list } = await discovery_core(req_prim);
+	const { ids_list_per_ty: ids_list, is_partial } = await discovery_core(req_prim);
 
 	if (ids_list == []) {
 		return [];
@@ -399,9 +399,77 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 		}
 	}
 	resp_prim.pc = aggr_res;
+	set_partial_content(req_prim, resp_prim, is_partial);
 
 	return resp_prim;
 };
+
+/**
+ * rcn = 5 (attributes and child resource references) / 6 (child resource references).
+ *
+ * Both return *references* to the children rather than their representations, and the two forms
+ * are mutually exclusive with the inline form by construction: CDT-<resourceType>.xsd wraps
+ * "childResource" (m2m:childResourceRef) and the inlined child elements in the same xs:choice,
+ * so a representation carries one or the other, never both.
+ *
+ * Serialization follows TS-0004:8.4.2 rule 10 — childResourceRef is a simple type carrying XML
+ * attributes, so each entry becomes an object whose XML attributes appear under their short names
+ * (nm, typ) and whose element value appears under the special name "val". TS-0004:8.4.3 EXAMPLE 2
+ * shows exactly this shape for rcn = 5:
+ *     "ch": [{"nm":"container1", "typ":3, "val":"mn-cse/appname/container1"}, ...]
+ *
+ * rcn = 6 drops the target's own attributes entirely (TS-0001:8.1.2 "without any representation of
+ * the actual requested resource"), so the content is m2m:resourceRefList instead of the resource
+ * element — Table 7.5.2-2 gives m2m:listOfChildResourceRef as its data type, whose repeated member
+ * is "resourceRef" (rrf).
+ */
+async function rcn56_retrieve(req_prim, resp_prim) {
+	const { ids_list, is_partial } = await discovery_core(req_prim);
+
+	// drt selects the address format of the reference, the same choice discovery makes for
+	// m2m:uril (TS-0004:7.5.2 note 2). Unset means structured, matching discovery's own default.
+	const use_unstructured = req_prim.drt === 2;
+	const refs = ids_list.map((item) => ({
+		nm: item.sid.split('/').pop(),
+		typ: item.ty,
+		val: use_unstructured ? item.ri : item.sid,
+	}));
+
+	if (6 === req_prim.rcn) {
+		resp_prim.pc = { 'm2m:rrl': { rrf: refs } };
+	} else {
+		const tmp_resp = {};
+		await retrieve_a_res(req_prim, tmp_resp);
+		if (!tmp_resp.pc) return resp_prim; // retrieve_a_res already set rsc (e.g. NOT_FOUND)
+		const res_key = Object.keys(tmp_resp.pc)[0];
+		// An empty ch would assert "this resource has no children", which is a different claim
+		// from "the reference list is absent". The XSD makes the whole block optional, so leave
+		// it out when there is nothing to reference.
+		if (refs.length) tmp_resp.pc[res_key].ch = refs;
+		resp_prim.pc = tmp_resp.pc;
+	}
+
+	set_partial_content(req_prim, resp_prim, is_partial);
+
+	return resp_prim;
+}
+
+/**
+ * TS-0001:8.1.2 requires child-resource results to carry an indication when the returned content
+ * is partial, and 8.1.3 names the two response parameters that carry it: Content Status (cnst,
+ * 1 = PARTIAL_CONTENT per TS-0004:6.3.4.2.44) and Content Offset (cnot), the point where a
+ * subsequent request should resume via the offset filter condition.
+ *
+ * Without this a truncated result is indistinguishable from a complete one, and the client stops
+ * early believing it saw everything.
+ */
+function set_partial_content(req_prim, resp_prim, is_partial) {
+	if (!is_partial) return;
+	const ofst = req_prim.fc.ofst || 0;
+	const lim = req_prim.fc.lim || config.cse.discovery_limit;
+	resp_prim.cnst = 1;
+	resp_prim.cnot = ofst + lim;
+}
 
 async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 	return await Promise.all(
@@ -1695,6 +1763,7 @@ module.exports = {
 	create_a_res,
 	retrieve_a_res,
 	rcn48_retrieve,
+	rcn56_retrieve,
 	update_a_res,
 	delete_a_res,
 	delete_resources,

@@ -40,7 +40,16 @@ async function request(baseUrl, { method, to, ty, body, originator = ADMIN, head
   const raw = await res.text();
   let parsed = null;
   try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
-  return { status: res.status, rsc: res.headers.get("x-m2m-rsc"), body: parsed, raw };
+  // cnst/cnot (Content Status / Content Offset, TS-0001:8.1.3) travel as headers, not in the
+  // body, so a test that wants to see whether a result was truncated needs them exposed.
+  return {
+    status: res.status,
+    rsc: res.headers.get("x-m2m-rsc"),
+    cnst: res.headers.get("x-m2m-cts"),
+    cnot: res.headers.get("x-m2m-cto"),
+    body: parsed,
+    raw,
+  };
 }
 
 const create   = (b, to, ty, body, o = {}) => request(b, { method: "POST",   to, ty, body, ...o });
