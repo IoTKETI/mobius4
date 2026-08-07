@@ -23,6 +23,67 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Changed — a `<container>`'s `maxInstanceAge` now actually bounds its instances' `expirationTime`
+
+`TS-0004:7.4.7.2.1` step 2 e) requires the Hosting CSE to set a new `<contentInstance>`'s
+`expirationTime` so that it is no more than `maxInstanceAge` past `creationTime`, when the
+parent `<container>` has one. `mia` was read from the parent and stored, but nothing compared
+it against `et` — every instance got the deployment's far-future default
+(`config.default.common.et_month`, 12 months) regardless of what the container declared.
+
+**This is a wide behavioural change, not a narrow bugfix, because of something already true
+before this release**: `cse/resources/cnt.js` fills in a deployment default (2,592,000 seconds
+= 30 days) for `mia` on every `<container>` creation that does not explicitly clear it. Most
+deployments' containers already carry that default. After this release, every
+`<contentInstance>` created under one of them gets `expirationTime` capped to 30 days past
+`creationTime` instead of the previous 12 months — unless the client requests something
+shorter, which is honoured as before; the cap is a ceiling, never a floor.
+
+If your deployment relies on content instances living longer than 30 days by default, set
+`mia` explicitly wider (or, once fixed, clear it — see the known issue below) on the containers
+that need it.
+
+The cap is computed in the same statement that already writes the `<contentInstance>`
+(`cse/resources/cin.js`'s `WRITE_CIN_SQL`, introduced for throughput in `v4.6.2`): the parent's
+`mia` comes back from the same row the write already touches, so no extra round trip is added.
+
+### Added — `<container>.maxByteSizePerInstance` (`mbis`)
+
+The other half of `TS-0004:7.4.7.2.1` step 1: content bigger than `mbis`, when the parent
+`<container>` has one, is refused with `NOT\_ACCEPTABLE` — independently of `maxByteSize`, the
+container's total budget. A container can have room overall and still refuse one instance for
+being too big on its own. This attribute did not exist in this codebase at all; content of any
+size was accepted as long as the container's total budget allowed it.
+
+Its short name is `mbis`, confirmed against the symbol table rather than assumed — a name like
+`mbsp` reads plausibly but is not what the spec uses. It applies to `<container>` only, not
+`<flexContainer>` or `<timeSeries>`.
+
+`mbis` has no deployment default, unlike `mni`/`mbs`/`mia`: `TS-0001:9.6.6` does not call for
+one, so a container that never sets it behaves exactly as before this release.
+
+**Known issue found while implementing this** (not fixed here, tracked separately): sending
+`null` to clear `mni`, `mbs` or `mia` on a `<container>` UPDATE has never worked — the
+validation schema rejects `null` for those fields before the code that would reset them ever
+runs. `mbis` does not have this problem; its schema entry allows `null` explicitly. The
+existing three, and whether the same gap reaches other resource types' UPDATE schemas, are
+open questions.
+
+Seven tests cover both changes in `test/container-retention.test.js`: `mbis` refuses oversized
+content even when `mbs` alone would allow it, accepts content within it, round-trips through
+create/update/clear, and a container with no `mbis` is unaffected; `mia` caps the default `et`
+exactly to the container's value, keeps a client-requested `et` that is already shorter, and a
+container whose `mia` is absent from storage (reachable only by writing `NULL` directly, since
+nothing in the API can currently produce that state) leaves `et` uncapped. Confirmed to fail
+without the fix: reverting the `et` assignment fails the `mia` test; reverting the `WHERE`
+clause's `mbis` condition fails the oversized-content test.
+
+Migration for existing databases: `db/migrations/v4.9.0.sql` (`ALTER TABLE cnt ADD COLUMN
+mbis`). A fresh install needs nothing extra — `db/init.js` creates the column directly.
+
+**Why MINOR**: a new optional attribute (`mbis`) and a conformance fix (`mia`) with a real
+default-configuration impact, not a capability an existing deployment asked for.
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M

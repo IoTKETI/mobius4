@@ -83,13 +83,16 @@ async function create_a_cin(req_prim, resp_prim) {
         }
         if (!written.stored) {
             resp_prim.rsc = enums.rsc_str['NOT_ACCEPTABLE'];
-            resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs of the parent container' };
+            resp_prim.pc = { 'm2m:dbg': 'content size of a new <cin> is bigger than mbs or mbis of the parent container' };
             return;
         }
 
         // TS-0004:7.4.7.2.1 step 3 — the instance carries the parent's stateTag *after* the
         // increment, which is why it comes back from the statement that performed it.
         cin_res.st = written.st;
+        // TS-0004:7.4.7.2.1 step 2 e) — et may have been capped to the parent's mia; the
+        // statement is authoritative, not the value cin_res was built with.
+        cin_res.et = written.et;
 
         // eviction after the write: delete oldest CIN(s) if mni or mbs exceeded
         await evict_if_needed(written, cin_pi);
@@ -115,17 +118,24 @@ async function create_a_cin(req_prim, resp_prim) {
 // into one statement is what this function is for; a single statement is also atomic without
 // an explicit transaction.
 //
-// Three things fall out of the shape rather than being arranged separately:
+// Four things fall out of the shape rather than being arranged separately:
 //
 //   - The size check is the UPDATE's own WHERE. If the content does not fit, no row is
 //     updated, so the two INSERTs — which select from that UPDATE — insert nothing. A refusal
-//     cannot leave the counters advanced for a row that was never written.
+//     cannot leave the counters advanced for a row that was never written. It checks mbs and
+//     mbis (maxByteSizePerInstance) both, per TS-0004:7.4.7.2.1 step 1 — the parent's total
+//     budget and its cap on any one instance are two independent reasons to refuse.
 //   - stateTag comes back from the UPDATE that incremented it, so the instance carries the
 //     parent's post-increment value (TS-0004:7.4.7.2.1 step 3). The previous code read st
 //     before opening its transaction, which let concurrent creates copy the same value into
 //     several instances and left eviction — which orders by st — picking arbitrarily.
 //   - "Parent missing" and "content too large" are distinguished by the parent CTE, since
 //     both otherwise present as an empty UPDATE.
+//   - et is capped to the parent's maxInstanceAge, computed in the same statement (step 2 e):
+//     et_calc reads mia off the row the UPDATE already touched, so no extra read is needed to
+//     learn it before deciding what to insert. The cap is a floor under whatever et was
+//     requested (client-supplied or the deployment default), never a raise — a client asking
+//     for something shorter than mia keeps what it asked for.
 //
 // The final SELECT uses scalar subqueries so that exactly one row comes back in every case,
 // including the two failures.
@@ -135,19 +145,30 @@ WITH parent AS (
 ), upd AS (
     UPDATE cnt
        SET cni = cni + 1, cbs = cbs + $2, st = st + 1
-     WHERE ri = $1 AND (mbs IS NULL OR $2 <= mbs)
-    RETURNING cni, cbs, mni, mbs, st
+     WHERE ri = $1 AND (mbs IS NULL OR $2 <= mbs) AND (mbis IS NULL OR $2 <= mbis)
+    RETURNING cni, cbs, mni, mbs, mbis, mia, st
+), et_calc AS (
+    SELECT CASE WHEN mia IS NULL THEN $6 ELSE
+             to_char(
+               LEAST(
+                 to_timestamp($6, 'YYYYMMDD"T"HH24MISS'),
+                 to_timestamp($7, 'YYYYMMDD"T"HH24MISS') + mia * INTERVAL '1 second'
+               ),
+               'YYYYMMDD"T"HH24MISS'
+             )
+           END AS et
+      FROM upd
 ), new_cin AS (
     INSERT INTO cin (ri, ty, rn, pi, sid, et, ct, lt, cr, acpi, lbl, loc, st, cs, con, cnf)
-    SELECT $3, 4, $4, $1, $5, $6, $7, $7, $8, $9, $10,
+    SELECT $3, 4, $4, $1, $5, et_calc.et, $7, $7, $8, $9, $10,
            CASE WHEN $11::text IS NULL THEN NULL
                 ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END,
            upd.st, $2, $12::jsonb, $13
-      FROM upd
-    RETURNING ri
+      FROM upd, et_calc
+    RETURNING ri, et
 ), new_lookup AS (
     INSERT INTO lookup (ri, ty, rn, sid, lvl, pi, cr, int_cr, et, loc)
-    SELECT $3, 4, $4, $5, $14, $1, $8, $15, $6,
+    SELECT $3, 4, $4, $5, $14, $1, $8, $15, (SELECT et FROM new_cin),
            CASE WHEN $11::text IS NULL THEN NULL
                 ELSE ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326) END
       FROM upd
@@ -159,7 +180,8 @@ SELECT (SELECT count(*) FROM parent)      AS parent_found,
        (SELECT cbs FROM upd)              AS cbs,
        (SELECT mni FROM upd)              AS mni,
        (SELECT mbs FROM upd)              AS mbs,
-       (SELECT st  FROM upd)              AS st
+       (SELECT st  FROM upd)              AS st,
+       (SELECT et  FROM new_cin)          AS et
 `;
 
 async function write_a_cin(cin_res, originator) {
@@ -190,6 +212,7 @@ async function write_a_cin(cin_res, originator) {
         mni: r.mni,
         mbs: r.mbs,
         st:  r.st,
+        et:  r.et,
     };
 }
 

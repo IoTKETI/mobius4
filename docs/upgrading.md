@@ -21,6 +21,39 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.9.0
+
+### Required if you have an existing database: add the `mbis` column
+
+```bash
+psql -U "$DB_USER" -d "$DB_NAME" -f db/migrations/v4.9.0.sql
+```
+
+Adds `cnt.mbis` (`maxByteSizePerInstance`). Fast — no default value, no rewrite of existing
+rows. Skip this if you are on Docker Compose and using its bundled database with a fresh
+volume; `db/init.js` creates the column directly for a new deployment.
+
+### Worth knowing: `<contentInstance>` lifetimes just got shorter, probably
+
+If your containers were created without ever clearing `maxInstanceAge` — which is most of
+them, because `cse/resources/cnt.js` has always filled in a deployment default (30 days) when
+it is not explicitly set — every new `<contentInstance>` created under them now gets an
+`expirationTime` capped to 30 days past its `creationTime`, instead of the previous 12-month
+default. This is a conformance fix (`TS-0004:7.4.7.2.1` step 2 e), not new behaviour someone
+requested, and it applies retroactively to nothing already stored — only to instances created
+from this version onward.
+
+If you need longer-lived content instances, set `mia` explicitly on the containers that need
+it, to a value wide enough (or see the known issue below — clearing it back to "no limit" does
+not currently work).
+
+**Known issue, not fixed in this release**: sending `null` to clear `mni`, `mbs` or `mia` on a
+`<container>` UPDATE does not work — the request is rejected with 4000 before the code that
+would reset it ever runs. If you were relying on this to remove a limit, it has never actually
+done so; set an explicit wide value instead.
+
+---
+
 ## v4.7.0
 
 ### Required if you serve HTTPS: turn it on and say where the files are

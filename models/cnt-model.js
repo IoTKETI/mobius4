@@ -36,6 +36,7 @@ const CNT = sequelize.define('cnt', {
   },
   mni: DataTypes.INTEGER,
   mbs: DataTypes.INTEGER,
+  mbis: DataTypes.INTEGER,
   mia: DataTypes.INTEGER,
   loc: DataTypes.GEOMETRY('GEOMETRY', 4326),
 }, {
