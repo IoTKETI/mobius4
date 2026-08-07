@@ -289,10 +289,6 @@ async function prim_handling(req_prim) {
               break;
             }
             if (req_prim.rcn === 4 || req_prim.rcn === 8) {
-              // to-do: the child resources are returned flat (grouped by type at the top level)
-              // instead of nested under their own parents, which TS-0004:8.4.3 EXAMPLE 3 and the
-              // recursive element refs in CDT-<resourceType>.xsd require. Tracked separately —
-              // fixing it changes the response shape for existing clients.
               await hostingCSE.rcn48_retrieve(req_prim, resp_prim);
             } else if (req_prim.rcn === 5 || req_prim.rcn === 6) {
               await hostingCSE.rcn56_retrieve(req_prim, resp_prim);

@@ -23,6 +23,88 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+## v4.10.0 (2026-08-07)
+
+### ⚠️ Breaking for clients that parse `rcn=4` / `rcn=8` responses
+
+**The shape of child-resource results changed.** Descendants are now nested inside their own
+parent instead of being grouped by type at the top level. A client that read the old flat shape
+will find no children — it gets an empty result, not an error.
+
+The version is a MINOR because this project's release numbers are tied to the product name
+(`mobius4`), not because the change is compatible. Read this entry before upgrading.
+
+Before (what 4.9.0 and earlier returned):
+
+```json
+{"m2m:cnt": {"rn": "sensors", ...,
+   "m2m:cnt": [{"rn": "humid01", ...}, {"rn": "temp01", ...}],
+   "m2m:cin": [{"rn": "h1", ...}, {"rn": "t1", ...}, {"rn": "t2", ...}],
+   "m2m:sub": [{"rn": "sub-a", ...}]}}
+```
+
+After:
+
+```json
+{"m2m:cnt": {"rn": "sensors", ...,
+   "m2m:cnt": [{"rn": "humid01", ..., "m2m:cin": [{"rn": "h1", ...}]},
+               {"rn": "temp01",  ..., "m2m:cin": [{"rn": "t1", ...}, {"rn": "t2", ...}]}],
+   "m2m:sub": [{"rn": "sub-a", ...}]}}
+```
+
+**What a client must change**: walk the tree recursively instead of reading one flat array per
+type. The parent-child relationship no longer has to be reconstructed from `pi`.
+
+**Why**: `TS-0004:7.5.2` Table 7.5.2-2 makes the response element `m2m:<resourceType>` and points
+at `CDT-<resourceType>.xsd` for its structure; that XSD refers to child resources by *global*
+element reference, so a child carries its own Child Resources block and nesting is recursive by
+construction. `TS-0004:8.4.3` EXAMPLE 3 shows the resulting JSON and states it plainly — "the
+subscription resource (sub1) appears nested inside its parent (container2)". `TS-0001:8.1.2`
+requires "proper nesting representation" and parents listed before children.
+
+### Also changed in `rcn=4` / `rcn=8`
+
+- **`lim` now cuts on subtree boundaries.** `TS-0001:8.1.2` requires that if a direct child and
+  all its descendants cannot be included, the direct child is left out entirely — half a subtree
+  is not a legal answer. **Consequence**: if the first subtree alone is larger than `lim`, the
+  response contains no children at all and raising `ofst` cannot help; only a larger `lim` can.
+  The default `lim` is `cse.discovery_limit` (200). A warning is logged when this happens,
+  because it is otherwise undiagnosable from the response.
+- **`ofst` counts direct children** for these two rcn values (it counts resources for `fu=1`
+  discovery). Nesting cannot be resumed mid-subtree without duplicating or orphaning nodes.
+  **Send back the `X-M2M-CTO` value you received rather than computing an offset yourself.**
+
+### Added
+
+- **`rcn=5` (attributes and child resource references) and `rcn=6` (child resource references)
+  are implemented.** They were previously **ignored**: both returned exactly what `rcn=1` returns,
+  with RSC 2000 — a client asking which children existed was told "none", successfully.
+  `rcn=5` adds a `ch` array of `{"nm","typ","val"}` to the target's representation
+  (`TS-0004:8.4.3` EXAMPLE 2; the `val` name comes from the serialization rule for simple types
+  with XML attributes in `8.4.2`). `rcn=6` returns `m2m:rrl` with an `rrf` array and no
+  representation of the target (`TS-0001:8.1.2`). `drt=2` yields unstructured IDs. When the
+  target has no children the `ch` member is omitted rather than sent empty.
+- **Partial results are now signalled.** `X-M2M-CTS` (Content Status, `1` = PARTIAL_CONTENT per
+  `TS-0004:6.3.4.2.44`) and `X-M2M-CTO` (Content Offset) are set whenever `lim` truncates a
+  child-resource result, for `rcn=4/5/6/8`. `TS-0001:8.1.2` requires the indication and `8.1.3`
+  names the two parameters. Previously a truncated result was indistinguishable from a complete
+  one.
+
+**Why MINOR**: by the table above this release both fixes conformance defects and changes an
+interface. The compatibility break would put it at MAJOR, but the major version is reserved —
+`mobius4` is the product name and moving to 5 would collide with it. The break is documented at
+the top of this entry instead of being signalled by the number.
+
+### Known gaps
+
+- `DELETE` with `rcn=4/5/6/8` still returns only the target's own attributes, though
+  `TS-0001:8.1.2` Table 8.1.2-1 marks them valid for Delete. Returning child representations
+  requires a pre-delete snapshot; tracked separately.
+- The base of the `ofst` filter condition (0 or 1) is ambiguous in `TS-0001:8.1.2`: the prose says
+  "The offset shall start at 1" while the Filter Criteria table describes it as a count of
+  resources to skip over. Mobius4 treats it as 0-based, matching the table. Pending clarification.
+
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M

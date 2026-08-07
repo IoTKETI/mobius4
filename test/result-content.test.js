@@ -176,11 +176,58 @@ test("a truncated rcn=4 result reports Content Status and Content Offset", async
   // TS-0001:8.1.2 — "An indication shall be included in the response signalling if the returned
   // content is partial", and 8.1.3 names cnst/cnot. Before this was wired, lim silently cut the
   // result and the client had no way to tell.
+  //
+  // Direct children sort by sid: humid01 (subtree of 2), sub-a (1), temp01 (3). lim=2 admits
+  // humid01 and stops, because adding sub-a would make 3 — and a subtree goes in whole or not at
+  // all (TS-0001:8.1.2). cnot is the index of the next unprocessed *direct child* (DEC-078).
   const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=2`);
   assert.equal(res.rsc, "2000");
 
   assert.equal(res.cnst, "1", "1 = PARTIAL_CONTENT (TS-0004:6.3.4.2.44)");
-  assert.equal(res.cnot, "2", "resume point for the next request's ofst");
+  assert.equal(res.cnot, "1", "resume at direct child index 1 (sub-a)");
+  assert.deepEqual(res.body["m2m:cnt"]["m2m:cnt"].map((c) => c.rn), ["humid01"]);
+});
+
+test("rcn=4 pagination never splits a subtree", async () => {
+  // The whole point of DEC-076: half a subtree is not a legal answer. lim=3 still cannot fit
+  // humid01(2) + sub-a(1) + temp01(3) = 6, so it stops after sub-a rather than sending part of
+  // temp01.
+  const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=3`);
+  assert.equal(res.rsc, "2000");
+
+  const top = res.body["m2m:cnt"];
+  assert.deepEqual(top["m2m:cnt"].map((c) => c.rn).sort(), ["humid01"]);
+  assert.deepEqual(top["m2m:sub"].map((c) => c.rn), ["sub-a"]);
+  assert.equal(top["m2m:cin"], undefined, "no orphaned grandchild at the top level");
+  assert.equal(res.cnot, "2", "temp01 is direct child index 2 and was not started");
+});
+
+test("rcn=4 resumes from cnot without losing or repeating a subtree", async () => {
+  const first = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=3`);
+  const second = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=3&ofst=${first.cnot}`);
+  assert.equal(second.rsc, "2000");
+
+  // The one subtree left is temp01, and its <contentInstance> children come with it.
+  const top = second.body["m2m:cnt"];
+  assert.deepEqual(top["m2m:cnt"].map((c) => c.rn), ["temp01"]);
+  assert.deepEqual(
+    top["m2m:cnt"][0]["m2m:cin"].map((c) => c.rn).sort(),
+    ["t1", "t2"],
+    "the resumed subtree arrives whole"
+  );
+  assert.equal(second.cnst, null, "nothing left after temp01");
+});
+
+test("rcn=4 returns no children when the first subtree alone exceeds lim", async () => {
+  // Documented dead end (DEC-076): raising ofst cannot help here, only a larger lim can. The
+  // response is still marked partial so the client is not told a lie.
+  const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=1`);
+  assert.equal(res.rsc, "2000");
+
+  assert.equal(res.body["m2m:cnt"]["m2m:cnt"], undefined);
+  assert.equal(res.body["m2m:cnt"].rn, "sensors", "the target's own attributes still come back");
+  assert.equal(res.cnst, "1");
+  assert.equal(res.cnot, "0", "still stuck at the first direct child");
 });
 
 test("a complete rcn=4 result reports no Content Status", async () => {
@@ -207,29 +254,49 @@ test("rcn=8 omits the target's own attributes but keeps the children", async () 
   assert.deepEqual(cnt["m2m:cnt"].map((c) => c.rn).sort(), ["humid01", "temp01"]);
 });
 
-test("rcn=4 flattens descendants (known deviation from TS-0004:8.4.3 EXAMPLE 3)", async () => {
-  // EXAMPLE 3 requires t1/t2 to sit inside temp01. mobius4 returns them as siblings of temp01,
-  // grouped by type directly under the target, so the parent-child relationship is only
-  // recoverable by reading each child's pi.
-  //
-  // This asserts the deviation rather than the rule on purpose: when nesting is implemented this
-  // test fails, which is the point — it is a tripwire, not an endorsement.
+test("rcn=4 nests descendants under their own parents (TS-0004:8.4.3 EXAMPLE 3)", async () => {
+  // The shape EXAMPLE 3 shows, with its own words: "the subscription resource (sub1) appears
+  // nested inside its parent (container2)". Backed by CDT-<resourceType>.xsd, whose Child
+  // Resources block refers to child types by *global* element reference — so a child carries its
+  // own Child Resources block and nesting is recursive by construction.
   const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lvl=2&lim=50`);
   assert.equal(res.rsc, "2000");
 
   const found = collect(res.body);
   assert.deepEqual(rnsAt(found, 0), ["sensors"]);
-  assert.deepEqual(
-    rnsAt(found, 1),
-    ["h1", "humid01", "sub-a", "t1", "t2", "temp01"],
-    "current behaviour: every descendant is one level deep, whatever its real parent"
-  );
-  assert.equal(rnsAt(found, 2).length, 0, "nothing is nested two deep today");
+  assert.deepEqual(rnsAt(found, 1), ["humid01", "sub-a", "temp01"], "only direct children at depth 1");
+  assert.deepEqual(rnsAt(found, 2), ["h1", "t1", "t2"], "grandchildren sit one level deeper");
 
-  // The relationship survives only in pi, which is what a client has to reconstruct from.
-  const grand = found.find((f) => f.rn === "t1");
-  assert.ok(grand, "t1 is present in the response");
-  const t1 = res.body["m2m:cnt"]["m2m:cin"].find((c) => c.rn === "t1");
-  const parent = res.body["m2m:cnt"]["m2m:cnt"].find((c) => c.rn === "temp01");
-  assert.equal(t1.pi, parent.ri, "t1's real parent is temp01, not the target");
+  // Structurally, not just by count: each <contentInstance> is inside the container that owns it.
+  const byRn = (arr, rn) => arr.find((c) => c.rn === rn);
+  const temp01Res = byRn(res.body["m2m:cnt"]["m2m:cnt"], "temp01");
+  const humid01Res = byRn(res.body["m2m:cnt"]["m2m:cnt"], "humid01");
+
+  assert.deepEqual(temp01Res["m2m:cin"].map((c) => c.rn).sort(), ["t1", "t2"]);
+  assert.deepEqual(humid01Res["m2m:cin"].map((c) => c.rn), ["h1"]);
+  assert.equal(res.body["m2m:cnt"]["m2m:cin"], undefined, "no grandchild at the top level");
+
+  // pi is still consistent with where the resource now sits — the nesting is not a relabelling.
+  assert.equal(temp01Res["m2m:cin"][0].pi, temp01Res.ri);
+});
+
+test("rcn=4 does not carry ch alongside inline children", async () => {
+  // CDT-<resourceType>.xsd puts "childResource" (the rcn 5/6 reference form) and the inline child
+  // elements in the same xs:choice, so a representation carries one or the other, never both.
+  const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lvl=2&lim=50`);
+  assert.equal(res.rsc, "2000");
+
+  const top = res.body["m2m:cnt"];
+  assert.equal(top.ch, undefined, "the target must not mix the reference form in");
+  for (const child of top["m2m:cnt"]) assert.equal(child.ch, undefined);
+});
+
+test("rcn=8 nests too, and still omits the target's attributes", async () => {
+  const res = await retrieve(srv.baseUrl, `${sensors}?rcn=8&lvl=2&lim=50`);
+  assert.equal(res.rsc, "2000");
+
+  const top = res.body["m2m:cnt"];
+  assert.equal(top.rn, undefined, "TS-0001:8.1.2 — parent attributes are not returned for rcn=8");
+  const temp01Res = top["m2m:cnt"].find((c) => c.rn === "temp01");
+  assert.deepEqual(temp01Res["m2m:cin"].map((c) => c.rn).sort(), ["t1", "t2"]);
 });
