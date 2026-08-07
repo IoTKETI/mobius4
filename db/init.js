@@ -197,6 +197,7 @@ async function create_tables(client) {
               cbs INTEGER DEFAULT 0,
               mni INTEGER,
               mbs INTEGER,
+              mbis INTEGER,
               mia INTEGER,
               loc GEOMETRY(GEOMETRY, 4326)
             );

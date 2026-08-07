@@ -1,15 +1,17 @@
 "use strict";
 // <container> bookkeeping and retention, as TS-0004:7.4.7.2.1 specifies it.
 //
-// The clause imposes four things on creating a <contentInstance>, and each is asserted here:
+// The clause imposes six things on creating a <contentInstance>, and each is asserted here:
 //
-//   step 1    content larger than maxByteSize is refused with NOT_ACCEPTABLE; otherwise
-//             contentSize is set to the size in bytes of content
+//   step 1    content larger than maxByteSize or maxByteSizePerInstance is refused with
+//             NOT_ACCEPTABLE; otherwise contentSize is set to the size in bytes of content
 //   step 2 a  currentNrOfInstances exceeding maxNrOfInstances evicts the oldest
 //   step 2 b  currentByteSize exceeding maxByteSize evicts the oldest, repeatedly, until the
 //             maxByteSize condition is met
 //   step 2 c  currentNrOfInstances is the count of <contentInstance> resources, and
 //             currentByteSize the sum of their contentSize attributes
+//   step 2 e  expirationTime is capped so that it is no more than maxInstanceAge past
+//             creationTime, when the parent has one
 //   step 3    the parent's stateTag is incremented and the value copied into the
 //             <contentInstance>'s stateTag
 //
@@ -19,25 +21,43 @@
 // cni, or evicted the wrong instance, or double-counted cbs. Counters are the part of a CSE
 // that goes wrong quietly: nothing fails, the numbers just drift.
 //
+// maxByteSizePerInstance and maxInstanceAge were added later (2026-08-07): mia was read from
+// the parent and stored, but nothing compared it against et, and mbis did not exist at all —
+// content bigger than a container's declared per-instance cap was accepted outright.
+//
 // Notification behaviour on eviction (step 2 d) lives in test/notification.test.js, next to
 // the other subscription tests.
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { create, retrieve, remove, discover, urils, createRoot, uniqueRn } = require("./helpers/onem2m");
-const { startServer } = require("./helpers/server");
+const { Client } = require("pg");
+const config = require("config");
+const { create, retrieve, update, remove, discover, urils, createRoot, uniqueRn } = require("./helpers/onem2m");
+const { startServer, TEST_DB } = require("./helpers/server");
 
-let srv, root;
+let srv, root, db;
 
 before(async () => {
   srv = await startServer();
   root = await createRoot(srv.baseUrl, "ret");
+
+  const { user, pw, host, port } = config.get("db");
+  db = new Client({ user, password: pw, host, port, database: TEST_DB });
+  await db.connect();
 });
 
 after(async () => {
   if (root) await root.remove();
   if (srv) await srv.stop();
+  if (db) await db.end();
 });
+
+// cse.timestamp_format is "YYYYMMDDTHHmmss", UTC, no offset. Returns epoch milliseconds.
+function parseTs(s) {
+  const y = s.slice(0, 4), mo = s.slice(4, 6), d = s.slice(6, 8);
+  const h = s.slice(9, 11), mi = s.slice(11, 13), se = s.slice(13, 15);
+  return Date.UTC(+y, +mo - 1, +d, +h, +mi, +se);
+}
 
 // A fresh <container> per test — these assertions are about exact counters, so they cannot
 // share one.
@@ -132,6 +152,129 @@ test("content larger than mbs is refused with 5207, and changes nothing", async 
   assert.equal(after_reject.cni, before_reject.cni, "a refused create must not move cni");
   assert.equal(after_reject.cbs, before_reject.cbs, "a refused create must not move cbs");
   assert.equal((await liveCins(cntSid)).length, before_reject.cni);
+});
+
+test("content larger than mbis is refused with 5207, even when mbs would allow it", async () => {
+  // mbis is a per-instance cap independent of mbs, the container's total budget — a container
+  // can have room for the instance overall and still refuse this particular one for being too
+  // big on its own. Until 2026-08-07 mbis did not exist in this codebase at all, so this
+  // content was accepted.
+  const cntSid = await container({ mni: 1000, mbs: 1000000, mbis: 20 });
+  const before_reject = await readCnt(cntSid);
+
+  const res = await addCin(cntSid, { v: "y".repeat(500) });
+  assert.equal(res.rsc, "5207", `expected NOT_ACCEPTABLE: ${res.raw.slice(0, 200)}`);
+
+  const after_reject = await readCnt(cntSid);
+  assert.equal(after_reject.cni, before_reject.cni, "a refused create must not move cni");
+  assert.equal(after_reject.cbs, before_reject.cbs, "a refused create must not move cbs");
+});
+
+test("content within mbis is accepted", async () => {
+  const cntSid = await container({ mni: 1000, mbs: 1000000, mbis: 500 });
+  const res = await addCin(cntSid, { v: "y".repeat(20) });
+  assert.equal(res.rsc, "2001", `expected CREATED: ${res.raw.slice(0, 200)}`);
+});
+
+test("mbis round-trips on the <container>: set on create, changeable, clearable with null", async () => {
+  const cntSid = await container({ mbis: 500 });
+  assert.equal((await readCnt(cntSid)).mbis, 500);
+
+  const upd = await update(srv.baseUrl, cntSid, { "m2m:cnt": { mbis: 900 } });
+  assert.equal(upd.rsc, "2004", `update failed: ${upd.raw.slice(0, 200)}`);
+  assert.equal((await readCnt(cntSid)).mbis, 900);
+
+  // Unlike mni/mbs/mia, mbis has no deployment default (TS-0001:9.6.6 gives it none), so
+  // sending null clears it rather than resetting it to one.
+  const cleared = await update(srv.baseUrl, cntSid, { "m2m:cnt": { mbis: null } });
+  assert.equal(cleared.rsc, "2004", `clearing update failed: ${cleared.raw.slice(0, 200)}`);
+  assert.equal((await readCnt(cntSid)).mbis, undefined, "a cleared mbis must not be reported at all");
+});
+
+test("a <container> with no mbis accepts content of any size mbs allows", async () => {
+  const cntSid = await container({ mni: 1000, mbs: 1000000 });
+  const res = await addCin(cntSid, { v: "y".repeat(900) });
+  assert.equal(res.rsc, "2001", `expected CREATED: ${res.raw.slice(0, 200)}`);
+});
+
+// ── step 2 e: maxInstanceAge caps expirationTime ───────────────────────────────
+
+test("a <container> left at its default mia keeps content instances for about a year, not 30 days", async () => {
+  // The deployment default for mia (config.default.container.mia) is what most containers get,
+  // since cse/resources/cnt.js fills it in whenever a client does not send one. Before mia was
+  // enforced at all, that default (once 2,592,000 seconds = 30 days) was inert: every instance
+  // still got the far-future et default regardless. Enforcing mia without also revisiting that
+  // default would have quietly cut every unconfigured container's content down to 30 days --
+  // a real data-loss risk for anything that treats the container as its only copy. The default
+  // now tracks the deployment's et default (12 months) instead, so this asserts the two stay in
+  // step: not narrowed to anywhere near 30 days, and not so far off the 12-month et default that
+  // the "track it" intent has drifted.
+  const cntSid = await container({}); // no mia — takes the deployment default
+  const res = await addCin(cntSid, { v: "default-lifetime" });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+
+  const cin = res.body["m2m:cin"];
+  const diff = (parseTs(cin.et) - parseTs(cin.ct)) / 1000;
+  const DAY = 24 * 3600;
+  assert.ok(diff > 300 * DAY,
+    `default mia must not shrink et anywhere near 30 days; got ${diff / DAY} days`);
+  assert.ok(diff >= 365 * DAY - DAY && diff <= 366 * DAY + DAY,
+    `default mia should track the ~12-month et default (365-366 days); got ${diff / DAY} days`);
+});
+
+test("maxInstanceAge caps et to ct + mia, overriding the deployment's far-future default", async () => {
+  // With no client-supplied et, the default (get_default_et) is months out — see
+  // config.default.common.et_month. mia has to win that comparison for this test to mean
+  // anything, so it is picked small enough that no real deployment default could accidentally
+  // already be shorter.
+  const mia = 5;
+  const cntSid = await container({ mia });
+  const res = await addCin(cntSid, { v: "capped" });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+
+  const cin = res.body["m2m:cin"];
+  const diff = (parseTs(cin.et) - parseTs(cin.ct)) / 1000;
+  assert.equal(diff, mia, `et - ct must equal mia exactly when the default et is what got capped: got ${diff}s`);
+});
+
+test("a client-requested et shorter than the mia cap is kept, not extended out to it", async () => {
+  const mia = 3600; // an hour — comfortably longer than the thirty seconds requested below
+  const cntSid = await container({ mia });
+
+  // Long enough that normal test/CI latency between reading ct and sending the create cannot
+  // push it into the past (et must be in the future at request time) or past mia by accident,
+  // short enough to stay unambiguously distinct from the hour-long mia above.
+  const requestedSeconds = 30;
+  const cnt = await readCnt(cntSid);
+  const shortEt = new Date(parseTs(cnt.ct) + requestedSeconds * 1000)
+    .toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "");
+
+  const res = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: { v: "short" }, et: shortEt } });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+  assert.equal(res.body["m2m:cin"].et, shortEt,
+    "a requested et shorter than mia allows must not be pushed out to the mia cap");
+});
+
+test("a <container> whose mia is actually absent in storage does not cap et", async () => {
+  // Reachable only by writing NULL directly: cse/resources/cnt.js currently has no path that
+  // stores mia as anything other than a number (create falls back to the deployment default,
+  // and both of update's null-handling branches reset to that same default rather than
+  // clearing the column — see the code map's R-2 note on this). So every container made
+  // through the API carries a numeric mia, and the WRITE_CIN_SQL branch for "no cap" would be
+  // untested by API-only means despite being a real branch of that query.
+  const cntSid = await container({});
+  const ri = (await readCnt(cntSid)).ri;
+  await db.query("UPDATE cnt SET mia = NULL WHERE ri = $1", [ri]);
+
+  const res = await addCin(cntSid, { v: "uncapped" });
+  assert.equal(res.rsc, "2001", `create failed: ${res.raw.slice(0, 200)}`);
+
+  const cin = res.body["m2m:cin"];
+  const diff = (parseTs(cin.et) - parseTs(cin.ct)) / 1000;
+  // Well past a year: with no mia to cap against at all, et must keep the deployment's
+  // far-future default (12 calendar months) undisturbed, not merely stay under some cap.
+  assert.ok(diff > 3600 * 24 * 300,
+    `with no mia to cap against, et should keep its far-future default; got ${diff}s past ct`);
 });
 
 // ── step 2 a: mni eviction ────────────────────────────────────────────────────

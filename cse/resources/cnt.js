@@ -39,9 +39,9 @@ async function create_a_cnt(req_prim, resp_prim) {
     }
 
     // check attribute values validity
-    if (prim_res.mni < 0 || prim_res.mbs < 0 || prim_res.mia < 0) {
+    if (prim_res.mni < 0 || prim_res.mbs < 0 || prim_res.mbis < 0 || prim_res.mia < 0) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': 'mni, mbs, and mia must be greater than 0' };
+        resp_prim.pc = { 'm2m:dbg': 'mni, mbs, mbis, and mia must be greater than 0' };
         return;
     }
 
@@ -74,6 +74,10 @@ async function create_a_cnt(req_prim, resp_prim) {
                 lbl: prim_res.lbl || null,
                 mni: prim_res.mni || config.default.container.mni,
                 mbs: prim_res.mbs || config.default.container.mbs,
+                // No deployment default: TS-0001:9.6.6 gives it no required-else-defaulted
+                // semantics the way mni/mbs/mia have here, so "not sent" stays "not set"
+                // rather than picking a number nobody asked for.
+                mbis: prim_res.mbis ?? null,
                 mia: prim_res.mia || config.default.container.mia,
                 loc: prim_res.loc || null,
             }, { transaction: t });
@@ -149,6 +153,7 @@ async function retrieve_a_cnt(req_prim, resp_prim) {
 
         if (db_res.mni !== undefined) cnt_obj['m2m:cnt'].mni = db_res.mni;
         if (db_res.mbs !== undefined) cnt_obj['m2m:cnt'].mbs = db_res.mbs;
+        if (db_res.mbis !== null && db_res.mbis !== undefined) cnt_obj['m2m:cnt'].mbis = db_res.mbis;
         if (db_res.mia !== undefined) cnt_obj['m2m:cnt'].mia = db_res.mia;
 
         resp_prim.pc = cnt_obj;
@@ -199,6 +204,7 @@ async function update_a_cnt(req_prim, resp_prim) {
         // resource specific attributes
         if (prim_res.mni) db_res.mni = prim_res.mni;
         if (prim_res.mbs) db_res.mbs = prim_res.mbs;
+        if (prim_res.mbis) db_res.mbis = prim_res.mbis;
         if (prim_res.mia) db_res.mia = prim_res.mia;
         if (prim_res.mni === null) db_res.mni = config.default.container.mni;
         if (prim_res.mbs === null) db_res.mbs = config.default.container.mbs;
@@ -214,6 +220,9 @@ async function update_a_cnt(req_prim, resp_prim) {
         if (prim_res.mni === null) db_res.mni = config.default.container.mni;
         if (prim_res.mbs === null) db_res.mbs = config.default.container.mbs;
         if (prim_res.mia === null) db_res.mia = config.default.container.mia;
+        // mbis has no deployment default (TS-0001:9.6.6 gives it none), so null clears it
+        // rather than falling back to one, unlike mni/mbs/mia above.
+        if (prim_res.mbis === null) db_res.mbis = null;
 
         await db_res.save();
 

@@ -236,7 +236,7 @@ These settings control internal ID and data size limits. The defaults work for m
 | `default.common.et_month` | Default resource expiration in months (current time + et_month) |
 | `default.container.mbs` | Default maxByteSize of a container resource |
 | `default.container.mni` | Default maxNumberOfInstances of a container resource |
-| `default.container.mia` | Default maxInstanceAge of a container resource |
+| `default.container.mia` | Default maxInstanceAge of a container resource, in seconds (default: `31536000` = 365 days, chosen to track `default.common.et_month`'s 12 months — see the `v4.9.0` CHANGELOG entry) |
 | `default.datasetPolicy.tcd` | Default time correlation duration for dataset creation |
 | `default.datasetPolicy.nvp` | Default null value policy for dataset creation |
 | `default.datasetPolicy.nrhd` | Default number of rows in historical dataset |

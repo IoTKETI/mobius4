@@ -21,6 +21,43 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.9.0
+
+### Required if you have an existing database: add the `mbis` column
+
+```bash
+psql -U "$DB_USER" -d "$DB_NAME" -f db/migrations/v4.9.0.sql
+```
+
+Adds `cnt.mbis` (`maxByteSizePerInstance`). Fast — no default value, no rewrite of existing
+rows. Skip this if you are on Docker Compose and using its bundled database with a fresh
+volume; `db/init.js` creates the column directly for a new deployment.
+
+### Worth knowing: `maxInstanceAge` is now actually enforced
+
+`TS-0004:7.4.7.2.1` step 2 e) requires a `<container>`'s `maxInstanceAge` to cap the
+`expirationTime` of its `<contentInstance>` children. It never did before this release — `mia`
+was stored and returned but nothing compared it against `et`.
+
+If a container's `mia` was left at the deployment default, this now costs at most about a day
+off what its content instances' lifetime would otherwise have been: the default moved from 30
+days to 365 days in the same release that turns enforcement on, specifically so that a
+container left at its defaults keeps behaving the way it did before (the 365-day default and
+the previous 12-calendar-month `et` default can differ by up to a day, only in date ranges
+that include 29 February).
+
+If a container's `mia` was set explicitly to something narrower than that, its content
+instances now actually get the shorter lifetime that attribute always claimed to promise. If
+that is not what you want, widen or clear `mia` on that container (see the known issue below —
+clearing it back to "no limit" does not currently work).
+
+**Known issue, not fixed in this release**: sending `null` to clear `mni`, `mbs` or `mia` on a
+`<container>` UPDATE does not work — the request is rejected with 4000 before the code that
+would reset it ever runs. If you were relying on this to remove a limit, it has never actually
+done so; set an explicit wide value instead.
+
+---
+
 ## v4.7.0
 
 ### Required if you serve HTTPS: turn it on and say where the files are

@@ -193,6 +193,7 @@ const cnt_create_schema = Joi.object().keys({
     // resource specific attributes
     mni: Joi.number().integer().min(0),
     mbs: Joi.number().integer().min(0),
+    mbis: Joi.number().integer().min(0),
     mia: Joi.number().integer().min(0)
 });
 
@@ -209,6 +210,11 @@ const cnt_update_schema = Joi.object().keys({
     // resource specific attributes
     mni: Joi.number().integer().min(0),
     mbs: Joi.number().integer().min(0),
+    // .allow(null): unlike mni/mbs/mia (whose null-clears-it branch in cnt.js is unreachable —
+    // Joi rejects null before that code runs, a pre-existing defect tracked as BACKLOG-046 —
+    // not fixed here), mbis is designed from the start to be clearable, and cnt.js's handling
+    // of prim_res.mbis === null depends on this actually reaching it.
+    mbis: Joi.number().integer().min(0).allow(null),
     mia: Joi.number().integer().min(0)
 });
 
