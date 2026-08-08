@@ -88,3 +88,102 @@ test("forwarding over the CSE's own broker is refused", async () => {
   const resp = await outbound.request_over_mqtt("mqtt://127.0.0.1:1883", { rqi: "x" }, "/remote");
   assert.equal(resp, null);
 });
+
+// ── Against a live broker ────────────────────────────────────────────────────────────────────
+// These need mosquitto on PATH; test/helpers/broker.js skips the file when it is missing, the
+// same as test/mqtt.test.js.
+
+const { startBroker } = require("./helpers/broker");
+const MQTT = require("async-mqtt");
+
+test("two forwards to the same CSE do not cut each other off", async (t) => {
+  // The defect this pins down: the response topic was subscribed per request and unsubscribed
+  // when that request finished. Two forwards to the same <remoteCSE> share that topic, so the
+  // first to complete unsubscribed the second, which then waited for an answer it could no longer
+  // receive and timed out. Now the subscription is made once and left in place.
+  let broker;
+  try {
+    broker = await startBroker();
+  } catch {
+    return t.skip("mosquitto is not available");
+  }
+  t.after(async () => {
+    await outbound.disconnect_all();
+    await broker.stop();
+  });
+
+  const url = `mqtt://127.0.0.1:${broker.port}`;
+
+  // Stand-in for the remote CSE: answers on the response topic, slowly for the first request so
+  // that both are in flight at once.
+  const responder = await MQTT.connectAsync(url, { reconnectPeriod: 0 });
+  const req_topic = outbound.request_topic("/mobius4", "/remote");
+  const resp_topic = outbound.response_topic("/mobius4", "/remote");
+  await responder.subscribe(req_topic);
+  responder.on("message", async (_topic, payload) => {
+    const req = JSON.parse(payload.toString());
+    const delay = req.rqi === "slow" ? 300 : 0;
+    setTimeout(() => {
+      responder.publish(resp_topic, JSON.stringify({ rqi: req.rqi, rsc: "2000" })).catch(() => {});
+    }, delay);
+  });
+  t.after(async () => { await responder.end(true); });
+
+  const [slow, fast] = await Promise.all([
+    outbound.request_over_mqtt(url, { rqi: "slow", op: 2 }, "/remote", 5000),
+    outbound.request_over_mqtt(url, { rqi: "fast", op: 2 }, "/remote", 5000),
+  ]);
+
+  assert.equal(fast?.rsc, "2000", "the request that finished first was answered");
+  assert.equal(slow?.rsc, "2000", "and so was the one still in flight when it did");
+  assert.equal(slow.rqi, "slow", "answers are matched by rqi, not by arrival order");
+});
+
+test("an idle connection is collected, a busy one is not", async (t) => {
+  // Garbage collection, not pooling: the window is long enough that a subscription firing a few
+  // times an hour keeps finding a warm socket. Driven directly here rather than waiting it out.
+  let broker;
+  try {
+    broker = await startBroker();
+  } catch {
+    return t.skip("mosquitto is not available");
+  }
+  t.after(async () => {
+    await outbound.disconnect_all();
+    await broker.stop();
+  });
+
+  const url = `mqtt://127.0.0.1:${broker.port}/some/topic`;
+  assert.equal(await outbound.publish_to_url(url, { a: 1 }), true);
+  assert.equal(outbound.open_broker_count(), 1);
+
+  // Just used, so a sweep leaves it alone.
+  await outbound.sweep_idle();
+  assert.equal(outbound.open_broker_count(), 1, "a connection in use is not collected");
+
+  // Pretend the idle window has passed.
+  outbound.__set_last_used_for_test(`mqtt://127.0.0.1:${broker.port}`,
+    Date.now() - outbound.IDLE_TTL_MS - 1);
+  await outbound.sweep_idle();
+  assert.equal(outbound.open_broker_count(), 0, "an idle connection is closed");
+});
+
+test("a second publish to the same broker reuses the connection", async (t) => {
+  // Connection per message would make MQTT a slower HTTP. Publishing twice must not open twice.
+  let broker;
+  try {
+    broker = await startBroker();
+  } catch {
+    return t.skip("mosquitto is not available");
+  }
+  t.after(async () => {
+    await outbound.disconnect_all();
+    await broker.stop();
+  });
+
+  const url = `mqtt://127.0.0.1:${broker.port}/some/topic`;
+  assert.equal(await outbound.publish_to_url(url, { a: 1 }), true);
+  assert.equal(await outbound.publish_to_url(url, { a: 2 }), true);
+
+  assert.equal(outbound.open_broker_count(), 1, "one connection served both publishes");
+});

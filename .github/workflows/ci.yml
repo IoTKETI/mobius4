@@ -127,7 +127,7 @@ jobs:
           #   and a resource with no lookup row not being returned).
           # grep -oP is PCRE and absent from macOS's default (BSD) grep, so awk extracts it portably.
           TEST_COUNT=$(awk '/^# tests /{print $3}' test-output.txt | tail -n1)
-          BASELINE=199
+          BASELINE=202
 
           if [ -z "$TEST_COUNT" ]; then
             echo "::error::No '# tests N' line was found in test-output.txt — this does not look like tap reporter output."

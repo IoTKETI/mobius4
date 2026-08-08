@@ -94,9 +94,15 @@ wrong, which looks identical in the logs and delivers nothing.
 Outbound connections are now opened per broker and reused, with `TS-0010:6.6.2`'s default ports
 (1883 for `mqtt`, 8883 for `mqtts`) and `6.6.4`'s rule that the URL's path **is** the topic, whole.
 A URL naming this CSE's own broker still goes through the existing client rather than opening a
-second connection to it. A broker that cannot be reached is remembered briefly so that a burst of
-notifications does not retry a dead host on every message, and the number of brokers held open at
-once is capped.
+second connection to it.
+
+**Connections are kept warm.** Opening one per message would turn MQTT into a slower HTTP and
+throw away the reason to use it, so a connection is opened on first use and stays. It is reclaimed
+two ways, both slow enough not to disturb an active path: a connection that has carried nothing for
+thirty minutes is closed, and at the ceiling of twenty a new broker evicts the least recently used
+idle one. Nothing with a request in flight is ever closed. Reconnection is automatic, and any
+response topic being listened on is re-subscribed, since MQTT subscriptions do not survive a
+session.
 
 ### Added — forwarding to a `<remoteCSE>` over MQTT
 
@@ -106,7 +112,9 @@ honest failure; this release makes it work).
 
 The request goes out on `TS-0010:6.4.2`'s request topic and the answer comes back on the matching
 response topic of `6.4.3`, matched by `rqi` because one subscription carries the answers to every
-request in flight to that CSE. Identifiers are written into the topic as the clause requires — an
+request in flight to that CSE. That subscription is made once and left in place: subscribing per
+request would cost two extra round trips each time, and — worse — two concurrent forwards to the
+same CSE share the topic, so the first to finish would have unsubscribed the second. Identifiers are written into the topic as the clause requires — an
 SP-relative ID drops its leading `/`, an Absolute-CSE-ID's leading `//` becomes `:`, and every
 remaining `/` becomes `:`. A request that gets no answer within the timeout falls through to the
 next `pointOfAccess`, and then to 5103 TARGET_NOT_REACHABLE.
