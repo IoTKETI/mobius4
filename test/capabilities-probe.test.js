@@ -19,7 +19,13 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { support, observedOf, hasDrifted, summarize } = require("../scripts/lib/capabilities");
+const {
+  support,
+  observedOf,
+  hasDrifted,
+  summarize,
+  isReadableFormat,
+} = require("../scripts/lib/capabilities");
 const { startSink } = require("./helpers/noti-sink");
 
 // ── support(): what counts as "this works" ────────────────────────────────────────────────────
@@ -60,6 +66,7 @@ test("a response with no status header is marked as such, not silently unsupport
 // ── hasDrifted(): what the CI gate compares ───────────────────────────────────────────────────
 
 const manifest = (over = {}) => ({
+  formatVersion: 1,
   probed_at: "2026-08-08",
   probed_against: { commit: "aaaaaaa", version: "4.13.1" },
   entries: [{ ty: 3, short_name: "cnt", long_name: "container", operations: { create: { supported: true, rsc: 2001 } } }],
@@ -102,8 +109,29 @@ test("a newly supported operation is drift too", () => {
 
 test("observedOf tolerates a manifest with neither section", () => {
   // A truncated or hand-edited file must not crash the gate — it has to fail it.
-  assert.equal(observedOf({}), JSON.stringify({ entries: [], procedures: [] }));
+  assert.equal(
+    observedOf({}),
+    JSON.stringify({ formatVersion: null, entries: [], procedures: [] })
+  );
   assert.equal(hasDrifted({}, manifest()), true);
+});
+
+test("a format version bump is drift, so the file cannot claim a shape it does not have", () => {
+  // The version is producer-controlled, so bumping it without regenerating would leave a file
+  // announcing a shape it was not written in — and a consumer trusting that announcement is
+  // exactly what the version exists to protect.
+  const after = manifest({ formatVersion: 2 });
+
+  assert.equal(hasDrifted(manifest(), after), true);
+});
+
+test("isReadableFormat accepts only the version the consumer was written for", () => {
+  // Newer may have moved a field or changed what one means; older is a shape nobody tested
+  // against. Guessing in either direction does not crash — it produces a plausible wrong
+  // answer, in a file whose whole purpose is to be trusted.
+  assert.equal(isReadableFormat(1, 1), true);
+  assert.equal(isReadableFormat(2, 1), false);
+  assert.equal(isReadableFormat(undefined, 1), false, "a file with no version is not version 1");
 });
 
 // ── summarize(): unasked is not unsupported ───────────────────────────────────────────────────

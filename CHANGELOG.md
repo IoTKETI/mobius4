@@ -23,6 +23,20 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Added: a format version on `features/capabilities.json`
+
+The file is produced here and read by tooling in the development repository — it crosses a
+repository boundary. Inside one repository a producer and its consumer change in the same
+commit; across two they do not, so the consumer can meet a shape it was not written for. What
+comes out of guessing at that point is not a crash but a plausible wrong answer: a supported
+operation missing from the generated specification, or an unsupported one present. That is the
+exact failure this file exists to prevent.
+
+`formatVersion: 1` now names the shape, and the consumer refuses a version it does not know
+rather than interpreting it. The version is part of the drift check too: bumping it in the
+producer without regenerating would leave a file announcing a shape it was not written in.
+
+
 ### Added: a machine-checked record of what this CSE supports
 
 Two files under `features/`, and a CI step that keeps the first one honest.

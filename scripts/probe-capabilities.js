@@ -35,6 +35,9 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const OUT_PATH = path.join(REPO_ROOT, "features", "capabilities.json");
 const PROBE_DB = "mobius4_capabilities_probe";
 
+/** Bump when a consumer that assumes the current shape would read the new one wrongly. */
+const CAPABILITIES_FORMAT_VERSION = 1;
+
 // ── the resource types to ask about ───────────────────────────────────────────────────────────
 //
 // long_name is copied from the resourceType enumeration in oneM2M TS-0004, not invented: the
@@ -328,6 +331,15 @@ async function main() {
   let result;
   try {
     result = {
+      // The shape of this file, for the tools in the development repository that read it
+      // across a repo boundary. They can be updated in the same change as the producer only
+      // as long as both live here — and they do not. A consumer that meets a shape it does not
+      // know has to be able to say so instead of misreading it: fields it expects may have
+      // moved or changed meaning, and every one of those misreadings looks like a real answer.
+      //
+      // 1 — entries[] of resource types with per-operation support, procedures[] with
+      //     supported true/false/null.
+      formatVersion: CAPABILITIES_FORMAT_VERSION,
       probed_at: new Date().toISOString().slice(0, 10),
       probed_against: gitDescribe(),
       entries: await probeResourceTypes(srv.baseUrl),

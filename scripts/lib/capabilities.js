@@ -42,9 +42,25 @@ function support(res) {
  */
 function observedOf(manifest) {
   return JSON.stringify({
+    // The format version is part of what the file asserts, not metadata about the run: bumping
+    // it in the producer without regenerating would leave a file claiming a shape it does not
+    // have. Including it here makes the CI check force the regeneration.
+    formatVersion: (manifest && manifest.formatVersion) || null,
     entries: (manifest && manifest.entries) || [],
     procedures: (manifest && manifest.procedures) || [],
   });
+}
+
+/**
+ * Whether a consumer written for `supported` can read `found`.
+ *
+ * Only the same version is readable. A newer file may have moved a field or changed what one
+ * means, and the failure mode of guessing is not a crash — it is a plausible wrong answer, in a
+ * file whose whole purpose is to be trusted. An older file is refused for the same reason
+ * rather than read leniently: leniency here buys a shape nobody tested.
+ */
+function isReadableFormat(found, supported) {
+  return found === supported;
 }
 
 function hasDrifted(previous, current) {
@@ -73,4 +89,4 @@ function summarize(manifest) {
   };
 }
 
-module.exports = { support, observedOf, hasDrifted, summarize };
+module.exports = { support, observedOf, hasDrifted, summarize, isReadableFormat };
