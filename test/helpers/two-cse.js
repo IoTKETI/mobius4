@@ -33,8 +33,15 @@ const { startServer, freePort } = require("./server");
 const { discover, urils, retrieve, CSE_BASE } = require("./onem2m");
 
 const SP_ID = "//two-cse.test";
-const A = { dbName: "mobius4_test_reg_a", cseId: "/reg-a", csebaseRn: CSE_BASE, cseType: 1 };
-const B = { dbName: "mobius4_test_reg_b", cseId: "/reg-b", csebaseRn: CSE_BASE, cseType: 2 };
+
+// Databases are named per process. `npm test` passes --test-concurrency=1, but running two of
+// these files together without it -- `node --test test/a.test.js test/b.test.js`, which is the
+// natural thing to do -- runs them in parallel, and a fixed name made the second one fail with
+// "Key (datname)=(mobius4_test_reg_a) already exists" while the first had the databases open.
+// The tests then read as the feature being broken rather than the fixture colliding.
+const RUN = process.pid.toString(36);
+const A = { dbName: `mobius4_test_reg_a_${RUN}`, cseId: "/reg-a", csebaseRn: CSE_BASE, cseType: 1 };
+const B = { dbName: `mobius4_test_reg_b_${RUN}`, cseId: "/reg-b", csebaseRn: CSE_BASE, cseType: 2 };
 
 const REGISTRATION_TIMEOUT_MS = 20000;
 const REGISTRATION_POLL_MS = 200;
