@@ -101,3 +101,28 @@ test("the notification carries the subscription's creator", async () => {
   assert.ok(sgn.sur, "sur still present");
   assert.ok(sgn.nev, "nev still present");
 });
+
+test("a subscription cannot name someone else as its creator", async () => {
+  // creator is "the AE-ID or CSE-ID of the entity which created the resource"
+  // (TS-0001:9.6.1.3.2) — a statement about who acted, not a field to fill in freely. It is not
+  // only an accuracy question: on a resource that defines accessControlPolicyIDs but has none
+  // set, the creator is the identity with full control, so accepting a supplied value would let
+  // a client hand that control to a third party.
+  const cnt = await makeContainer("spoof");
+  const res = await create(srv.baseUrl, cnt, 23, {
+    "m2m:sub": { rn: "s", nu: [sink.url], nct: 2, cr: "SomeOtherEntity", enc: { net: [3] } },
+  });
+
+  assert.equal(res.rsc, "4000", `expected refusal, got ${res.rsc}`);
+});
+
+test("naming yourself as creator is accepted as the no-op it is", async () => {
+  const cnt = await makeContainer("selfname");
+  const res = await create(srv.baseUrl, cnt, 23, {
+    "m2m:sub": { rn: "s", nu: [sink.url], nct: 2, cr: ADMIN, enc: { net: [3] } },
+  });
+  assert.equal(res.rsc, "2001");
+
+  const got = await retrieve(srv.baseUrl, `${cnt}/s`);
+  assert.equal(got.body["m2m:sub"].cr, ADMIN);
+});
