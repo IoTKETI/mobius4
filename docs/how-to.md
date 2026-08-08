@@ -74,6 +74,10 @@ _Result Content_ (`rcn`) request parameter specifies what content will be includ
 | 5 | child resource *references* (`ch`) | included |
 | 6 | child resource *references* (`m2m:rrl`) | omitted |
 
+These four values work on **DELETE** as well as RETRIEVE (`TS-0001:8.1.2` Table 8.1.2-1): the
+response carries the resources as they were immediately before removal, which is the only chance to
+see them. The default for DELETE is still "nothing".
+
 The two families are mutually exclusive by schema: `CDT-<resourceType>.xsd` puts the reference
 form and the inline form in the same `xs:choice`, so a response carries one or the other.
 

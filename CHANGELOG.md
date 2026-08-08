@@ -54,6 +54,41 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
   through the full TS-0010 text can use to settle them.
 
 
+## v4.12.0 (2026-08-08)
+
+### Added — Result Content on DELETE
+
+`TS-0001:8.1.2` Table 8.1.2-1 marks rcn **4** (attributes and child resources), **5** (attributes
+and child resource references), **6** (child resource references) and **8** (child resources) valid
+for Delete as well as Retrieve. The Originator is asking to be shown what is about to disappear,
+which is the only chance to see it.
+
+mobius4 accepted those values and then answered with the target's own attributes — the same as
+rcn=1 — with nothing to say the request had been half honoured.
+
+```bash
+DELETE /Mobius/sensors?rcn=4&lvl=2
+```
+
+```jsonc
+{"m2m:cnt": {"rn": "sensors", /* ... */
+   "m2m:cnt": [{"rn": "humid01", /* ... */ "m2m:cin": [{"rn": "h1"}]},
+               {"rn": "temp01",  /* ... */ "m2m:cin": [{"rn": "t1"}, {"rn": "t2"}]}],
+   "m2m:sub": [{"rn": "sub-a"}]}}
+```
+
+The snapshot follows the same rules as the equivalent retrieve: descendants nest under their own
+parent (`TS-0004:8.4.3` EXAMPLE 3), `lvl` bounds the depth, `lim` cuts on subtree boundaries, and a
+truncated result carries `X-M2M-CTS`/`X-M2M-CTO`.
+
+Unchanged: the default Result Content for Delete is still "nothing", rcn=1 still returns the
+target's attributes alone, and rcn 2, 3, 7, 9, 10 and 12 are still refused as n/a for this
+operation.
+
+**Why MINOR**: this adds a oneM2M capability to an existing operation. It is additive — a client
+that does not ask for these values sees no difference, and one that did ask now gets what it asked
+for instead of a subset. Nothing to do on upgrade.
+
 ## v4.11.1 (2026-08-08)
 
 A sweep of the `to-do` comments left in the source. Twenty-six of them; roughly half described
