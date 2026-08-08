@@ -1,0 +1,21 @@
+-- Mobius4 v4.13.0 Migration
+-- Description: Add <AE>.ontologyRef (or)
+--
+-- Why this is needed
+-- -------------------
+-- TS-0001 table 9.6.5-2 lists ontologyRef as a 0..1 RW attribute of <AE>. Mobius4 had no
+-- column, no model field and no schema entry for it, so ae_create_schema answered
+-- 4000 "or is not allowed" to a registration that carried it. This was found by
+-- TP/oneM2M/CSE/REG/CRE/012_AE/OR in TS-0018 clause 7.2.2.2.1, which registers an AE with
+-- each optional attribute in turn and expects 2001.
+--
+-- "or" is quoted because OR is a reserved SQL keyword; the flx table already carries the
+-- column under the same name and quoting (db/init.js).
+--
+-- ALTER TABLE ... ADD COLUMN with no default does not rewrite existing rows: every <AE> that
+-- already exists gets or = NULL, which is what "attribute not present" already meant. No
+-- behaviour changes because of this migration by itself.
+--
+-- A fresh install does not need this file: db/init.js creates the column directly.
+
+ALTER TABLE ae ADD COLUMN IF NOT EXISTS "or" VARCHAR(255);

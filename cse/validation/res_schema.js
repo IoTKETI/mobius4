@@ -126,6 +126,10 @@ const ae_create_schema = Joi.object().keys({
     csz: Joi.array().optional().items(Joi.string()),
     apn: Joi.string().optional(),
     poa: Joi.array().optional().items(Joi.string()),
+    // ontologyRef, 0..1 RW (TS-0001 table 9.6.5-2). Rejecting it made
+    // TP/oneM2M/CSE/REG/CRE/012_AE/OR fail: a registration carrying a perfectly valid optional
+    // attribute was answered 4000.
+    or: Joi.string().optional(),
 });
 
 const ae_update_schema = Joi.object().keys({
@@ -144,6 +148,7 @@ const ae_update_schema = Joi.object().keys({
     csz: Joi.array().optional().items(Joi.string()),
     apn: Joi.string().optional(),
     poa: Joi.array().optional().items(Joi.string()),
+    or: Joi.string().optional(),
 });
 
 const csr_create_schema = Joi.object().keys({
