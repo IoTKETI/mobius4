@@ -157,3 +157,14 @@ jobs:
           # so drop the { todo: true } flag from that test and promote it to a real regression test.
           echo "── Known unfixed defects ──"
           grep -E '# TODO' test-output.txt || echo "(no TODO-marked tests)"
+
+      # features/capabilities.json records what this CSE answers, established by asking it
+      # rather than by anyone writing it down. That is only worth anything if it stays true, so
+      # the probe runs here and the job fails when the committed file no longer matches.
+      #
+      # It runs on one Node version, not the whole matrix: the file describes Mobius4's
+      # behaviour, which does not depend on which supported runtime executes it, and writing the
+      # same answer twice would only add a way for the two runs to disagree.
+      - name: Check features/capabilities.json against a live instance
+        if: matrix.node == '24'
+        run: npm run probe-capabilities -- --check

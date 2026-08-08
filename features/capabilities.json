@@ -1,0 +1,332 @@
+{
+  "probed_at": "2026-08-08",
+  "probed_against": {
+    "commit": "890ec92",
+    "version": "4.13.1"
+  },
+  "entries": [
+    {
+      "ty": 1,
+      "short_name": "acp",
+      "long_name": "accessControlPolicy",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 2,
+      "short_name": "ae",
+      "long_name": "AE",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 3,
+      "short_name": "cnt",
+      "long_name": "container",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 4,
+      "short_name": "cin",
+      "long_name": "contentInstance",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 5,
+      "short_name": "cb",
+      "long_name": "CSEBase",
+      "operations": {
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": false,
+          "rsc": 4005
+        }
+      }
+    },
+    {
+      "ty": 9,
+      "short_name": "grp",
+      "long_name": "group",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 16,
+      "short_name": "csr",
+      "long_name": "remoteCSE",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 23,
+      "short_name": "sub",
+      "long_name": "subscription",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 28,
+      "short_name": "flx",
+      "long_name": "flexContainer",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    }
+  ],
+  "procedures": [
+    {
+      "id": "discovery.filter-usage",
+      "name": "Resource discovery (fu=1)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?fu=1"
+    },
+    {
+      "id": "discovery.resource-type",
+      "name": "Discovery filtered by resourceType (ty)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?fu=1&ty=3"
+    },
+    {
+      "id": "discovery.labels",
+      "name": "Discovery filtered by labels (lbl)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?fu=1&lbl=probe:x"
+    },
+    {
+      "id": "discovery.limit-offset",
+      "name": "Discovery paging (lim, ofst)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?fu=1&lim=1&ofst=1"
+    },
+    {
+      "id": "discovery.level",
+      "name": "Discovery depth limit (lvl)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?fu=1&lvl=1"
+    },
+    {
+      "id": "result-content.rcn-1",
+      "name": "Result Content rcn=1 on RETRIEVE",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?rcn=1"
+    },
+    {
+      "id": "result-content.rcn-4",
+      "name": "Result Content rcn=4 on RETRIEVE",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?rcn=4"
+    },
+    {
+      "id": "result-content.rcn-5",
+      "name": "Result Content rcn=5 on RETRIEVE",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?rcn=5"
+    },
+    {
+      "id": "result-content.rcn-6",
+      "name": "Result Content rcn=6 on RETRIEVE",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?rcn=6"
+    },
+    {
+      "id": "result-content.rcn-8",
+      "name": "Result Content rcn=8 on RETRIEVE",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <target>?rcn=8"
+    },
+    {
+      "id": "virtual.latest",
+      "name": "<latest> virtual resource",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <container>/la"
+    },
+    {
+      "id": "virtual.oldest",
+      "name": "<oldest> virtual resource",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <container>/ol"
+    },
+    {
+      "id": "group.fanout",
+      "name": "Request fan-out through <group>/fopt",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <group>/fopt"
+    },
+    {
+      "id": "group.fanout-relative",
+      "name": "Fan-out with a path appended to fopt",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "GET <group>/fopt/la"
+    },
+    {
+      "id": "notification.net-3",
+      "name": "Notification on child creation (net=3)",
+      "supported": true,
+      "rsc": 2000,
+      "evidence": "POST <subscription> with nu, then create a child and wait for delivery"
+    },
+    {
+      "id": "registration.cse-to-cse",
+      "name": "Registration with another CSE (<remoteCSE> exchange)",
+      "supported": null,
+      "rsc": null,
+      "evidence": "not probed — needs a second CSE; covered by test/cse-registration-remote.test.js and test/group-remote-members.test.js"
+    },
+    {
+      "id": "forwarding.sp-relative",
+      "name": "Request forwarding to a registered CSE",
+      "supported": null,
+      "rsc": null,
+      "evidence": "not probed — needs a second CSE; covered by test/cse-registration-remote.test.js and test/group-remote-members.test.js"
+    },
+    {
+      "id": "group.remote-members",
+      "name": "Fan-out to group members hosted on another CSE",
+      "supported": null,
+      "rsc": null,
+      "evidence": "not probed — needs a second CSE; covered by test/cse-registration-remote.test.js and test/group-remote-members.test.js"
+    }
+  ]
+}
