@@ -173,12 +173,15 @@ async function prim_handling(req_prim) {
   // 'fopt' supports CRUD operations, so call it here before switch into C/R/U/D below
   if ('fopt' === req_prim.vr) {
     await grp.fanout(req_prim, resp_prim);
-    resp_prim.rsc = enums.rsc_str["OK"];
+    // Only when the handler did not already answer. The unconditional assignment turned every
+    // refusal fanout() could make into a 2000 — a group with no members has to answer 4109
+    // NO_MEMBERS (TS-0004:7.4.14.2.4), and it was reaching the client as "OK, here is nothing".
+    if (!resp_prim.rsc) resp_prim.rsc = enums.rsc_str["OK"];
   }
   // handling of retrievalPoint(rpt) virtual child resource of <dataset>
   else if ('rpt' === req_prim.vr) {
     await dst.retrieval(req_prim, resp_prim);
-    resp_prim.rsc = enums.rsc_str["OK"];
+    if (!resp_prim.rsc) resp_prim.rsc = enums.rsc_str["OK"];
   }
   else if ('la' === req_prim.vr) {
     switch (req_prim.op) {
@@ -590,6 +593,14 @@ function get_http_method(op) {
  * Split out so it can be tested without a registered <remoteCSE>: what is worth pinning down is
  * which access point gets dialled and what comes back, and a real registration exercises neither.
  */
+// A Response Status Code as the number it is defined to be. Anything unparseable is left alone
+// rather than turned into NaN -- a wrong-looking value is easier to chase than a missing one.
+function to_rsc(value) {
+  if (value === undefined || value === null) return value;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : value;
+}
+
 async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_cse_id) {
   // pointOfAccess is a list because a CSE may be reachable more than one way. Trying only the
   // first made a <remoteCSE> unreachable as soon as that one stopped answering, however many
@@ -630,7 +641,12 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
       // convert http response to response primitive
 
       resp_prim.rqi = http_resp.headers['x-m2m-ri'];
-      resp_prim.rsc = http_resp.headers['x-m2m-rsc'];
+      // HTTP headers are strings; responseStatusCode is xs:integer (TS-0004
+      // CDT-enumerationTypes.xsd). Passing the header through verbatim put a quoted "2000" into
+      // the response primitive, which showed up in group fanout: a local member answered
+      // rsc 2000 and a forwarded one answered "2000" in the same m2m:agr, so a client comparing
+      // them had to accept both spellings.
+      resp_prim.rsc = to_rsc(http_resp.headers['x-m2m-rsc']);
       resp_prim.rvi = http_resp.headers['x-m2m-rvi'];
 
       if (http_resp.data) {
@@ -646,7 +662,7 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
       // this access point is unusable; a status came from the CSE and is its answer.
       if (error.response) {
         resp_prim.rqi = error.response.headers['x-m2m-ri'];
-        resp_prim.rsc = error.response.headers['x-m2m-rsc'];
+        resp_prim.rsc = to_rsc(error.response.headers['x-m2m-rsc']);
         resp_prim.rvi = error.response.headers['x-m2m-rvi'];
         if (error.response.data) resp_prim.pc = error.response.data;
         if (resp_prim.rsc) return resp_prim;

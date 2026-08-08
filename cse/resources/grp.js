@@ -42,11 +42,18 @@ async function create_a_grp(req_prim, resp_prim) {
 
     if (prim_res.mt !== 0) {
         const validity = await memberType_validation(req_prim, resp_prim);
-        if (false === validity) {
+        if (true !== validity) {
+            // A validation that refuses must say so. reqPrim's CREATE branch fills in 2001 when no
+            // status was set, so returning quietly here reported a group that was never created.
+            if (!resp_prim.rsc) {
+                logger.error({ validity }, 'memberType_validation refused without setting a status');
+                resp_prim.rsc = enums.rsc_str['INTERNAL_SERVER_ERROR'];
+                resp_prim.pc = { 'm2m:dbg': 'member type validation failed' };
+            }
             return;
-        } else {
-            prim_res.mtv = true;
         }
+        // prim_res.mtv was set by memberType_validation: true only when every member's
+        // resourceType was actually read.
     }
 
     // if (false === await memberType_validation(prim_res.csy, prim_res.mid, resp_prim)) {
@@ -75,7 +82,12 @@ async function create_a_grp(req_prim, resp_prim) {
                 lbl: prim_res.lbl || null,
                 cr: prim_res.cr === null ? req_prim.fr : null,
                 mt: prim_res.mt || 0,
-                mtv: prim_res.mtv ? prim_res.mtv : null,
+                // false is a value here, not an absence. TS-0001:9.6.13 requires
+                // memberTypeValidated to be set whenever memberType is not 'mixed', and false
+                // is exactly what an unvalidated group has to report -- a truthiness test wrote
+                // null instead, so a group that could not be validated looked like one where
+                // the question had never come up.
+                mtv: prim_res.mtv ?? null,
                 cnm: prim_res.mid ? prim_res.mid.length : 0,
                 mnm: prim_res.mnm,
                 csy: prim_res.csy || 1,
@@ -148,7 +160,7 @@ async function retrieve_a_grp(req_prim, resp_prim) {
 
         // resource specific attributes
         if (db_res.mt) grp_obj['m2m:grp'].mt = db_res.mt;
-        if (db_res.mtv) grp_obj['m2m:grp'].mtv = db_res.mtv;
+        if (db_res.mtv !== null && db_res.mtv !== undefined) grp_obj['m2m:grp'].mtv = db_res.mtv;
         if (db_res.mnm) grp_obj['m2m:grp'].mnm = db_res.mnm;
         if (db_res.csy) grp_obj['m2m:grp'].csy = db_res.csy;
         if (db_res.mid) grp_obj['m2m:grp'].mid = db_res.mid;
@@ -253,7 +265,7 @@ async function update_a_grp(req_prim, resp_prim) {
             if (false === validity) {
                 return;
             } else {
-                db_res.mtv = true;
+                db_res.mtv = req_prim.pc['m2m:grp'].mtv;
                 db_res.mt = req_prim.pc['m2m:grp'].mt;
                 if (req_prim.pc['m2m:grp'].mid) {
                     db_res.mid = req_prim.pc['m2m:grp'].mid;
@@ -292,52 +304,170 @@ function remove_duplicate_memberIDs(memberIDs) {
     );
 }
 
+// The consistency strategies of TS-0001:9.6.13, and the default the same clause gives:
+// "If it is not given by the Originator at the creation procedure, default is ABANDON_MEMBER."
+//
+// The default mattered more than it looks. Without it, a group whose members did not all match
+// memberType fell past every branch to a bare `return false` that set no response status —
+// create_a_grp then returned with nothing set, and reqPrim's CREATE branch filled in 2001. The
+// Originator was told the group had been created and there was no group. Measured 2026-08-08:
+// mt=3 with one <container> and one <AE> answered 2001 and a later GET answered 4004.
+const ABANDON_MEMBER = 1;
+const ABANDON_GROUP = 2;
+const SET_MIXED = 3;
+
+// How a single member's resourceType came back. The three cases lead to three different
+// answers in TS-0004:7.4.13.2.1, so they must not collapse into one "type unknown".
+const MEMBER_OK = 'ok';
+const MEMBER_FORBIDDEN = 'forbidden';
+const MEMBER_UNREACHABLE = 'unreachable';
+
+// Resource status codes the member's Hosting CSE may answer, mapped to the three cases above.
+const RSC_FORBIDDEN = [
+    enums.rsc_str['ORIGINATOR_HAS_NO_PRIVILEGE'],
+    enums.rsc_str['RECEIVER_HAS_NO_PRIVILEGE'],
+];
+const RSC_UNREACHABLE = [enums.rsc_str['TARGET_NOT_REACHABLE']];
+
+// The resourceType of one member.
+//
+// A member of a group need not live on the group-hosting CSE. TS-0004:7.4.13.2.1 has the
+// receiver "retrieve the memberType of each ... member resource to validate the memberType",
+// not look it up locally. This used to be a local lookup only: a member on another CSE resolved
+// to type 0, which is indistinguishable from a type mismatch, so the default consistency
+// strategy (ABANDON_MEMBER) dropped it and the group was still reported memberTypeValidated =
+// true. Measured 2026-08-08 against two CSEs: a <group> with one local and one remote
+// <container> came back with the remote one gone and mtv true — the CSE asserted it had
+// validated a member it had never read.
+//
+// Going through prim_handling rather than an HTTP client is deliberate: it is the same entry
+// point a request from the outside takes, so a member ID that is local resolves locally and one
+// that is SP-relative to another CSE goes through request_forwarding with the registered
+// <remoteCSE>'s pointOfAccess, without this function having to know which is which.
+async function resolve_member_type(mid, originator) {
+    const { get_unstructuredID, get_ty_from_unstructuredID } = require('../hostingCSE');
+
+    const ri = await get_unstructuredID(mid);
+    if (ri) {
+        const ty = await get_ty_from_unstructuredID(ri);
+        if (ty) return { mid, ty, status: MEMBER_OK };
+    }
+
+    let resp;
+    try {
+        const { prim_handling } = require('../reqPrim');
+        resp = await prim_handling({
+            fr: originator,
+            to: mid,
+            op: 2, // RETRIEVE
+            rqi: `grp-mtv-${generate_ri()}`,
+        });
+    } catch (err) {
+        // A throw here is the transport giving up, which is the unreachable case rather than a
+        // reason to fail the whole group.
+        logger.warn({ err, mid }, 'member type retrieval threw; treating the member as unreachable');
+        return { mid, ty: 0, status: MEMBER_UNREACHABLE };
+    }
+
+    const rsc = Number(resp && resp.rsc);
+    if (rsc === enums.rsc_str['OK'] && resp.pc) {
+        // The response carries one namespaced resource; its ty is what we came for.
+        const body = resp.pc[Object.keys(resp.pc)[0]];
+        if (body && body.ty) return { mid, ty: body.ty, status: MEMBER_OK };
+        return { mid, ty: 0, status: MEMBER_UNREACHABLE };
+    }
+    if (RSC_FORBIDDEN.includes(rsc)) return { mid, ty: 0, status: MEMBER_FORBIDDEN };
+    if (RSC_UNREACHABLE.includes(rsc)) return { mid, ty: 0, status: MEMBER_UNREACHABLE };
+
+    // Anything else — 4004 most often — means the member is not there. That is a member the
+    // group cannot validate, and the consistency strategy decides what happens to it, exactly
+    // as before this function existed.
+    return { mid, ty: 0, status: MEMBER_OK };
+}
+
 // member type validation is called during creation and update of 'mid' attribute of <grp> resource
+//
+// Sets prim_res.mtv to what the memberTypeValidated attribute must become. Callers use that
+// rather than assuming true: a group whose members could not all be reached is created, but it
+// must say so (TS-0004:7.4.13.2.1, "If the ... member resources are temporarily unreachable, the
+// receiver shall set the memberTypeValidated attribute of the <group> resource to false").
 async function memberType_validation(req_prim, resp_prim) {
     // arguments: consistencyStrategy, memberType, memberIDs
     const prim_res = req_prim.pc['m2m:grp'];
-    const consistencyStrategy = prim_res.csy;
+    const consistencyStrategy = prim_res.csy ?? ABANDON_MEMBER;
     let memberType = prim_res.mt;
     const memberIDs = prim_res.mid;
 
-    // get all resource types of the members
-    // note that this works for local members only
-    const member_types = await Promise.all(memberIDs.map(async (mid) => {
-        const { get_unstructuredID, get_ty_from_unstructuredID } = require('../hostingCSE');
-        const ri = await get_unstructuredID(mid);
-        const ty = await get_ty_from_unstructuredID(ri);
-        return { mid, ty };
-    }));
+    const member_types = await Promise.all(
+        memberIDs.map((mid) => resolve_member_type(mid, req_prim.fr))
+    );
+
+    // A member whose type cannot be read for lack of privilege fails the whole request, and it
+    // does so before the consistency strategy gets a say — the CSE cannot tell whether that
+    // member is consistent, so it must not decide either way.
+    const forbidden = member_types.filter(({ status }) => status === MEMBER_FORBIDDEN);
+    if (forbidden.length > 0) {
+        resp_prim.rsc = enums.rsc_str['RECEIVER_HAS_NO_PRIVILEGE'];
+        resp_prim.pc = {
+            'm2m:dbg': `cannot read the resourceType of ${forbidden.map((m) => m.mid).join(', ')}`,
+        };
+        return false;
+    }
+
+    // Unreachable members stay in the group and are not judged against memberType; the group is
+    // marked unvalidated instead, and the validation is meant to be redone when they come back.
+    const unreachable = member_types.filter(({ status }) => status === MEMBER_UNREACHABLE);
+    prim_res.mtv = unreachable.length === 0;
+    if (unreachable.length > 0) {
+        logger.info(
+            { unreachable: unreachable.map((m) => m.mid) },
+            'group members unreachable; memberTypeValidated set to false'
+        );
+    }
 
     // check the member types from 'member_types' against 'memberType'
     // if all members are of the same type, return that type, otherwise, return 'MIXED'
-    if (memberType && memberType !== 0) {
-        const checked_ty = member_types.every(({ ty }) => ty === memberType) ? memberType : 'MIXED';
-    
+    // mt = 0 is MIXED: every type is acceptable, so there is nothing to validate.
+    if (!memberType || memberType === 0) return true;
+
+    {
+        const judged = member_types.filter(({ status }) => status !== MEMBER_UNREACHABLE);
+        const checked_ty = judged.every(({ ty }) => ty === memberType) ? memberType : 'MIXED';
+
         logger.debug({ checked_ty }, 'memberType_validation result');
         if (memberType === checked_ty)
             return true;
         else
         // apply the consistency strategy (1: ABANDON_MEMBER, 2: ABANDON_GROUP, 3: SET_MIXED)
         {
-            if (consistencyStrategy === 1) {
+            if (consistencyStrategy === ABANDON_MEMBER) {
                 // remove the members in member_types that do not conform to the memberType, and get the 'mid' list of the remaining members
-                const remaining_members = member_types.filter(({ ty }) => ty === memberType).map(({ mid }) => mid);
+                // An unreachable member is not an inconsistent one — it is one nobody has
+                // judged yet — so it stays. Dropping it here would silently shrink the group
+                // because another CSE happened to be down at creation time.
+                const remaining_members = member_types
+                    .filter(({ ty, status }) => status === MEMBER_UNREACHABLE || ty === memberType)
+                    .map(({ mid }) => mid);
                 req_prim.pc['m2m:grp'].mid = remaining_members;
                 
                 return true;
             }
-            if (consistencyStrategy === 2) {
+            if (consistencyStrategy === ABANDON_GROUP) {
                 resp_prim.rsc = enums.rsc_str['GROUP_MEMBER_TYPE_INCONSISTENT'];
                 resp_prim.pc = { 'm2m:dbg': 'member types are inconsistent with mt value provided' };
                 
                 return false;
             }
-            if (consistencyStrategy === 3) {
+            if (consistencyStrategy === SET_MIXED) {
                 req_prim.pc['m2m:grp'].mt = 0; // 0: 'MIXED'
                 
                 return true; 
             }
+
+            // Unreachable while csy is validated to 1-3 and defaulted above, but a silent `false`
+            // here is exactly what produced the 2001-with-no-group, so it says why it failed.
+            resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+            resp_prim.pc = { 'm2m:dbg': `unsupported consistencyStrategy: ${consistencyStrategy}` };
             return false;
         }
     }
@@ -348,15 +478,28 @@ exports.fanout = async function (req_prim, resp_prim) {
     // same way the enclosing 'm2m:agr' is. It was carried unprefixed for a while to work around
     // a conformance tester issue; the prefix is what the standard specifies, so it is restored
     // here and the tester side is tracked separately.
-    resp_prim.pc = { 'm2m:agr': { 'm2m:rsp': {} } };
-
     // send fanout requests concurrently and sum-up
     const fanout_resp_prims = await aggregate_fanout_resp_prims(req_prim);
 
-    resp_prim.pc['m2m:agr']['m2m:rsp'] = fanout_resp_prims;
+    // TS-0004:7.4.14.2.4: "If the parent group has no members, the group-hosting CSE shall
+    // reject the request with the Response Status Code indicating NO_MEMBERS." An empty
+    // aggregation answered 2000 with an empty list, which reads to the client as "fanned out to
+    // everyone, and everyone was happy" -- the same shape a successful zero-member fanout would
+    // have if such a thing existed. TP/oneM2M/CSE/GMG/007 checks exactly this.
+    if (fanout_resp_prims === NO_MEMBERS) {
+        resp_prim.rsc = enums.rsc_str['NO_MEMBERS'];
+        resp_prim.pc = { 'm2m:dbg': 'the group has no members to fan out to' };
+        return;
+    }
+
+    resp_prim.pc = { 'm2m:agr': { 'm2m:rsp': fanout_resp_prims } };
 
     return;
 }
+
+// Distinguishes "the group has no members" from "the fanout produced no responses". A bare []
+// cannot carry that difference, and the two need different status codes.
+const NO_MEMBERS = Symbol('no members');
 
 async function aggregate_fanout_resp_prims(req_prim) {
     // 'to_parent' is given in check_vir_res() before
@@ -365,7 +508,7 @@ async function aggregate_fanout_resp_prims(req_prim) {
     const grp_res = await GRP.findByPk(ri, { attributes: ['mid'] });
     
     if (!grp_res || !grp_res.mid || grp_res.mid.length === 0) {
-        return [];
+        return NO_MEMBERS;
     }
     
     const mid_list = grp_res.mid;

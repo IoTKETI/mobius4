@@ -48,8 +48,16 @@ function killChild(child) {
   child.kill("SIGTERM");
 }
 
-async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB } = {}) {
-  const port = await freePort();
+// cseOverrides lets a caller give the server an identity of its own — cse_id, csebase_rn,
+// cse_type, poa, sp_id, registrar. test/helpers/two-cse.js needs it to stand up two CSEs that
+// can register with each other; everything else leaves it alone and gets config/default.json's
+// identity. It is merged over the admin setting rather than replacing it, so a caller cannot
+// accidentally drop the admin identity that config/validate.js requires.
+async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse = {}, port: fixedPort } = {}) {
+  // A caller that has to know the port *before* the server starts passes one in. two-cse.js
+  // does: a registree's own poa has to carry its port so the registrar can retarget to it, and
+  // that has to be in the config we hand to the child.
+  const port = fixedPort || (await freePort());
   // The https listener is off unless https.enabled is set (v4.7.0), so nothing here has to
   // reserve a port for it. Before that it came up unconditionally on config.https.port, and
   // these tests had to allocate a second free port purely to stay clear of the development
@@ -62,7 +70,7 @@ async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB } = 
     // Required since v4.6.0: config/default.json no longer ships an admin identity and
     // config/validate.js refuses to start without one. The value is deliberately not "SM" --
     // that is the identity earlier versions shipped, and the same guard now rejects it.
-    cse: { admin: TEST_ADMIN },
+    cse: { admin: TEST_ADMIN, ...cse },
     // MQTT is disabled by default: most tests only exercise the HTTP binding, and there is no
     // broker running unless a test starts one. A test that wants MQTT coverage spawns its own
     // broker via startBroker() (test/helpers/broker.js) and passes its port here.

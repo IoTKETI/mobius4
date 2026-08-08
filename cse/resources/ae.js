@@ -104,6 +104,7 @@ async function create_an_ae(req_prim, resp_prim) {
         csz: prim_res.csz || null,
         apn: prim_res.apn || null,
         poa: prim_res.poa || null,
+        or: prim_res.or || null,
     };
 
     try {
@@ -171,6 +172,7 @@ async function retrieve_an_ae(req_prim, resp_prim) {
         if (db_res.apn) ae_obj['m2m:ae'].apn = db_res.apn;
         if (db_res.aei) ae_obj['m2m:ae'].aei = db_res.aei;
         if (db_res.poa) ae_obj['m2m:ae'].poa = db_res.poa;
+        if (db_res.or) ae_obj['m2m:ae'].or = db_res.or;
         if (db_res.loc) ae_obj['m2m:ae'].loc = get_loc_attribute(db_res.loc);
 
     } catch (err) {
@@ -211,6 +213,10 @@ async function update_an_ae(req_prim, resp_prim) {
         if (prim_res.apn) db_res.apn = prim_res.apn;
         if (prim_res.poa) db_res.poa = prim_res.poa;
         if (prim_res.rr) db_res.rr = prim_res.rr;
+        // csz had a delete branch below but no set branch, so an UPDATE carrying a new
+        // contentSerialization was accepted with 2004 and silently discarded.
+        if (prim_res.csz) db_res.csz = prim_res.csz;
+        if (prim_res.or) db_res.or = prim_res.or;
         if (prim_res.loc) {
             await convert_loc_to_geoJson(prim_res, resp_prim);
             if (resp_prim.rsc) // from the prev function, error code is set
@@ -234,6 +240,7 @@ async function update_an_ae(req_prim, resp_prim) {
         if (prim_res.apn === null) db_res.apn = null;
         if (prim_res.poa === null) db_res.poa = null;
         if (prim_res.csz === null) db_res.csz = null;
+        if (prim_res.or === null) db_res.or = null;
 
         await db_res.save();
 

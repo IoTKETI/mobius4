@@ -34,6 +34,42 @@ hardcodes `cse_id` to build every MQTT request/response topic, and with a `cse_t
 the CSE tries to register with a remote CSE at boot, which can make the startup wait time out.
 The DB credentials also come from `config/`.
 
+## Tests transcribed from TS-0018
+
+Most of this suite is written against mobius4's behaviour. Four files are not: they are
+transcribed from the *test purposes* in TS-0018 (Test Suite Structure and Test Purposes), which
+is what a certification body judges an implementation against. Each test name carries the TP
+identifier it implements, and the assertions are that TP's *Expected behaviour* — so a failure
+reads as a conformance failure rather than as a disagreement with a scenario someone invented.
+
+| file | test purposes | configuration |
+|---|---|---|
+| `cse-registration.test.js` | `TP/oneM2M/CSE/REG/*` | CF01 — one CSE, test system acting as an AE |
+| `cse-registration-remote.test.js` | `TP/oneM2M/CSE/REG/*` | CF04 — two CSEs |
+| `group-management.test.js` | `TP/oneM2M/CSE/GMG/*` | CF01 |
+| `group-remote-members.test.js` | `TP/oneM2M/CSE/GMG/*` | CF02 — member hosted on a second CSE |
+
+Each of those files begins with a comment listing the test purposes it deliberately does **not**
+implement and why. Read it before adding to the file: "there is no test for this TP" and "this
+TP does not apply" are different situations and the file says which one holds.
+
+**Do not invent TP identifiers.** If a behaviour has no test purpose covering it, derive the
+test from the core specification and say so in the file. A made-up identifier reads like
+evidence.
+
+### The two-CSE configurations
+
+`test/helpers/two-cse.js` starts an IN-CSE and an MN-CSE that register with each other, each
+with a database of its own (`mobius4_test_reg_a`, `mobius4_test_reg_b`, created and dropped by
+the helper). It waits for the registration to complete before returning — `registree()` is not
+awaited by `mobius4.js`, so a server that reports "ready" has not necessarily registered yet.
+
+The wait polls **as the registree**, not as the registrar's administrator: a `<remoteCSE>`
+created by a registering CSE has no `acpi`, so the default access policy makes it visible to its
+creator only. Polling as the registrar's admin waits out the timeout on a registration that in
+fact succeeded.
+
+
 ## Running
 
 ```bash

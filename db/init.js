@@ -471,6 +471,8 @@ async function create_tables(client) {
                 rr BOOLEAN NOT NULL,
                 srv VARCHAR(10)[],
                 csz VARCHAR(10)[],
+                -- "or" (ontologyRef) is quoted because OR is a reserved SQL keyword.
+                "or" VARCHAR(${len.structured_res_id}),
                 loc GEOMETRY(GEOMETRY, 4326)
             );
         `);

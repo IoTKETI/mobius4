@@ -23,6 +23,95 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+## v4.13.0 (2026-08-08)
+
+**Why MINOR** — a new `<AE>` attribute (`ontologyRef`) with a backward-compatible
+DB migration, plus group members on remote CSEs, which is an oneM2M capability
+that did not work before.
+
+### Conformance tests taken from TS-0018
+
+The test purposes in TS-0018 (Test Suite Structure and Test Purposes) are what a
+certification body judges an implementation against, so the tests here are now
+transcribed from them rather than invented. Each test name carries the TP
+identifier it implements and asserts that TP's *Expected behaviour*.
+
+- `TP/oneM2M/CSE/REG/*` — registration. 24 cases in `test/cse-registration.test.js`
+  (CF01, one CSE) and 22 in `test/cse-registration-remote.test.js` (CF04, two CSEs).
+- `TP/oneM2M/CSE/GMG/*` — group management. 18 cases in
+  `test/group-management.test.js` (CF01) and 7 in
+  `test/group-remote-members.test.js` (CF02, member on another CSE).
+- `test/helpers/two-cse.js` stands up an IN-CSE and an MN-CSE that register with
+  each other, each with its own database, for the configurations that need two.
+
+Test count 209 → 282.
+
+Deliberately not implemented, and why, is recorded at the top of each test file.
+The largest exclusion is everything that depends on service subscription
+profiles and `<serviceSubscribedAppRule>` (the 4126 APP_RULE_VALIDATION_FAILED
+cases) and on `<AEAnnc>` announcement: neither exists in mobius4 and neither is
+planned.
+
+### Fixed — found by those test purposes
+
+- **`<AE>` rejected `ontologyRef`.** TS-0001 table 9.6.5-2 lists it as a 0..1 RW
+  attribute; mobius4 had no column, no model field and no schema entry, so a
+  registration carrying it was answered 4000 "or is not allowed". Adds the
+  attribute across the resource (`db/migrations/v4.13.0.sql`).
+- **An `<AE>` UPDATE silently dropped `contentSerialization`.** `update_an_ae`
+  had a delete branch for `csz` but no set branch, so a client that changed it
+  got 2004 and the old value stayed.
+- **A group fanout with no members answered 2000 with an empty list.**
+  TS-0004:7.4.14.2.4 requires NO_MEMBERS. Two things had to change: `fanout()`
+  now distinguishes "no members" from "no responses", and `reqPrim` no longer
+  overwrites the handler's status code with OK unconditionally — that assignment
+  had been turning every refusal the fanout could make into a success.
+- **Forwarded responses carried the Response Status Code as a string.**
+  `responseStatusCode` is `xs:integer`; the HTTP header was passed through
+  verbatim, so a group fanout aggregation held `2000` for a local member and
+  `"2000"` for a remote one, and a client had to accept both spellings.
+
+### Group members hosted on other CSEs
+
+`memberType_validation` looked a member's `resourceType` up locally and nowhere
+else. A member on another CSE therefore resolved to type 0 — indistinguishable
+from a type mismatch — so the default consistency strategy (ABANDON\_MEMBER)
+dropped it, and the group was still returned with `memberTypeValidated` = true.
+Measured against two CSEs on 2026-08-08: a `<group>` created with one local and
+one remote `<container>` came back with the remote one gone and claimed the
+members had been validated.
+
+The three outcomes TS-0004:7.4.13.2.1 defines are now distinguished, on CREATE
+and on UPDATE alike:
+
+| the member's type is | mobius4 now |
+|---|---|
+| readable (locally or by retrieving it from its Hosting CSE) | uses that type, then applies the consistency strategy |
+| refused for lack of privilege | rejects the request, RECEIVER\_HAS\_NO\_PRIVILEGE |
+| unreachable | keeps the member, sets `memberTypeValidated` to false |
+
+Retrieval goes through the normal request path, so a member ID that is
+SP-relative to a registered CSE is forwarded using that `<remoteCSE>`'s
+`pointOfAccess`. Fanout to remote members works through the same path and was
+verified end to end.
+
+Two related fixes fell out of this: `memberTypeValidated` = false was being
+stored as null and omitted from responses, because both places tested it for
+truthiness. TS-0001:9.6.13 requires the attribute to be set whenever
+`memberType` is not 'mixed', and false is precisely what an unvalidated group
+has to report.
+
+### Known specification inconsistency
+
+`TP/oneM2M/CSE/REG/CRE/023` expects **4105 CONFLICT** when an AE re-registers
+with an AE-ID-Stem already in use. TS-0004:7.4.5.2.1 names
+**ORIGINATOR\_HAS\_ALREADY\_REGISTERED** for that exact check, and
+TS-0001:10.2.2.2 step 004 says only "shall respond with an error". mobius4
+follows TS-0004 and answers 4117. Recorded so that a failure on this TP in a
+certification run is recognised as the known disagreement it is, not as a
+regression.
+
+
 ### Unresolved — pending spec clarification
 
 - **Whether CIN eviction (`mni`/`mbs` exceeded) should fire `net=4`.** In oneM2M

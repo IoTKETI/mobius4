@@ -21,6 +21,9 @@ const AE = sequelize.define('ae', {
   rr: { type: DataTypes.BOOLEAN, allowNull: false },
   srv: { type: DataTypes.ARRAY(DataTypes.STRING) },
   csz: { type: DataTypes.ARRAY(DataTypes.STRING) },
+  // 'or' (ontologyRef) is a reserved SQL keyword; Sequelize quotes every identifier, so the
+  // column name is safe as written. Same treatment as models/flx-model.js.
+  or: { type: DataTypes.STRING },
   loc: { type: DataTypes.GEOMETRY('GEOMETRY', 4326) },
 }, {
   tableName: 'ae',

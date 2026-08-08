@@ -78,7 +78,10 @@ test("the remote CSE's status is returned, not replaced with OK", async (t) => {
   const resp = {};
   await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "r1", rvi: "3" }, "Mobius/x", resp);
 
-  assert.equal(resp.rsc, "4004", "a forwarded 4004 must not arrive as 2000");
+  // A number, not the "4004" string the header carried: responseStatusCode is xs:integer
+  // (TS-0004 CDT-enumerationTypes.xsd), and passing the header through verbatim put a quoted
+  // status into group fanout aggregations next to numeric local ones.
+  assert.equal(resp.rsc, 4004, "a forwarded 4004 must not arrive as 2000");
   assert.deepEqual(resp.pc, { "m2m:dbg": "no such thing" });
 });
 
@@ -92,7 +95,7 @@ test("a dead poa is skipped and the next one is used", async (t) => {
   const resp = {};
   await forward_to_poa([dead, alive.url], { op: 2, fr: "Sabc", rqi: "r2", rvi: "3" }, "Mobius/x", resp);
 
-  assert.equal(resp.rsc, "2000");
+  assert.equal(resp.rsc, 2000);
   assert.equal(alive.received.length, 1, "the second access point was actually dialled");
 });
 

@@ -11,7 +11,7 @@
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+const { create, update, retrieve, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
 const { startServer } = require("./helpers/server");
 
 let srv;
@@ -77,4 +77,38 @@ test("aei cannot be chosen by the requester", async () => {
   const res = await register(ae({ aei: "CmineNow" }));
   assert.equal(res.rsc, "4000");
   assert.match(res.body["m2m:dbg"], /^aei =>/);
+});
+
+// An UPDATE that changes an attribute the CSE quietly drops is worse than one that is refused:
+// the client is told 2004 and goes on believing the change took. update_an_ae had a delete
+// branch for csz (`csz === null` -> null) but no set branch, so a new contentSerialization went
+// nowhere. Found while implementing the TS-0018 registration test purposes; the same read
+// turned up ontologyRef missing from the resource altogether, which is covered by
+// TP/oneM2M/CSE/REG/CRE/012_AE/OR in test/cse-registration.test.js.
+test("an UPDATE of csz takes effect rather than being silently dropped", async () => {
+  const body = ae({ csz: ["json"] });
+  const created = await create(srv.baseUrl, CSE_BASE, 2, body, { originator: "" });
+  assert.equal(created.rsc, "2001");
+  const sid = `${CSE_BASE}/${body["m2m:ae"].rn}`;
+  const aei = created.body["m2m:ae"].aei;
+
+  const res = await update(srv.baseUrl, sid, { "m2m:ae": { csz: ["cbor", "json"] } }, { originator: aei });
+
+  assert.equal(res.rsc, "2004");
+  const got = (await retrieve(srv.baseUrl, sid, { originator: aei })).body["m2m:ae"];
+  assert.deepEqual(got.csz, ["cbor", "json"], "the stored value must be the one just sent");
+});
+
+test("an UPDATE of or takes effect", async () => {
+  const body = ae({ or: "http://example.invalid/ont-1" });
+  const created = await create(srv.baseUrl, CSE_BASE, 2, body, { originator: "" });
+  assert.equal(created.rsc, "2001");
+  const sid = `${CSE_BASE}/${body["m2m:ae"].rn}`;
+  const aei = created.body["m2m:ae"].aei;
+
+  const res = await update(srv.baseUrl, sid, { "m2m:ae": { or: "http://example.invalid/ont-2" } }, { originator: aei });
+
+  assert.equal(res.rsc, "2004");
+  const got = (await retrieve(srv.baseUrl, sid, { originator: aei })).body["m2m:ae"];
+  assert.equal(got.or, "http://example.invalid/ont-2");
 });
