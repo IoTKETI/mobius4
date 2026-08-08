@@ -23,6 +23,51 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+## v4.13.1 (2026-08-08)
+
+**Why PATCH** — a container could not be configured to do something it already
+knew how to do. No new oneM2M capability, no schema change.
+
+### Fixed: a containerised CSE could not register with another CSE
+
+`cse/registree.js` reads `config.cse.registrar` (`cse_type`, `cse_id`,
+`csebase_rn`, `ip`, `port`) to find the CSE it should register with.
+`docker/entrypoint.js` assembles `NODE_CONFIG` from the environment and **that
+block was missing entirely** — and because the entrypoint overwrites
+`process.env.NODE_CONFIG`, it could not be injected from outside either. There
+was also no `CSE_TYPE`, and `mobius4.js` only calls `registree()` when
+`cse.cse_type` is 2 or 3, so a container could never be anything but a
+standalone IN-CSE. Found on 2026-08-08 while building a two-CSE test
+environment, which had to be run from source instead.
+
+Six new variables, all optional — leave them out and the container is a
+standalone IN-CSE exactly as before:
+
+`CSE_TYPE`, `REGISTRAR_CSE_ID`, `REGISTRAR_CSE_BASE_RN`, `REGISTRAR_HOST`,
+`REGISTRAR_PORT`, `REGISTRAR_CSE_TYPE`.
+
+[`docker/compose.two-cse.yml`](docker/compose.two-cse.yml) is a working example
+of an IN-CSE and an MN-CSE registering with each other, and
+[docs/docker.md](docs/docker.md) explains the two settings that are easy to get
+wrong (`CSE_SP_ID` has to match on both; `CSE_POA` has to be reachable from the
+*other* container).
+
+**Verified end to end, in containers** on 2026-08-08: the MN-CSE registered at
+startup (`remoteCSE resource created on registrar` in its log, and the
+`<remoteCSE>` retrievable on the registrar), and a `<container>` created on one
+CSE was readable from the other by SP-relative address in **both** directions,
+2000 each way.
+
+The `NODE_CONFIG` assembly moved to `docker/node-config.js` so it can be tested
+without the entrypoint's identity file, database connection and handover to
+`mobius4.js`. `test/docker-node-config.test.js` covers it, including the rule
+that matters most here: a variable that is not set must not appear in the output,
+because `NODE_CONFIG` is merged *over* `config/default.json` and an empty string
+does not mean "use the default".
+
+Test count 282 → 289.
+
+
 ## v4.13.0 (2026-08-08)
 
 **Why MINOR** — a new `<AE>` attribute (`ontologyRef`) with a backward-compatible

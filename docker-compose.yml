@@ -89,6 +89,14 @@ services:
       CSE_SP_ID: ${CSE_SP_ID:-}
       CSE_BASE_RN: ${CSE_BASE_RN:-}
       CSE_POA: ${CSE_POA:-}
+      # Registration with another CSE. Leave all of these unset for a standalone IN-CSE, which
+      # is what an unconfigured deployment is. See docs/docker.md for a two-CSE example.
+      CSE_TYPE: ${CSE_TYPE:-}
+      REGISTRAR_CSE_ID: ${REGISTRAR_CSE_ID:-}
+      REGISTRAR_CSE_BASE_RN: ${REGISTRAR_CSE_BASE_RN:-}
+      REGISTRAR_HOST: ${REGISTRAR_HOST:-}
+      REGISTRAR_PORT: ${REGISTRAR_PORT:-}
+      REGISTRAR_CSE_TYPE: ${REGISTRAR_CSE_TYPE:-}
 
       HTTP_PORT: 7599
       HTTPS_ENABLED: ${HTTPS_ENABLED:-false}

@@ -15,6 +15,7 @@
 
 const path = require('node:path');
 const { resolveAdminIdentity, DEFAULT_LENGTH } = require('./admin-identity');
+const { buildNodeConfig } = require('./node-config');
 
 const IDENTITY_FILE = process.env.CSE_ADMIN_FILE || '/var/lib/mobius4/cse-admin';
 
@@ -44,20 +45,6 @@ const number = (name) => {
     return n;
 };
 
-// Drops undefined values so that an unset variable does not override config/default.json.
-const only = (obj) => {
-    const out = {};
-    for (const [k, v] of Object.entries(obj)) {
-        if (v === undefined) continue;
-        if (v && typeof v === 'object' && !Array.isArray(v)) {
-            const inner = only(v);
-            if (Object.keys(inner).length > 0) out[k] = inner;
-        } else {
-            out[k] = v;
-        }
-    }
-    return out;
-};
 
 // ── the administrator identity ────────────────────────────────────────────────────────────────
 
@@ -91,54 +78,7 @@ if (resolved.source === 'generated') {
 
 // ── NODE_CONFIG ───────────────────────────────────────────────────────────────────────────────
 
-const nodeConfig = only({
-    cse: {
-        admin: resolved.identity,
-        cse_id: env('CSE_ID'),
-        sp_id: env('CSE_SP_ID'),
-        csebase_rn: env('CSE_BASE_RN'),
-        poa: env('CSE_POA') ? [env('CSE_POA')] : undefined,
-    },
-    http: { port: number('HTTP_PORT') },
-    https: {
-        enabled: bool('HTTPS_ENABLED'),
-        port: number('HTTPS_PORT'),
-        key: env('HTTPS_KEY'),
-        cert: env('HTTPS_CERT'),
-        chain: env('HTTPS_CHAIN'),
-    },
-    db: {
-        host: env('DB_HOST'),
-        port: number('DB_PORT'),
-        name: env('DB_NAME'),
-        user: env('DB_USER'),
-        pw: env('DB_PW'),
-        // Exposed because the value that needs adjusting is environment-specific: a cold
-        // container on a throttled host takes longer to hand out a connection than a laptop does.
-        // Unset falls through to config/default.json rather than overriding it with undefined.
-        pool: {
-            max: number('DB_POOL_MAX'),
-            connectionTimeoutMs: number('DB_POOL_CONNECTION_TIMEOUT_MS'),
-            statementTimeoutMs: number('DB_POOL_STATEMENT_TIMEOUT_MS'),
-        },
-    },
-    mqtt: {
-        enabled: bool('MQTT_ENABLED'),
-        ip: env('MQTT_HOST'),
-        port: number('MQTT_PORT'),
-    },
-    security: {
-        helmet: { enabled: bool('HELMET_ENABLED') },
-        rateLimit: { enabled: bool('RATELIMIT_ENABLED'), max: number('RATELIMIT_MAX') },
-    },
-    // Containers log to stdout and let the log driver deal with rotation; a file inside the
-    // container is invisible to `docker compose logs` and grows in a layer nobody backs up.
-    logging: {
-        level: env('LOG_LEVEL'),
-        console: { enabled: true, pretty: false },
-        file: { enabled: false },
-    },
-});
+const nodeConfig = buildNodeConfig({ env, bool, number }, resolved.identity);
 
 process.env.NODE_CONFIG = JSON.stringify(nodeConfig);
 

@@ -1,0 +1,134 @@
+# Two CSEs registering with each other, in containers.
+#
+#   docker compose -f docker/compose.two-cse.yml up -d --build
+#
+# On arm64 set POSTGRES_IMAGE first (see docker-compose.yml for why it is overridable):
+#   POSTGRES_IMAGE=imresamu/postgis:17-3.5 \
+#     docker compose -f docker/compose.two-cse.yml up -d --build
+#
+# The registrar is on 7801, the registree on 7802. To see the registration that happened at
+# startup, ask the registrar for its <remoteCSE> children *as the registree* -- a <remoteCSE>
+# created by a registering CSE carries no acpi, so the default access policy shows it to its
+# creator only, and the registrar's own administrator cannot see it:
+#
+#   curl -s -H 'X-M2M-Origin: /mn-cse' -H 'X-M2M-RI: 1' -H 'X-M2M-RVI: 3' \
+#        'http://127.0.0.1:7801/Mobius?fu=1&ty=16'
+#
+# Standalone on purpose: it does not extend docker-compose.yml. That file describes one
+# deployment, and layering a second CSE onto it means overriding the service, the database name
+# and the volumes at once — three chances to end up testing the first CSE twice. Here both are
+# spelled out.
+#
+# What it demonstrates is the registrar wiring, which is what was missing: CSE_TYPE decides
+# whether a CSE registers at all (mobius4.js calls registree() only for 2 and 3), and the
+# REGISTRAR_* variables say where. Both CSEs carry the same CSE_SP_ID — without that,
+# SP-relative addressing between them does not resolve and a <group> member on the other CSE is
+# unreachable.
+#
+# MQTT is off: registration and forwarding here go over HTTP, and leaving the broker out keeps
+# the example to the thing it is showing.
+
+name: mobius4-two-cse
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  db-in:
+    # Overridable for the same reason as in docker-compose.yml: postgis/postgis has no
+    # arm64 manifest, so Apple Silicon and Graviton need a multi-arch build.
+    image: ${POSTGRES_IMAGE:-postgis/postgis:17-3.5}
+    environment:
+      POSTGRES_DB: mobius4
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mobius4"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  db-mn:
+    # Overridable for the same reason as in docker-compose.yml: postgis/postgis has no
+    # arm64 manifest, so Apple Silicon and Graviton need a multi-arch build.
+    image: ${POSTGRES_IMAGE:-postgis/postgis:17-3.5}
+    environment:
+      POSTGRES_DB: mobius4
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mobius4"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  # The registrar. An IN-CSE registers with nobody, so it has no REGISTRAR_* settings at all.
+  in-cse:
+    build:
+      context: ..
+    image: mobius4:local
+    depends_on:
+      db-in:
+        condition: service_healthy
+    environment:
+      CSE_ADMIN: Stwocse-admin
+      CSE_TYPE: 1
+      CSE_ID: /in-cse
+      CSE_SP_ID: //two-cse.example
+      CSE_BASE_RN: Mobius
+      # Reachable from the other container, not from the host: this is what the registree and
+      # any forwarded request dial.
+      CSE_POA: http://in-cse:7579
+      HTTP_PORT: 7579
+      DB_HOST: db-in
+      DB_NAME: mobius4
+      DB_USER: postgres
+      DB_PW: postgres
+      MQTT_ENABLED: "false"
+      LOG_LEVEL: info
+    ports:
+      - "7801:7579"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:7579/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    logging: *logging
+
+  # The registree. It sends a <remoteCSE> CREATE to the registrar once, at startup, and is not
+  # retried — so it waits for the registrar to be healthy rather than merely started.
+  mn-cse:
+    build:
+      context: ..
+    image: mobius4:local
+    depends_on:
+      db-mn:
+        condition: service_healthy
+      in-cse:
+        condition: service_healthy
+    environment:
+      CSE_ADMIN: Stwocse-admin
+      CSE_TYPE: 2
+      CSE_ID: /mn-cse
+      CSE_SP_ID: //two-cse.example
+      CSE_BASE_RN: Mobius
+      CSE_POA: http://mn-cse:7579
+      HTTP_PORT: 7579
+      REGISTRAR_CSE_ID: /in-cse
+      REGISTRAR_CSE_BASE_RN: Mobius
+      REGISTRAR_HOST: in-cse
+      REGISTRAR_PORT: 7579
+      REGISTRAR_CSE_TYPE: 1
+      DB_HOST: db-mn
+      DB_NAME: mobius4
+      DB_USER: postgres
+      DB_PW: postgres
+      MQTT_ENABLED: "false"
+      LOG_LEVEL: info
+    ports:
+      - "7802:7579"
+    logging: *logging
