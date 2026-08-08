@@ -42,7 +42,14 @@ async function create_a_grp(req_prim, resp_prim) {
 
     if (prim_res.mt !== 0) {
         const validity = await memberType_validation(req_prim, resp_prim);
-        if (false === validity) {
+        if (true !== validity) {
+            // A validation that refuses must say so. reqPrim's CREATE branch fills in 2001 when no
+            // status was set, so returning quietly here reported a group that was never created.
+            if (!resp_prim.rsc) {
+                logger.error({ validity }, 'memberType_validation refused without setting a status');
+                resp_prim.rsc = enums.rsc_str['INTERNAL_SERVER_ERROR'];
+                resp_prim.pc = { 'm2m:dbg': 'member type validation failed' };
+            }
             return;
         } else {
             prim_res.mtv = true;
@@ -292,11 +299,23 @@ function remove_duplicate_memberIDs(memberIDs) {
     );
 }
 
+// The consistency strategies of TS-0001:9.6.13, and the default the same clause gives:
+// "If it is not given by the Originator at the creation procedure, default is ABANDON_MEMBER."
+//
+// The default mattered more than it looks. Without it, a group whose members did not all match
+// memberType fell past every branch to a bare `return false` that set no response status —
+// create_a_grp then returned with nothing set, and reqPrim's CREATE branch filled in 2001. The
+// Originator was told the group had been created and there was no group. Measured 2026-08-08:
+// mt=3 with one <container> and one <AE> answered 2001 and a later GET answered 4004.
+const ABANDON_MEMBER = 1;
+const ABANDON_GROUP = 2;
+const SET_MIXED = 3;
+
 // member type validation is called during creation and update of 'mid' attribute of <grp> resource
 async function memberType_validation(req_prim, resp_prim) {
     // arguments: consistencyStrategy, memberType, memberIDs
     const prim_res = req_prim.pc['m2m:grp'];
-    const consistencyStrategy = prim_res.csy;
+    const consistencyStrategy = prim_res.csy ?? ABANDON_MEMBER;
     let memberType = prim_res.mt;
     const memberIDs = prim_res.mid;
 
@@ -311,7 +330,10 @@ async function memberType_validation(req_prim, resp_prim) {
 
     // check the member types from 'member_types' against 'memberType'
     // if all members are of the same type, return that type, otherwise, return 'MIXED'
-    if (memberType && memberType !== 0) {
+    // mt = 0 is MIXED: every type is acceptable, so there is nothing to validate.
+    if (!memberType || memberType === 0) return true;
+
+    {
         const checked_ty = member_types.every(({ ty }) => ty === memberType) ? memberType : 'MIXED';
     
         logger.debug({ checked_ty }, 'memberType_validation result');
@@ -320,24 +342,29 @@ async function memberType_validation(req_prim, resp_prim) {
         else
         // apply the consistency strategy (1: ABANDON_MEMBER, 2: ABANDON_GROUP, 3: SET_MIXED)
         {
-            if (consistencyStrategy === 1) {
+            if (consistencyStrategy === ABANDON_MEMBER) {
                 // remove the members in member_types that do not conform to the memberType, and get the 'mid' list of the remaining members
                 const remaining_members = member_types.filter(({ ty }) => ty === memberType).map(({ mid }) => mid);
                 req_prim.pc['m2m:grp'].mid = remaining_members;
                 
                 return true;
             }
-            if (consistencyStrategy === 2) {
+            if (consistencyStrategy === ABANDON_GROUP) {
                 resp_prim.rsc = enums.rsc_str['GROUP_MEMBER_TYPE_INCONSISTENT'];
                 resp_prim.pc = { 'm2m:dbg': 'member types are inconsistent with mt value provided' };
                 
                 return false;
             }
-            if (consistencyStrategy === 3) {
+            if (consistencyStrategy === SET_MIXED) {
                 req_prim.pc['m2m:grp'].mt = 0; // 0: 'MIXED'
                 
                 return true; 
             }
+
+            // Unreachable while csy is validated to 1-3 and defaulted above, but a silent `false`
+            // here is exactly what produced the 2001-with-no-group, so it says why it failed.
+            resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+            resp_prim.pc = { 'm2m:dbg': `unsupported consistencyStrategy: ${consistencyStrategy}` };
             return false;
         }
     }
