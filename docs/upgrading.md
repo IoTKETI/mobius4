@@ -21,6 +21,61 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.13.0
+
+### Required: DB migration
+
+`<AE>` gains the `ontologyRef` attribute, which needs a new column. A clean
+install does not need this — `db/init.js` creates the column — but an existing
+database does:
+
+```bash
+psql -d mobius4 -f db/migrations/v4.13.0.sql
+```
+
+The migration is `ALTER TABLE ae ADD COLUMN IF NOT EXISTS "or" VARCHAR(255)`. It
+does not rewrite existing rows and changes no behaviour by itself: every `<AE>`
+that already exists gets `or = NULL`, which is what "the attribute is not
+present" already meant. It is safe to run twice.
+
+### Worth knowing: a fanout over an empty group now fails instead of succeeding
+
+A RETRIEVE (or any operation) sent to `<group>/fopt` when the group has no
+members used to answer **2000** with an empty `m2m:agr`. It now answers **4109
+NO_MEMBERS**, which is what `TS-0004:7.4.14.2.4` requires.
+
+If a client treats "2000 with nothing in it" as normal — polling a group that is
+filled in later, for instance — it will start seeing an error status. The fix on
+the client side is to treat 4109 as "not yet", not as a failure.
+
+### Worth knowing: `memberTypeValidated` can now be false, and members are no longer silently dropped
+
+Before this release, a `<group>` member hosted on another CSE was dropped at
+creation time and the group still reported `memberTypeValidated` = true. Groups
+created that way are **already missing those members in the database** — this
+release does not go back and repair them. If you have groups whose `memberIDs`
+were meant to include resources on another CSE, re-send the CREATE or an UPDATE
+with the full member list.
+
+Two consequences for clients:
+
+- `memberTypeValidated` may now be **false**, which previously never appeared. It
+  means the CSE could not reach some member's Hosting CSE and has not judged
+  those members yet. The members are in the group regardless.
+- A `<group>` CREATE or UPDATE naming a member whose type the CSE is not allowed
+  to read is now rejected with **5105 RECEIVER_HAS_NO_PRIVILEGE** rather than
+  quietly dropping that member.
+
+### Worth knowing: forwarded Response Status Codes are numbers
+
+In an aggregated fanout response (`m2m:agr`/`m2m:rsp`), a member response coming
+from another CSE used to carry `rsc` as a JSON string (`"2000"`) while a local
+one carried a number (`2000`). Both are numbers now, matching the `xs:integer`
+type in TS-0004. A client that compared `rsc` against a string literal for
+forwarded members must compare against a number.
+
+---
+
 ## v4.11.0
 
 ### Worth knowing: `contentSize` values change, and with them what `mbis`/`mbs` refuse

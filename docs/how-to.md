@@ -63,6 +63,43 @@ There is another way of doing the same. The `group` resource creation request be
 }
 ```
 
+#### Members hosted on another CSE
+
+A group member does not have to live on the CSE hosting the `<group>`. A member ID in
+SP-relative form — `/{CSE-ID}/{path}` — names a resource on another CSE, and as long as that CSE
+is registered (there is a `<remoteCSE>` for it with a usable `pointOfAccess`), the fan-out
+reaches it and its response comes back in the aggregation alongside the local ones.
+
+```json
+{
+    "m2m:grp": {
+        "rn": "grp3",
+        "mnm": 10,
+        "mt": 3,
+        "mid": [
+            "Mobius/cnt1",
+            "/mobius4b/Mobius/cnt9"
+        ]
+    }
+}
+```
+
+When `memberType` (`mt`) is set, the CSE reads each member's `resourceType` to check it — for a
+remote member, by retrieving it from its Hosting CSE. Three things can happen, and they are not
+the same:
+
+| what happened | the answer |
+|---|---|
+| the type was read | the member is judged against `mt`, and `consistencyStrategy` decides the rest |
+| the member's CSE refused for lack of privilege | the whole request is rejected, **5105 RECEIVER_HAS_NO_PRIVILEGE** |
+| the member's CSE could not be reached | the member **stays** in the group and `memberTypeValidated` (`mtv`) comes back **false** |
+
+So `"mtv": false` in a response is not a failure. It says the CSE has not yet been able to check
+some members, and the group is usable in the meantime.
+
+A fan-out to a group that has no members at all is rejected with **4109 NO_MEMBERS** rather than
+answering 2000 with an empty aggregation.
+
 ### _Result Content_ parameter
 
 _Result Content_ (`rcn`) request parameter specifies what content will be included in a response. Mobius4 supports the following `rcn` values for child resources.
