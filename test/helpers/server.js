@@ -48,7 +48,7 @@ function killChild(child) {
   child.kill("SIGTERM");
 }
 
-async function startServer({ mqttPort, logLevel = "error" } = {}) {
+async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB } = {}) {
   const port = await freePort();
   // The https listener is off unless https.enabled is set (v4.7.0), so nothing here has to
   // reserve a port for it. Before that it came up unconditionally on config.https.port, and
@@ -56,7 +56,9 @@ async function startServer({ mqttPort, logLevel = "error" } = {}) {
   // instance sitting on 7580. The listener has its own file, test/https.test.js.
   const overrides = {
     http: { port },
-    db: { name: TEST_DB },
+    // dbName lets a test point the server at a database of its own — test/db-failure.test.js
+    // deliberately breaks the schema it runs against, which must not be the shared one.
+    db: { name: dbName },
     // Required since v4.6.0: config/default.json no longer ships an admin identity and
     // config/validate.js refuses to start without one. The value is deliberately not "SM" --
     // that is the identity earlier versions shipped, and the same guard now rejects it.

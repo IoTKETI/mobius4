@@ -97,7 +97,7 @@
     "pool": {
       "max": 20,
       "idleTimeoutMs": 30000,
-      "connectionTimeoutMs": 2000,
+      "connectionTimeoutMs": 5000,
       "statementTimeoutMs": 30000
     }
   },

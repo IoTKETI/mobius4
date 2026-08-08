@@ -1245,18 +1245,14 @@ async function fu1_discovery(req_prim, resp_prim) {
 }
 
 async function get_ty_from_unstructuredID(ri) {
-	try {
-		const result = await pool.query('SELECT ty FROM lookup WHERE ri = $1', [ri]);
-
-		if (result.rows.length === 0) {
-			return 0;
-		} else {
-			return result.rows[0].ty;
-		}
-	} catch (err) {
-		logger.error({ err }, 'get_ty_from_unstructuredID failed');
-		return 0;
-	}
+	// A failed query is NOT the same answer as "no such row", and must not be turned into one.
+	// This used to return 0 on error, which set_ri_sid reads as "the resource disappeared" and
+	// reqPrim answers 4004 — so an unreachable database told every client that every resource
+	// had ceased to exist. TS-0004:6.6.3.6 puts a receiver-side failure at 5000
+	// INTERNAL_SERVER_ERROR; prim_handling already maps a thrown error to that, so the error is
+	// left to propagate.
+	const result = await pool.query('SELECT ty FROM lookup WHERE ri = $1', [ri]);
+	return result.rows.length === 0 ? 0 : result.rows[0].ty;
 }
 
 async function get_structuredID(to) {
@@ -1271,31 +1267,22 @@ async function get_structuredID(to) {
 	}
 
 	// in other cases, 'to' is 'ri'
-	try {
-		result = await Lookup.findOne({ where: { ri: to } });
-		return result.sid;
-	} catch (err) {
-		logger.error({ err }, 'get_structuredID failed');
-		return null;
-	}
-
+	// Errors propagate on purpose — see get_ty_from_unstructuredID. The old catch also hid a
+	// second case: a missing row made `result` null and `result.sid` threw a TypeError, which was
+	// then reported as if the lookup itself had failed. A row that is not there is not an error,
+	// so it is answered with null and only real failures are thrown.
+	const result = await Lookup.findOne({ where: { ri: to } });
+	return result ? result.sid : null;
 }
 
 async function get_unstructuredID(to) {
 	// if 'to' is the csebase_rn or a structuredID, then return the 'ri' from the lookup table
 	if (config.cse.csebase_rn == to || to.includes("/")) {
-		try {
-			const result = await Lookup.findOne({ where: { sid: to } });
-
-			if (!result) {
-				return null;
-			} else {
-				return result.ri;
-			}
-		} catch (err) {
-			logger.error({ err }, 'get_unstructuredID failed');
-			return null;
-		}
+		// Errors propagate on purpose — see get_ty_from_unstructuredID. Returning null here made a
+		// database outage indistinguishable from "no such resource", and 4004 is a claim about the
+		// resource tree that the CSE is in no position to make when it cannot read it.
+		const result = await Lookup.findOne({ where: { sid: to } });
+		return result ? result.ri : null;
 	}
 	// if 'to' is not a structuredID, then return it
 	return to;

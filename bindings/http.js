@@ -13,6 +13,7 @@ const logger = require("../logger");
 const enums = require("../config/enums");
 const reqPrim = require("../cse/reqPrim");
 const metrics = require("../metrics");
+const pool = require("../db/connection");
 
 // Security: Helmet (configurable, default off)
 if (config.get("security.helmet.enabled")) {
@@ -178,9 +179,30 @@ app.get('/metrics', async (req, res) => {
   }
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+// Health check endpoint.
+//
+// This is a *readiness* probe: it answers "can this process serve a request", not merely "is the
+// process alive". Mobius4 cannot serve anything without its database — every request path starts
+// with a lookup — so a health check that skips the database reports a healthy container that
+// answers 5000 to everything. An orchestrator would leave it in the load balancer.
+//
+// The probe reads the `lookup` table rather than issuing `SELECT 1`. `SELECT 1` only proves the
+// connection is up, and a reachable database with a missing or unmigrated schema fails every real
+// request while passing that check. One indexed row is as cheap as the constant.
+//
+// It is bounded by the pool's own connectionTimeoutMs, so a wedged database fails this endpoint
+// rather than hanging it.
+app.get('/health', async (req, res) => {
+  const body = { status: 'ok', uptime: process.uptime() };
+  try {
+    await pool.query('SELECT ri FROM lookup LIMIT 1');
+    body.db = 'ok';
+    res.json(body);
+  } catch (err) {
+    // 503, not 500: the process is fine and the condition is expected to clear on its own.
+    logger.error({ err }, 'health check: database unreachable');
+    res.status(503).json({ status: 'unavailable', uptime: process.uptime(), db: 'unreachable' });
+  }
 });
 
 // CRUD mapping for HTTP / HTTPs server

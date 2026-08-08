@@ -113,6 +113,14 @@ const nodeConfig = only({
         name: env('DB_NAME'),
         user: env('DB_USER'),
         pw: env('DB_PW'),
+        // Exposed because the value that needs adjusting is environment-specific: a cold
+        // container on a throttled host takes longer to hand out a connection than a laptop does.
+        // Unset falls through to config/default.json rather than overriding it with undefined.
+        pool: {
+            max: number('DB_POOL_MAX'),
+            connectionTimeoutMs: number('DB_POOL_CONNECTION_TIMEOUT_MS'),
+            statementTimeoutMs: number('DB_POOL_STATEMENT_TIMEOUT_MS'),
+        },
     },
     mqtt: {
         enabled: bool('MQTT_ENABLED'),
