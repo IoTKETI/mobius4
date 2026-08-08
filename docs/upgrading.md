@@ -51,11 +51,11 @@ the client side is to treat 4109 as "not yet", not as a failure.
 ### Worth knowing: `memberTypeValidated` can now be false, and members are no longer silently dropped
 
 Before this release, a `<group>` member hosted on another CSE was dropped at
-creation time and the group still reported `memberTypeValidated` = true. Groups
-created that way are **already missing those members in the database** — this
-release does not go back and repair them. If you have groups whose `memberIDs`
-were meant to include resources on another CSE, re-send the CREATE or an UPDATE
-with the full member list.
+creation time and the group still reported `memberTypeValidated` = true. Those
+members are already gone from the stored `memberIDs`, and this release does not
+go back and repair them — re-send the CREATE, or an UPDATE carrying the full
+member list, for any group that was meant to span CSEs. Nothing to do if you have
+never put a remote member in a group, which is the common case: it did not work.
 
 Two consequences for clients:
 
