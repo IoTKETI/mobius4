@@ -110,7 +110,11 @@ async function create_a_res(req_prim, resp_prim) {
 	// get and check 'rn'
 
 	if (!res_rep.rn) {
-		res_rep.rn = get_a_new_rn(ty);
+		// A generated name still has to be free. A collision is unlikely but not impossible, and
+		// the failure it produced was the confusing kind: the unique index on lookup.sid rejected
+		// the insert and the client was told 4105 CONFLICT about a name it never chose and cannot
+		// change. Retrying costs one indexed lookup on a path that is already doing several.
+		res_rep.rn = await get_a_free_rn(ty, req_prim.sid);
 	}
 	else if (virtual_res_names.includes(res_rep.rn)) {
 		resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
@@ -1336,11 +1340,35 @@ async function set_ri_sid(req_prim) {
 
 
 function get_a_new_rn(ty) {
-	const rn = enums.ty_str[ty.toString()] + '-' + randomstring.generate(config.length.rn_random);
+	return enums.ty_str[ty.toString()] + '-' + randomstring.generate(config.length.rn_random);
+}
 
-	// BACKLOG-055: not checked for collision. A repeat would be caught by the unique index on
-	// lookup.sid and answered 4105 -- a name conflict the client never chose.
+// How many names to try before giving up. Each attempt is independent, so exhausting this many in
+// a namespace that is not nearly full does not happen by chance -- if it does, the cause is
+// something other than luck (a truncated rn_random, say) and looping harder would only hide it.
+const RN_GENERATION_ATTEMPTS = 5;
 
+/**
+ * A generated resourceName that is not already taken under `parent_sid`.
+ *
+ * TS-0001:9.6.1.3.1 leaves the name to the Hosting CSE when the Originator does not provide one,
+ * and requires names to be unique among the children of a parent. Nothing here can make that
+ * atomic -- a concurrent create can take the name between this check and the insert -- so the
+ * unique index stays the real guard. This removes the ordinary collision, not the race.
+ */
+async function get_a_free_rn(ty, parent_sid) {
+	let rn = get_a_new_rn(ty);
+
+	for (let attempt = 1; attempt <= RN_GENERATION_ATTEMPTS; attempt++) {
+		if (!(await get_unstructuredID(`${parent_sid}/${rn}`))) return rn;
+		logger.warn({ rn, parent_sid, attempt }, 'generated resourceName was taken, retrying');
+		rn = get_a_new_rn(ty);
+	}
+
+	// Handing back the last candidate rather than throwing: the unique index will refuse it if it
+	// is genuinely taken, which is the same answer this function would have to give anyway.
+	logger.error({ parent_sid, attempts: RN_GENERATION_ATTEMPTS },
+		'could not generate a free resourceName; check config.length.rn_random');
 	return rn;
 }
 
@@ -1822,6 +1850,7 @@ module.exports = {
 	fu1_discovery,
 	discovery_core,
 	get_a_new_rn,
+	get_a_free_rn,
 	get_ty_from_unstructuredID,
 	get_structuredID,
 	get_unstructuredID,
