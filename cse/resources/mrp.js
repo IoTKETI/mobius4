@@ -167,7 +167,8 @@ async function update_an_mrp(req_prim, resp_prim) {
   return;
 }
 
-// to-do: check the logic (all the functions below)
+// BACKLOG-060: the <modelRepo> family is non-standard and its virtual-resource handling has
+// never been reviewed or covered by tests.
 async function retrieve_ol(req_prim, resp_prim) {
   const mrp_res = await MRP.findOne({
     where: { ri: req_prim.parent_ri },

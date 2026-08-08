@@ -26,7 +26,7 @@ async function create_an_mmd(req_prim, resp_prim) {
     return;
   }
 
-  // validity check: to-do: change this with Joi
+  // BACKLOG-060: hand-written validation instead of a Joi schema (non-standard resource).
   if (!prim_res.vr || !prim_res.plf || !prim_res.mlt) {
     resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
     resp_prim.pc = { "m2m:dbg": "vr, plf, and mlt are mandatory attributes" };
@@ -121,7 +121,7 @@ async function update_parent_mrp(mrp_db_res, mmd_id, model_size) {
     const deleted_ri = mmd_list.shift();
 
     const tmp_resp = {};
-    // to-do: don't get the mms with additional access but, put the 'mms' info in 'mms_list'
+    // BACKLOG-060: each member is fetched separately instead of being carried in mms_list.
     const { delete_a_res } = require('../hostingCSE');
     await delete_a_res({ fr: config.cse.admin, to: deleted_ri, rqi: "1234" }, tmp_resp);
     cbmo = cbmo - tmp_resp.pc["m2m:mmd"].mms;
@@ -131,7 +131,7 @@ async function update_parent_mrp(mrp_db_res, mmd_id, model_size) {
   // update 'cbmo' of the parent
   cbmo += model_size;
   if (cbmo > mbmo) {
-    // to-do: checking 'mbs' and remove a number of instances, as required
+    // BACKLOG-060: maxByteSize is not enforced for this resource family.
   }
 
   // finally update the above parent attributes
@@ -193,7 +193,7 @@ async function update_an_mmd(req_prim, resp_prim) {
   const prim_res = req_prim.pc["m2m:mmd"];
   const ri = req_prim.ri;
 
-  // validity check: to-do: change this with Joi
+  // BACKLOG-060: hand-written validation instead of a Joi schema (non-standard resource).
   if (prim_res.mmd === null && prim_res.mmu) {
     resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
     resp_prim.pc = { 'm2m:dbg': 'either mmd or mmu shall be included' };

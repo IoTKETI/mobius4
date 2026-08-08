@@ -37,7 +37,8 @@ async function create_an_ae(req_prim, resp_prim) {
     }
 
     let aei;
-    // to-do: no 'fr' is allowed in the spec only for AE registration
+    // An AE that has no identity yet registers without From, and the CSE assigns one. That is
+    // why an empty originator is accepted here and nowhere else.
     if (!req_prim.fr) {
         // set empty string to assign an ID
         req_prim.fr = '';
@@ -60,7 +61,8 @@ async function create_an_ae(req_prim, resp_prim) {
     const et = get_default_et();
 
     // 'rr' is mandatory
-    // to-do: mandatory attribute validation by Joi
+    // BACKLOG-059: mandatory-attribute checks are hand written here rather than declared in the
+    // Joi schema, so they can drift from it.
     if (prim_res.rr === undefined || prim_res.rr === null) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': 'rr is missing' };

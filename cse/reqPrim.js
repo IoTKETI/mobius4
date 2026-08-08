@@ -38,7 +38,8 @@ async function prim_handling(req_prim) {
   resp_prim.rvi = req_prim.rvi || config.cse.versions[0];
 
   // request primitive validation
-  // to-do: allow empty 'to' parameter for AE registration
+  // BACKLOG-056: the schema requires To on every request. Whether AE registration may omit it
+  // is a specification question that has not been settled here.
   const validated = req_prim_schema.validate(req_prim);
   if (validated.error) {
     const { message, path } = validated.error.details[0];
@@ -98,15 +99,13 @@ async function prim_handling(req_prim) {
   }
 
   // check if the target is a virtual resource
-  await set_virtual_res_info(req_prim); // to-do: should change the function name? a bit misleading for the following code
+  await set_virtual_res_info(req_prim);
   // in case it is a normal resource and does not exist, return the response immediately
   if (!req_prim.vr && !ri) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
     resp_prim.pc = { "m2m:dbg": "target resource does not exist" };
 
     return resp_prim;
-  } else if (req_prim.vr && ri == null) {
-    // to-do
   }
 
   //
@@ -330,7 +329,8 @@ async function prim_handling(req_prim) {
         if (!resp_prim.rsc) {
           resp_prim.rsc = enums.rsc_str["DELETED"];
         }
-        // to-do: depending on 'rcn' options, 'pc' is set to empty or not
+        // rcn 4/5/6/8 are valid for Delete (TS-0001:8.1.2 Table 8.1.2-1) and would carry the
+        // child representations; only rcn 0/1 are honoured here. Tracked as BACKLOG-050.
         if (!req_prim.rcn) resp_prim.pc = undefined;
 
         break;
@@ -473,12 +473,19 @@ async function set_virtual_res_info(req_prim) {
         req_prim.parent_ty = parent_res.ty;
         req_prim.parent_ri = parent_res.ri;
       } else {
-        // to-do: return error info
+        // The parent is gone, so this is not a virtual resource of anything. Returning without
+        // setting req_prim.vr is what produces the right answer: vr is only assigned further down,
+        // once the parent and its type check out, so the caller's "no vr and no ri" guard answers
+        // 4004. Measured 2026-08-08: GET /Mobius/no-such-container/la -> 404 / RSC 4004.
+        //
+        // It reads like a missing error path and is not one, but it is fragile — moving the vr
+        // assignment above this point would turn the 4004 into an empty 2000.
         return;
       }
 
       if (vir_res_name == "la" || vir_res_name == "ol") {
-        // confirm that the parent is 'cnt' type => could be timeSeries, flexContainerInstance as well (to-do)
+        // <timeSeries> and <flexContainerInstance> also carry <latest>/<oldest>, but neither
+        // resource type exists in mobius4 yet, so there is nothing to add to this list.
         if (
           enums.ty_str[parent_res.ty] !== "cnt" &&
           enums.ty_str[parent_res.ty] !== "mrp" &&
@@ -557,8 +564,8 @@ async function request_forwarding(req_prim, shortest_to) {
   // get 'poa' of the <remoteCSE> resource
   // send the request to the other CSE by the 'poa', which may be over HTTP or MQTT
 
-  // to-do
-  // check whether we need to try other poa items if one of them is not working
+  // BACKLOG-057: only the first pointOfAccess is tried. A <remoteCSE> that lists several is
+  // unreachable through this CSE as soon as the first one stops answering.
   const poa = csr_res.poa[0];
   logger.debug({ poa }, 'forwarding via poa');
 
@@ -605,7 +612,8 @@ async function request_forwarding(req_prim, shortest_to) {
     }
   } else if (poa.startsWith('mqtt')) {
     // MQTT
-    // to-do: implement MQTT forwarding
+    // BACKLOG-058: forwarding to a <remoteCSE> whose poa is mqtt: is not implemented -- the
+    // branch falls through and the response is reported as OK.
   }
 
   // step4: handle the response back from the other CSEs and send it back to the Originator

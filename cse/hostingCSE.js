@@ -713,8 +713,8 @@ async function delete_a_res(req_prim, resp_prim) {
 	noti.check_and_send_noti(req_prim, tmp_resp, "delete")
 		.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 
-	// to-do
-	// when delete a <cin> resource, update the parent <cnt> resource's 'cbs' attribute
+	// Deleting a <cin> shrinks the parent <cnt>'s currentByteSize by that instance's contentSize.
+	// (TS-0004:7.4.7.2.4 — the counters track the instances that are actually there.)
 	if (req_prim.to_ty === 4 && req_prim.int_cr_req !== true) {
 		const parent_cnt_ri = tmp_resp.pc['m2m:cin'].pi;
 		const cs = tmp_resp.pc['m2m:cin'].cs;
@@ -994,7 +994,6 @@ function set_where_clause(req_prim) {
 	const lvl = req_prim.fc.lvl; // level
 	const sza = req_prim.fc.sza; // size above
 	const szb = req_prim.fc.szb; // size below
-	const ofst = req_prim.fc.ofst; // offset (to-do: implement)
 
 	// array filter condition
 	const cty_list = req_prim.fc.cty; // contentType
@@ -1339,7 +1338,8 @@ async function set_ri_sid(req_prim) {
 function get_a_new_rn(ty) {
 	const rn = enums.ty_str[ty.toString()] + '-' + randomstring.generate(config.length.rn_random);
 
-	// To-Do: check if the random one already exists, for safety
+	// BACKLOG-055: not checked for collision. A repeat would be caught by the unique index on
+	// lookup.sid and answered 4105 -- a name conflict the client never chose.
 
 	return rn;
 }
@@ -1434,8 +1434,10 @@ async function access_decision(req_prim, resp_prim) {
 	const ty_str = enums.ty_str[ty];
 	const acpi = JSONPath("$..acpi", temp_resp)[0];
 
-	// to-do: what is this?
-	// disable this so it is not applied for subsequent procedures, hence not exposed in responses
+	// int_cr_req marks a request the CSE raised on its own behalf (eviction, cascade delete), which
+	// makes retrieve_a_res hand back the internal creator that access control needs. It is cleared
+	// here, once that decision has been made, so the flag cannot leak into the procedures that
+	// follow and put int_cr into a response.
 	req_prim.int_cr_req = false;
 
 	// The administrator used to be granted every operation here, before any policy was read.
