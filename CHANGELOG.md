@@ -46,6 +46,16 @@ The two answer different questions and neither replaces the README's prose: capa
 observation, the matrix is coverage. `docs/openapi.yaml` remains the third thing — the shape of
 a request.
 
+Because CI enforces `capabilities.json`, the probe's own judgement is load-bearing: if it
+decides wrongly, CI enforces the wrong answer and the file looks exactly like a right one. The
+decisions are therefore separated into `scripts/lib/capabilities.js` and covered by
+`test/capabilities-probe.test.js` (11 tests). Writing those tests found two defects in the
+probe before any of this was committed — a notification wait that could never match, so a
+working feature was recorded as unsupported; and a missing `X-M2M-RSC` header being written as
+`rsc: 0`, a status code that does not exist, sitting where a real refusal would be.
+
+Test count 289 → 300.
+
 
 ### Fixed (tests only, no runtime change)
 

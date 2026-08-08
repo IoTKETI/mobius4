@@ -28,7 +28,8 @@ const config = require("config");
 
 const { startServer } = require("../test/helpers/server");
 const { startSink } = require("../test/helpers/noti-sink");
-const { request, discover, urils, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
+const { request, discover, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
+const { support, hasDrifted, summarize } = require("./lib/capabilities");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const OUT_PATH = path.join(REPO_ROOT, "features", "capabilities.json");
@@ -54,16 +55,6 @@ const RESOURCE_TYPES = [
 // The envelope key is the prefix that specialization declares, not m2m:.
 const FLX_CND = "http://developers.iotocean.org/schema/parkingBlock.xsd";
 const FLX_KEY = "sc:parkingBlock";
-
-// A success-class status (2xxx) is the only thing counted as support. Anything else — including
-// a perfectly reasonable 4005 OPERATION_NOT_ALLOWED — is recorded with the status that came
-// back, so that "refused on purpose" and "not implemented" stay distinguishable by whoever
-// reads the file.
-function support(res) {
-  const rsc = Number(res.rsc);
-  if (!Number.isFinite(rsc)) return { supported: false, rsc: null, note: "no X-M2M-RSC header" };
-  return { supported: rsc >= 2000 && rsc < 3000, rsc };
-}
 
 async function withPostgres(fn) {
   const client = new Client({
@@ -347,10 +338,7 @@ async function main() {
     await dropDatabase();
   }
 
-  // probed_at and the commit change on every run; comparing them would make --check fail
-  // always and mean nothing. What must not drift is the observed behaviour.
-  const observed = JSON.stringify({ entries: result.entries, procedures: result.procedures });
-  const text = `${JSON.stringify(result, null, 2)}\n`;
+  const summary = summarize(result);
 
   if (check) {
     if (!existsSync(OUT_PATH)) {
@@ -358,8 +346,10 @@ async function main() {
       return 1;
     }
     const previous = JSON.parse(readFileSync(OUT_PATH, "utf-8"));
-    if (JSON.stringify({ entries: previous.entries, procedures: previous.procedures }) === observed) {
-      console.log(`capabilities: no drift (${result.entries.length} resource types, ${result.procedures.length} procedures)`);
+    if (!hasDrifted(previous, result)) {
+      console.log(
+        `capabilities: no drift (${summary.resourceTypes} resource types, ${summary.procedures} procedures)`
+      );
       return 0;
     }
     console.error(
@@ -370,15 +360,12 @@ async function main() {
   }
 
   mkdirSync(path.dirname(OUT_PATH), { recursive: true });
-  writeFileSync(OUT_PATH, text, "utf-8");
-  const supported = result.entries.reduce(
-    (n, e) => n + Object.values(e.operations).filter((o) => o.supported).length, 0);
-  const procs = result.procedures.filter((p) => p.supported === true).length;
-  const unprobed = result.procedures.filter((p) => p.supported === null).length;
+  writeFileSync(OUT_PATH, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
   console.log(
     `capabilities: ${OUT_PATH}\n` +
-      `  ${result.entries.length} resource types, ${supported} supported operations\n` +
-      `  ${result.procedures.length} procedures — ${procs} supported, ${unprobed} not probed here`
+      `  ${summary.resourceTypes} resource types, ${summary.supportedOperations} supported operations\n` +
+      `  ${summary.procedures} procedures — ${summary.supportedProcedures} supported, ` +
+      `${summary.unprobedProcedures} not probed here`
   );
   return 0;
 }
