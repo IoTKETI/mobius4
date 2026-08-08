@@ -60,21 +60,9 @@ async function create_an_ae(req_prim, resp_prim) {
     const now = get_cur_time();
     const et = get_default_et();
 
-    // 'rr' is mandatory
-    // BACKLOG-059: mandatory-attribute checks are hand written here rather than declared in the
-    // Joi schema, so they can drift from it.
-    if (prim_res.rr === undefined || prim_res.rr === null) {
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': 'rr is missing' };
-        return;
-    }
-
-    // 'api' shall start with 'N' or 'R'
-    if (!prim_res.api || (prim_res.api.startsWith('N') === false && prim_res.api.startsWith('R') === false)) {
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': 'api shall start with N or R' };
-        return;
-    }
+    // 'rr' and 'api' are checked by ae_create_schema above, including the N/R prefix rule.
+    // The two checks that used to sit here were unreachable for 'rr' — Joi rejected it first —
+    // and the only copy of the prefix rule for 'api'.
 
     // check if the AE-ID already exists
     const exists = await AE.findByPk(aei);
