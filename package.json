@@ -32,7 +32,8 @@
   "scripts": {
     "start": "node mobius4.js",
     "dev": "NODE_ENV=dev node mobius4.js",
-    "test": "node --test --test-concurrency=1 --test-reporter=tap 'test/**/*.test.js'"
+    "test": "node --test --test-concurrency=1 --test-reporter=tap 'test/**/*.test.js'",
+    "probe-capabilities": "node scripts/probe-capabilities.js"
   },
   "keywords": [
     "oneM2M"

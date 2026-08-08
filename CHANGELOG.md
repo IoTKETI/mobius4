@@ -23,6 +23,40 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Added: a machine-checked record of what this CSE supports
+
+Two files under `features/`, and a CI step that keeps the first one honest.
+
+- **[`features/capabilities.json`](features/capabilities.json)** — what a running instance
+  *answered*, not what anyone wrote down. `npm run probe-capabilities` starts an isolated
+  instance on its own database, sends real requests and records the Response Status Codes;
+  `npm run probe-capabilities -- --check` fails when the committed file no longer matches, and
+  CI runs it on every change. It covers 9 resource types and 18 procedures — discovery filters,
+  Result Content values, `<latest>`/`<oldest>`, group fan-out, notification delivery.
+  Procedures that need a second CSE (registration, forwarding, fan-out to remote members) are
+  listed with `supported: null` and the reason rather than left out: not having asked and having
+  been told no are different facts.
+- **[`features/support-matrix.md`](features/support-matrix.md)** — how far the implementation
+  reaches across the standard, by functional area of the oneM2M test suite structure
+  (TS-0018 clause 6.2), with the number of test purposes demonstrated by tests in this
+  repository. Generated from the development repository's feature inventory; regenerate rather
+  than edit.
+
+The two answer different questions and neither replaces the README's prose: capabilities is
+observation, the matrix is coverage. `docs/openapi.yaml` remains the third thing — the shape of
+a request.
+
+Because CI enforces `capabilities.json`, the probe's own judgement is load-bearing: if it
+decides wrongly, CI enforces the wrong answer and the file looks exactly like a right one. The
+decisions are therefore separated into `scripts/lib/capabilities.js` and covered by
+`test/capabilities-probe.test.js` (11 tests). Writing those tests found two defects in the
+probe before any of this was committed — a notification wait that could never match, so a
+working feature was recorded as unsupported; and a missing `X-M2M-RSC` header being written as
+`rsc: 0`, a status code that does not exist, sitting where a real refusal would be.
+
+Test count 289 → 300.
+
+
 ### Fixed (tests only, no runtime change)
 
 - **The two-CSE test helper hardcoded its database names.** `test/helpers/two-cse.js` used
