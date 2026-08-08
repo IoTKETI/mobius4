@@ -293,13 +293,18 @@ allows buys nothing. `db.pool.max` is the connection total for the process (defa
 ## Health checks and what they do not cover
 
 ```bash
-curl localhost:7599/health     # {"status":"ok","uptime":132.5}
+curl localhost:7599/health     # {"status":"ok","uptime":132.5,"db":"ok"}
 ```
 
-`/health` reports that the HTTP listener is answering. **It does not check the
-database**: a CSE that has lost PostgreSQL still returns `ok` here while failing every
-request. Treat it as a liveness check, not a readiness one. Compose uses it to decide
-whether the container is healthy, which is the same limitation.
+`/health` is a **readiness** check as of v4.11.0: it reads one row from the database before
+answering. A CSE that cannot reach PostgreSQL — or reaches it but finds no usable schema —
+answers `503` with `{"status":"unavailable","db":"unreachable"}` instead of `200`.
+
+That matters because Compose uses this endpoint to decide whether the container is healthy.
+Before v4.11.0 it only reported that the HTTP listener was answering, so a container whose
+database had gone away stayed `healthy` while failing every request — observed in a deployment
+lasting two and a half hours. Now the same situation marks the container unhealthy and the
+restart policy takes over.
 
 Metrics are richer, when `metrics.enabled` is on: `curl localhost:7599/metrics`. See
 [operations.md](operations.md).

@@ -21,6 +21,78 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.11.0
+
+### Worth knowing: `contentSize` values change, and with them what `mbis`/`mbs` refuse
+
+`contentSize` counted JavaScript string units (`length * 2`), not bytes. It now counts UTF-8
+bytes, as `TS-0001:9.6.7` requires.
+
+```
+"abc"          3 bytes    was 6    now 3
+"0123456789"  10 bytes    was 20   now 10
+"한글"          6 bytes    was 4    now 6
+```
+
+**Nothing needs migrating.** Existing `<contentInstance>` rows keep the `cs` they were stored
+with, and a container's `cbs` is the sum of those, so a container's figure is a mix of old and new
+until its instances turn over.
+
+**Two things to check before upgrading:**
+
+- A container sitting close to its `maxByteSize` ceiling may evict differently for a while, since
+  `cbs` is compared against `mbs` and half the values were inflated.
+- Requests that used to be refused will now succeed. If any client depends on a
+  `maxByteSizePerInstance` refusal as a size guard, its effective limit has roughly doubled for
+  ASCII content — halve the configured value to keep the previous behaviour.
+
+Structured content is measured as its JSON form. Which serialization the standard means is
+undefined and remains an open question.
+
+### Worth knowing: a database failure now answers 5000
+
+During a database outage requests came back 4004 "target resource does not exist", for resources
+that existed. They now answer 5000 INTERNAL_SERVER_ERROR (`TS-0004:6.6.2`, `6.6.3.6`).
+
+**Check your client's error handling.** A client that treats 4004 as "it is not there, create it"
+was being led into recreating live resources; a client that does not retry 4xxx was giving up on
+a condition that would have cleared. Both are correct behaviours against the new code and wrong
+against the old.
+
+The create path (previously 4000) and the `<CSEBase>` retrieve (previously **4103 access denied**)
+changed with it.
+
+### Worth knowing: `/health` can now fail
+
+It reads one row from the database before answering, and returns `503` with
+`{"status":"unavailable","db":"unreachable"}` when it cannot.
+
+If you have an external monitor treating any non-200 from `/health` as an incident, it will now
+see incidents it previously missed — that is the point. If you were using `/health` as a liveness
+probe specifically (restart only when the process is gone), it is no longer the right endpoint for
+that: it now reports readiness.
+
+Compose already used this endpoint as the container healthcheck, so no compose change is needed.
+
+### Worth knowing: `<subscription>` now sets `creator` by itself
+
+Where `notificationURI` is not the Originator, `creator` is filled in automatically
+(`TS-0004:7.4.8.2.1`) and carried in notifications as `m2m:sgn.cr` (`TS-0004:7.5.1.2.2`).
+
+If a notification consumer validates the set of members it receives strictly, it will now see one
+more.
+
+**A request can no longer set `creator` to another entity's identity** — that is refused with
+4000. Sending an empty value to mean "fill it in for me" still works, as does sending your own ID.
+This closes a privilege path: on a resource that defines `accessControlPolicyIDs` but has none
+set, the creator holds full control.
+
+### Optional: database pool settings on the container
+
+`db.pool.connectionTimeoutMs` default is raised from 2000 to 5000. `DB_POOL_MAX`,
+`DB_POOL_CONNECTION_TIMEOUT_MS` and `DB_POOL_STATEMENT_TIMEOUT_MS` can now be set in `.env`. Unset
+values fall through to `config/default.json` as before.
+
 ## v4.10.0
 
 ### Required if any client sends `rcn=4` or `rcn=8`: update the response parser
