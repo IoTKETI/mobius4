@@ -54,6 +54,65 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
   through the full TS-0010 text can use to settle them.
 
 
+## v4.11.1 (2026-08-08)
+
+A sweep of the `to-do` comments left in the source. Twenty-six of them; roughly half described
+work that had already been done or was never true. Two of the ones that were still true turned out
+to be silent wrong answers.
+
+### Fixed — a forwarded response kept its status
+
+The HTTP forwarding branch read `x-m2m-rsc` from the remote CSE into the response primitive and
+then fell through to an unconditional `OK` at the end of the function. **A forwarded 4004 reached
+the Originator as 2000**, with the remote CSE's error payload still attached — which is how it went
+unnoticed. Any status a `<remoteCSE>` returned was replaced.
+
+### Fixed — every pointOfAccess is tried, and an unreachable CSE says so
+
+Only `poa[0]` was used. A `<remoteCSE>` advertising several access points became unreachable
+through this CSE as soon as the first stopped answering. Each is now tried in turn, and when none
+answers the response is **5103 TARGET_NOT_REACHABLE** (`TS-0004:6.6.3.6`) rather than a transport
+error dressed as 5000.
+
+A transport failure is the only reason to move on: an answer from the remote CSE, including a
+4xxx, is the answer to that request and is passed back as it stands.
+
+An `mqtt:` `poa` used to fall into an empty branch and out through the same unconditional `OK`, so
+**a request that was never sent anywhere was reported as having succeeded**. It is now refused.
+Implementing it needs the ability to connect to a broker other than this CSE's own, which is
+tracked separately.
+
+### Fixed — a generated resourceName is checked before use
+
+`TS-0001:9.6.1.3.1` leaves the name to the Hosting CSE when the Originator does not supply one.
+mobius4 generated a random name and used it without looking, so a collision surfaced as **4105
+CONFLICT about a name the client never chose and could not change**. The name is now checked and
+regenerated. Concurrent creates are still settled by the unique index — this removes the ordinary
+collision, not the race.
+
+### Changed — `<AE>` mandatory attributes are validated in one place
+
+Two hand-written checks sat inside `create_an_ae`, one screen below the call that validates against
+the Joi schema. One was unreachable (the schema already required `rr` and rejected it first); the
+other, the App-ID `N`/`R` prefix rule of `TS-0001:7.1.2`, existed only there — so the schema a
+reader checks first did not describe what the CSE enforced. Both now live in the schema. No
+observable change.
+
+### Removed
+
+`cse/routing.js` — nothing required it, and its `request_forwarding` was an empty function. The
+real forwarding lives in `cse/reqPrim.js`.
+
+### Housekeeping
+
+The remaining `to-do` comments carry the backlog number that tracks them, so a reader can find out
+whether anyone is on it. Comments that described completed work were replaced with a description of
+what the code does; one that read like a missing error path was measured, found correct, and
+annotated with why it is fragile rather than deleted.
+
+**Why PATCH**: bug fixes and one refactor. No oneM2M capability is added, no resource type or
+operation changes, and no deployment needs to do anything.
+
 ## v4.11.0 (2026-08-08)
 
 Five conformance and robustness defects reported from an external proof of concept (a TR-0079
