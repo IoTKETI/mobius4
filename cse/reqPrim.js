@@ -657,12 +657,28 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
       continue;
     }
   } else if (poa.startsWith('mqtt')) {
-    // Not implemented. It used to fall through to the unconditional "OK" below, so a request that
-    // was never sent anywhere was reported as having succeeded. Reaching a CSE over MQTT means
-    // connecting to whatever broker its poa names, which this CSE cannot do yet (BACKLOG-054), so
-    // the honest answer is that the capability is absent (TS-0004:6.6.3.6 -- 5001).
-    logger.warn({ poa, targetCseId: target_cse_id }, 'MQTT forwarding is not implemented');
-    last_error = new Error('MQTT forwarding is not implemented');
+    // The request goes out on the standard request topic of TS-0010:6.4.2 and the answer comes
+    // back on the matching response topic, matched by rqi. A pointOfAccess names the broker only
+    // (TS-0010:6.6.3), so the topic is built from the two identities rather than read from the URL.
+    const mqtt_outbound = require('../bindings/mqtt-outbound');
+    const forwarded = {
+      ...req_prim,
+      to: cse_rel_to,
+      rqi: 'forwarding_' + req_prim.rqi,
+    };
+
+    const remote_resp = await mqtt_outbound.request_over_mqtt(poa, forwarded, target_cse_id);
+    if (remote_resp) {
+      // The remote CSE's own rqi is its answer to the forwarded request; the Originator is waiting
+      // on the one it sent, so the original is restored.
+      resp_prim.rsc = remote_resp.rsc;
+      resp_prim.rvi = remote_resp.rvi || resp_prim.rvi;
+      if (remote_resp.pc !== undefined) resp_prim.pc = remote_resp.pc;
+      return resp_prim;
+    }
+
+    logger.warn({ poa, targetCseId: target_cse_id }, 'mqtt forwarding got no answer');
+    last_error = new Error('no response over MQTT');
     continue;
   } else {
     logger.warn({ poa, targetCseId: target_cse_id }, 'unsupported poa scheme');

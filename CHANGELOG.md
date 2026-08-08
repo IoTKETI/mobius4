@@ -85,9 +85,35 @@ Unchanged: the default Result Content for Delete is still "nothing", rcn=1 still
 target's attributes alone, and rcn 2, 3, 7, 9, 10 and 12 are still refused as n/a for this
 operation.
 
-**Why MINOR**: this adds a oneM2M capability to an existing operation. It is additive — a client
-that does not ask for these values sees no difference, and one that did ask now gets what it asked
-for instead of a subset. Nothing to do on upgrade.
+### Added — notifications reach the broker their URL names
+
+A `<subscription>` whose `notificationURI` is `mqtt://…` was published through the one broker this
+CSE is itself connected to, whatever host the URL named. The topic was right and the server was
+wrong, which looks identical in the logs and delivers nothing.
+
+Outbound connections are now opened per broker and reused, with `TS-0010:6.6.2`'s default ports
+(1883 for `mqtt`, 8883 for `mqtts`) and `6.6.4`'s rule that the URL's path **is** the topic, whole.
+A URL naming this CSE's own broker still goes through the existing client rather than opening a
+second connection to it. A broker that cannot be reached is remembered briefly so that a burst of
+notifications does not retry a dead host on every message, and the number of brokers held open at
+once is capped.
+
+### Added — forwarding to a `<remoteCSE>` over MQTT
+
+A `pointOfAccess` of `mqtt://…` fell into an empty branch and out through an unconditional `OK`, so
+**a request that was never sent anywhere was reported as having succeeded** (v4.11.1 made it an
+honest failure; this release makes it work).
+
+The request goes out on `TS-0010:6.4.2`'s request topic and the answer comes back on the matching
+response topic of `6.4.3`, matched by `rqi` because one subscription carries the answers to every
+request in flight to that CSE. Identifiers are written into the topic as the clause requires — an
+SP-relative ID drops its leading `/`, an Absolute-CSE-ID's leading `//` becomes `:`, and every
+remaining `/` becomes `:`. A request that gets no answer within the timeout falls through to the
+next `pointOfAccess`, and then to 5103 TARGET_NOT_REACHABLE.
+
+**Why MINOR**: three oneM2M capabilities added — Result Content on an operation that lacked it, and
+two MQTT paths that did not work. All additive: a client that does not use them sees no difference,
+and nothing needs doing on upgrade. Deployments that never had a second broker are unaffected.
 
 ## v4.11.1 (2026-08-08)
 

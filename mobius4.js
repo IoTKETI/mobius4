@@ -81,8 +81,10 @@ async function shutdown(signal) {
             await new Promise((resolve) => { https_server.close(resolve); https_server.closeAllConnections(); });
         }
 
-        // 3. Disconnect MQTT
+        // 3. Disconnect MQTT — the inbound client, and any broker opened for outbound
+        //    notifications or forwarding (bindings/mqtt-outbound.js).
         await mqtt.disconnect();
+        await require('./bindings/mqtt-outbound').disconnect_all();
 
         // 4. Close the DB connections
         const sequelize = require('./db/sequelize');

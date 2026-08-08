@@ -288,10 +288,12 @@ async function mqtt_noti(noti_target, sgn) {
         pc: sgn,
     };
 
-    // BACKLOG-054: the MQTT delivery result is logged but never turned into a retry or a
-    // subscription-side signal, and every mqtt: notificationURI is sent through the one broker
-    // this CSE is configured with, whatever host the URL names.
-    const result = await mqtt.mqtt_transmitter(topic, req_prim);
+    // Published to the broker the URL names, not to this CSE's own. TS-0010:6.6.2 makes the
+    // authority part of the URL meaningful; sending everything to the local broker delivered the
+    // right topic to the wrong server, which looks identical in the logs and delivers nothing.
+    // bindings/mqtt-outbound.js short-circuits back to the local client when the URL does name it.
+    const mqtt_outbound = require('../bindings/mqtt-outbound');
+    const result = await mqtt_outbound.publish_to_url(noti_target, req_prim, { topic_override: topic });
     if (result === false) {
         logger.warn({ target: noti_target, topic }, 'mqtt notification delivery failed');
         return false;
