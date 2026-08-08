@@ -64,6 +64,75 @@ them off only if something in front of Mobius4 is doing the same job.
 
 ---
 
+## Registering with another CSE
+
+By default a container is a standalone IN-CSE: it registers with nobody, and
+`CSE_TYPE` and the `REGISTRAR_*` variables are unset. To make it an MN-CSE or
+ASN-CSE that registers with another CSE, set them.
+
+| variable | what it is |
+|---|---|
+| `CSE_TYPE` | `1` IN-CSE, `2` MN-CSE, `3` ASN-CSE. **This is what decides whether registration happens at all** — Mobius4 only registers when it is 2 or 3. |
+| `REGISTRAR_CSE_ID` | the registrar's CSE-ID, e.g. `/in-cse` |
+| `REGISTRAR_CSE_BASE_RN` | the registrar's `<CSEBase>` resource name, usually `Mobius` |
+| `REGISTRAR_HOST` | host or container name the registrar answers on |
+| `REGISTRAR_PORT` | its HTTP port |
+| `REGISTRAR_CSE_TYPE` | the registrar's own type, usually `1` |
+
+Two things are easy to get wrong:
+
+- **`CSE_SP_ID` must be the same on both CSEs.** SP-relative addressing
+  (`/other-cse/Mobius/...`) is what lets one CSE reach a resource on the other, and
+  it does not resolve across differing M2M-SP-IDs.
+- **`CSE_POA` must be reachable from the other container**, not from your laptop.
+  `http://localhost:7599` means "localhost" as read by whoever receives it. On a
+  compose network the service name works: `http://in-cse:7579`.
+
+Registration is attempted **once, at startup, and is not retried**, so the registree
+has to start after the registrar is answering. In compose that means
+`condition: service_healthy`, not merely `depends_on`.
+
+### A working two-CSE example
+
+[`docker/compose.two-cse.yml`](../docker/compose.two-cse.yml) brings up an IN-CSE and
+an MN-CSE that register with each other, each with its own database:
+
+```bash
+docker compose -f docker/compose.two-cse.yml up -d --build
+# on arm64, see "On Apple Silicon" above:
+#   POSTGRES_IMAGE=imresamu/postgis:17-3.5 docker compose -f docker/compose.two-cse.yml up -d --build
+```
+
+The registrar is on host port 7801, the registree on 7802. To see the registration:
+
+```bash
+curl -s -H 'X-M2M-Origin: /mn-cse' -H 'X-M2M-RI: 1' -H 'X-M2M-RVI: 3' \
+     'http://127.0.0.1:7801/Mobius?fu=1&ty=16'
+# {"m2m:uril":["Mobius/csr-xHocATHzAq"]}
+```
+
+Note the originator: **`/mn-cse`, not the administrator.** A `<remoteCSE>` created by
+a registering CSE carries no `accessControlPolicyIDs`, so the default access policy
+shows it to its creator only — asking as the registrar's own administrator returns an
+empty list, which looks exactly like a registration that never happened.
+
+Once registered, either CSE can reach the other's resources by SP-relative address.
+Over HTTP that is written with the `/~/` prefix (TS-0009 clause 6.2.2.1):
+
+```bash
+# create on the MN-CSE, read it from the IN-CSE
+curl -s -X POST 'http://127.0.0.1:7802/Mobius' -H "X-M2M-Origin: $ADMIN" \
+     -H 'X-M2M-RI: 1' -H 'X-M2M-RVI: 3' -H 'Content-Type: application/json;ty=3' \
+     -d '{"m2m:cnt":{"rn":"fwd-probe"}}'
+curl -si 'http://127.0.0.1:7801/~/mn-cse/Mobius/fwd-probe' -H "X-M2M-Origin: $ADMIN" \
+     -H 'X-M2M-RI: 2' -H 'X-M2M-RVI: 3' | grep -i x-m2m-rsc
+# X-M2M-RSC: 2000
+```
+
+Tear it down with `docker compose -f docker/compose.two-cse.yml down -v`.
+
+---
+
 ## The administrator identity
 
 `cse.admin` names the identity the admin `<accessControlPolicy>` grants all six
