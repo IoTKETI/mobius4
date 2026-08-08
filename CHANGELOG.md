@@ -23,6 +23,17 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Fixed (tests only, no runtime change)
+
+- **The two-CSE test helper hardcoded its database names.** `test/helpers/two-cse.js` used
+  `mobius4_test_reg_a`/`_b`, so running both files that need it in one command —
+  `node --test test/cse-registration-remote.test.js test/group-remote-members.test.js`, which
+  is the natural thing to do — failed with
+  `Key (datname)=(mobius4_test_reg_a) already exists`. `npm test` passes
+  `--test-concurrency=1` and was never affected, but the failure read as the *feature* being
+  broken rather than the fixture colliding. The names now carry the process id.
+
+
 ## v4.13.1 (2026-08-08)
 
 **Why PATCH** — a container could not be configured to do something it already
