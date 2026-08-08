@@ -5,6 +5,38 @@ const enums = require('../config/enums');
 // code, so both shapes are recognised here.
 const PG_UNIQUE_VIOLATION = '23505';
 
+// Failures of the database itself, not of the request. Sequelize's connection error classes plus
+// the PostgreSQL classes for a cancelled statement (57), a connection exception (08) and an
+// unavailable/locked resource (53, 55).
+//
+// Why this list exists: everything that was not a unique violation was answered 4000 BAD_REQUEST,
+// so during a database outage a client was told its request was malformed. TS-0004:6.6.2
+// Table 6.6.2-1 reserves 4xxx for "the request was malformed by the Originator" and 5xxx for "an
+// error condition at the Receiver CSE" — a connection that could not be acquired is squarely the
+// latter, and the distinction is what decides whether a client retries with backoff or gives up.
+const DB_FAILURE_NAMES = [
+    'SequelizeConnectionError',
+    'SequelizeConnectionRefusedError',
+    'SequelizeConnectionTimedOutError',
+    'SequelizeConnectionAcquireTimeoutError',
+    'SequelizeHostNotFoundError',
+    'SequelizeHostNotReachableError',
+    'SequelizeInvalidConnectionError',
+];
+const DB_FAILURE_PG_CLASSES = ['08', '53', '55', '57'];
+
+function is_db_failure(err) {
+    const name = err?.name ?? err?.parent?.name ?? err?.original?.name;
+    if (DB_FAILURE_NAMES.includes(name)) return true;
+
+    const code = err?.code ?? err?.original?.code ?? err?.parent?.code;
+    if (typeof code === 'string' && DB_FAILURE_PG_CLASSES.includes(code.slice(0, 2))) return true;
+
+    // node-postgres reports a dropped socket with a message and no SQLSTATE.
+    const message = err?.message ?? '';
+    return message.startsWith('Connection terminated');
+}
+
 /**
  * Classifies an error thrown while creating a resource.
  *
@@ -34,10 +66,17 @@ function classify_create_error(err) {
         };
     }
 
+    if (is_db_failure(err)) {
+        return {
+            rsc: enums.rsc_str['INTERNAL_SERVER_ERROR'],
+            dbg: err?.message,
+        };
+    }
+
     return {
         rsc: enums.rsc_str['BAD_REQUEST'],
         dbg: err?.message,
     };
 }
 
-module.exports = { classify_create_error };
+module.exports = { classify_create_error, is_db_failure };

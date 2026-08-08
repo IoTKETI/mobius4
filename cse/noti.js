@@ -164,6 +164,17 @@ async function send_a_noti(sub_res, event_obj, notificationEventType, ae_poa_map
         },
     };
 
+    // TS-0004:7.5.1.2.2 step 2.1 (repeated in 7.5.1.2.3/.4/.19/.20): "if the <subscription>
+    // resource instance has the creator attribute, the Originator shall set the creator element
+    // of the notification data object to the value of the <subscription> resource's creator
+    // attribute."
+    //
+    // Without it a consumer cannot tell, from the notification alone, whose subscription produced
+    // it — which is what a gateway needs in order to drop the echo of its own writes. Note this
+    // is the *subscription's* creator; the changed resource's own cr travels inside nev.rep and
+    // is a different attribute.
+    if (sub_res.cr) sgn["m2m:sgn"].cr = sub_res.cr;
+
     for (const noti_target of sub_res.nu) {
         if (noti_target.startsWith('http'))  { http_noti(noti_target, sgn); continue; }
         if (noti_target.startsWith('mqtt'))  { mqtt_noti(noti_target, sgn); continue; }

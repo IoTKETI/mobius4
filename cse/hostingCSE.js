@@ -1245,18 +1245,14 @@ async function fu1_discovery(req_prim, resp_prim) {
 }
 
 async function get_ty_from_unstructuredID(ri) {
-	try {
-		const result = await pool.query('SELECT ty FROM lookup WHERE ri = $1', [ri]);
-
-		if (result.rows.length === 0) {
-			return 0;
-		} else {
-			return result.rows[0].ty;
-		}
-	} catch (err) {
-		logger.error({ err }, 'get_ty_from_unstructuredID failed');
-		return 0;
-	}
+	// A failed query is NOT the same answer as "no such row", and must not be turned into one.
+	// This used to return 0 on error, which set_ri_sid reads as "the resource disappeared" and
+	// reqPrim answers 4004 — so an unreachable database told every client that every resource
+	// had ceased to exist. TS-0004:6.6.3.6 puts a receiver-side failure at 5000
+	// INTERNAL_SERVER_ERROR; prim_handling already maps a thrown error to that, so the error is
+	// left to propagate.
+	const result = await pool.query('SELECT ty FROM lookup WHERE ri = $1', [ri]);
+	return result.rows.length === 0 ? 0 : result.rows[0].ty;
 }
 
 async function get_structuredID(to) {
@@ -1271,31 +1267,22 @@ async function get_structuredID(to) {
 	}
 
 	// in other cases, 'to' is 'ri'
-	try {
-		result = await Lookup.findOne({ where: { ri: to } });
-		return result.sid;
-	} catch (err) {
-		logger.error({ err }, 'get_structuredID failed');
-		return null;
-	}
-
+	// Errors propagate on purpose — see get_ty_from_unstructuredID. The old catch also hid a
+	// second case: a missing row made `result` null and `result.sid` threw a TypeError, which was
+	// then reported as if the lookup itself had failed. A row that is not there is not an error,
+	// so it is answered with null and only real failures are thrown.
+	const result = await Lookup.findOne({ where: { ri: to } });
+	return result ? result.sid : null;
 }
 
 async function get_unstructuredID(to) {
 	// if 'to' is the csebase_rn or a structuredID, then return the 'ri' from the lookup table
 	if (config.cse.csebase_rn == to || to.includes("/")) {
-		try {
-			const result = await Lookup.findOne({ where: { sid: to } });
-
-			if (!result) {
-				return null;
-			} else {
-				return result.ri;
-			}
-		} catch (err) {
-			logger.error({ err }, 'get_unstructuredID failed');
-			return null;
-		}
+		// Errors propagate on purpose — see get_ty_from_unstructuredID. Returning null here made a
+		// database outage indistinguishable from "no such resource", and 4004 is a claim about the
+		// resource tree that the CSE is in no position to make when it cannot read it.
+		const result = await Lookup.findOne({ where: { sid: to } });
+		return result ? result.ri : null;
 	}
 	// if 'to' is not a structuredID, then return it
 	return to;
@@ -1357,37 +1344,34 @@ function get_a_new_rn(ty) {
 	return rn;
 }
 
+/**
+ * The value of a `contentSize`-style attribute: the size **in bytes** of a content value.
+ *
+ * `TS-0001:9.6.7` Table 9.6.7-2 defines `contentSize` as "Size in bytes of the content
+ * attribute", and `TS-0004:7.4.37.2.1` uses the same wording for `<flexContainer>`.
+ *
+ * This used to report the JavaScript in-memory footprint instead — `string.length * 2` (UTF-16
+ * code units), 8 per number, 4 per boolean. That is not a byte count of anything on the wire, and
+ * it broke a real deployment: a `<container>` with `maxByteSizePerInstance` of 10 refused a
+ * 10-byte ASCII payload with 5207 NOT_ACCEPTABLE, because 10 characters were counted as 20. It
+ * also ran the other way for non-Latin text — "한글" is 6 bytes in UTF-8 and was counted as 4.
+ *
+ * A string is measured as its own UTF-8 bytes, not as its JSON encoding: the attribute being
+ * sized is the content value, and the surrounding quotes belong to the serialization rather than
+ * to the value. Structured content has no size until it is serialized, so it is measured as its
+ * JSON form — which is what mobius4 stores and returns.
+ *
+ * **This does not settle what the standard means.** "Size in bytes" is undefined as to *which*
+ * serialization, and the same resource has different sizes in JSON, XML and CBOR while
+ * `contentSize` is a single value (tracked as SQ-003 in mobius4-dev-tool). What is settled is
+ * that the previous figure was not a byte count under any reading.
+ */
 function get_mem_size(obj) {
-	let bytes = 0;
-
-	function sizeOf(obj) {
-		if (obj !== null && obj !== undefined) {
-			switch (typeof obj) {
-				case "number":
-					bytes += 8;
-					break;
-				case "string":
-					bytes += obj.length * 2;
-					break;
-				case "boolean":
-					bytes += 4;
-					break;
-				case "object":
-					var objClass = Object.prototype.toString.call(obj).slice(8, -1);
-					if (objClass === "Object" || objClass === "Array") {
-						for (var key in obj) {
-							if (!obj.hasOwnProperty(key)) continue;
-							sizeOf(obj[key]);
-						}
-					} else bytes += obj.toString().length * 2;
-					break;
-			}
-		}
-		return bytes;
-	}
-
-	return sizeOf(obj);
+	if (obj === null || obj === undefined) return 0;
+	if (typeof obj === "string") return Buffer.byteLength(obj, "utf8");
+	return Buffer.byteLength(JSON.stringify(obj), "utf8");
 }
+
 
 // Resource types whose access decision is their parent's. TS-0001:9.6.1.3.2 draws the line at
 // whether the *type* defines accessControlPolicyIDs at all: a type with no such definition is

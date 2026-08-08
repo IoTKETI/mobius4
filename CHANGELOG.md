@@ -54,6 +54,126 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
   through the full TS-0010 text can use to settle them.
 
 
+## v4.11.0 (2026-08-08)
+
+Five conformance and robustness defects reported from an external proof of concept (a TR-0079
+oneM2M–ROS 2 interworking proxy), each reproduced against a live instance and checked against the
+core specification. Four are fixed here; the fifth is diagnosed but not solved.
+
+### ⚠️ `contentSize` values change
+
+`contentSize` was reporting the JavaScript in-memory footprint of the content — `string.length * 2`
+— rather than a byte count. `TS-0001:9.6.7` Table 9.6.7-2 defines it as "**Size in bytes** of the
+content attribute".
+
+| content | UTF-8 bytes | reported before | reported now |
+|---------|-------------|-----------------|--------------|
+| `"abc"` | 3 | 6 | 3 |
+| `"0123456789"` | 10 | 20 | 10 |
+| `"한글"` | 6 | 4 | 6 |
+| `"가나다"` | 9 | 6 | 9 |
+
+**This was breaking real requests, not just reporting.** A `<container>` with
+`maxByteSizePerInstance` of 10 refused a 10-byte ASCII payload with 5207 NOT_ACCEPTABLE, because
+ten characters counted as twenty. `currentByteSize`, `maxByteSize` and the `sizeAbove`/`sizeBelow`
+filter conditions all read the same figure.
+
+**What to expect on an existing deployment**: instances created before this release keep the old
+`cs`, and their parent's `cbs` is the sum of those old values, so a container's `cbs` will be a
+mix until its instances turn over. Retention limits (`mni`/`mbs`) are enforced against that mixed
+figure. Nothing needs to be migrated — the numbers converge as content rotates — but a deployment
+sitting close to a `mbs` ceiling may see eviction behave differently for a while.
+
+Structured content is measured as its JSON serialization. Which serialization the standard
+intends is genuinely undefined — the same resource has different sizes in JSON, XML and CBOR while
+`contentSize` is one value — and that question stays open. What is settled is that the previous
+figure was not a byte count under any reading.
+
+### Fixed — a database failure is no longer reported as a missing resource
+
+During a database outage, requests came back **4004 "target resource does not exist"**, for
+resources that existed. Three lookup helpers caught their own query errors and returned the value
+they also use for "no such row", so a failure to *read* the tree was reported as a fact *about*
+the tree.
+
+`TS-0004:6.6.2` Table 6.6.2-1 reserves 4xxx for "the request was malformed by the Originator" and
+5xxx for "an error condition at the Receiver CSE"; `6.6.3.6` gives 5000 INTERNAL_SERVER_ERROR. The
+distinction decides what a client does next — the reporting proxy treated 4004 as "it is not
+there, create it" and tried to recreate live resources, leaving unique-constraint violations
+behind, while a 5xxx would have been retried with backoff.
+
+The same outage produced different codes on different paths. All four now answer 5000:
+
+| path | before | now |
+|------|--------|-----|
+| resource lookup (`cse/hostingCSE.js`) | 4004 | 5000 |
+| create (`cse/create-error.js`) | 4000 | 5000 |
+| `<CSEBase>` retrieve (`cse/resources/cb.js`) | **4103 access denied** | 5000 |
+| request handling (`cse/reqPrim.js`) | 5000 | unchanged |
+
+### Fixed — `/health` is a readiness check
+
+It reported only that the process was up. Compose already uses it as the container healthcheck, so
+a container that had lost its database stayed `healthy` while failing every request — observed
+lasting two and a half hours in the reporting deployment, ending only with a manual restart.
+
+`/health` now reads one row from the `lookup` table and answers `503` with
+`{"status":"unavailable","db":"unreachable"}` when it cannot. It reads a table rather than issuing
+`SELECT 1` so that a reachable database with a missing or unmigrated schema also fails the check.
+
+`db.pool.connectionTimeoutMs` is raised from 2000 to 5000, and `DB_POOL_MAX`,
+`DB_POOL_CONNECTION_TIMEOUT_MS` and `DB_POOL_STATEMENT_TIMEOUT_MS` are now settable on the
+container. v4.6.3 left this value alone on the grounds that no measurement showed it causing a
+failure; this report is that measurement.
+
+### Fixed — `<subscription>` sets `creator`, and notifications carry it
+
+`TS-0004:7.4.8.2.1` (Recv-6.5, step 2): "If the _notificationURI_ is not the Originator, the
+Hosting CSE **shall** set the Originator's ID as the `<subscription>` resource's _creator_
+attribute." Only the explicit form was implemented — a request carrying `"cr": null` got the
+Originator, and a request that simply omitted it got nothing.
+
+`TS-0004:7.5.1.2.2` (step 2.1): "if the `<subscription>` resource instance has the _creator_
+attribute, the Originator **shall** set the _creator_ element of the notification data object to
+the value of the `<subscription>` resource's _creator_ attribute." `m2m:sgn` carried `nev` and
+`sur` only, so a consumer could not tell which subscription had produced a notification — the
+thing an interworking proxy needs in order to drop the echo of its own writes. (This is the
+subscription's `creator`; the changed resource's own `cr` travels inside `nev.rep` and always
+worked.)
+
+Both are now implemented. When every `nu` names the Originator itself the clause does not apply
+and `creator` stays unset.
+
+### Fixed — `creator` cannot be set to another entity's identity
+
+Found while implementing the above. A supplied `cr` was stored verbatim, and `creator` is defined
+as "the AE-ID or CSE-ID of the entity **which created** the resource" (`TS-0001:9.6.1.3.2`) — not
+a field a requester fills in freely.
+
+It was a privilege question, not only an accuracy one: on a resource that defines
+`accessControlPolicyIDs` but has none set, the default access policy gives the creator full
+control, so a client could hand that control to a third party by writing its ID into `cr`. An
+empty value still means "fill it in for me", the Originator's own ID is accepted as the no-op it
+is, and anything else is refused with 4000.
+
+### Known gap — the connection pool does not appear to recover on its own
+
+The reported outage had PostgreSQL recover completely while mobius4 stayed unusable for two and a
+half hours; `docker compose restart` fixed it in eighteen seconds with no action taken on the
+database. The logs point at connections that were never re-established
+(`SequelizeConnectionAcquireTimeoutError`, `Connection terminated due to connection timeout`), but
+the pool's internal state was not observed and the mechanism is not confirmed.
+
+**What this release changes is the consequence, not the cause**: the health check now fails in
+that situation, so an orchestrator restarts the container instead of leaving it in rotation. That
+is automatic recovery, not a fix. Reproducing it needs a real interruption of PostgreSQL rather
+than the schema-level failure the tests use, and is tracked separately.
+
+**Why MINOR**: no oneM2M capability is added and no resource type or operation changes, which
+would make this PATCH by the table above. But `contentSize` values change, and with them the
+thresholds `mbis`/`mbs` enforce, so an existing deployment can see requests accepted or refused
+differently after the upgrade. That is more than a bug fix from a client's point of view.
+
 ## v4.10.0 (2026-08-07)
 
 ### ⚠️ Breaking: `rcn=4` and `rcn=8` change shape *and* pagination

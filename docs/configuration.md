@@ -176,7 +176,7 @@ cp config/local.json.example config/local.json
 | `db.pw` | Database user password |
 | `db.pool.max` | **PostgreSQL connections one mobius4 process may open, in total** (default: `20`). Split evenly between the two pools this process runs — see below |
 | `db.pool.idleTimeoutMs` | How long an unused connection stays open before being closed (default: `30000`) |
-| `db.pool.connectionTimeoutMs` | How long a request waits for a free connection, and for a new one to be established, before failing (default: `2000`) |
+| `db.pool.connectionTimeoutMs` | How long a request waits for a free connection, and for a new one to be established, before failing (default: `5000`). Raised from 2000 in v4.11.0 — a cold container on a throttled host was failing to acquire a connection inside two seconds |
 | `db.pool.statementTimeoutMs` | Server-side cap on a single statement (default: `30000`) |
 
 ### Logging
