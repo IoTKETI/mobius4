@@ -689,6 +689,8 @@ async function delete_a_res(req_prim, resp_prim) {
 			break;
 	}
 
+	// TS-0001:8.1.2 Table 8.1.2-1, Delete column: 0, 1, 4, 5, 6, 8 and 11 are valid; the rest are
+	// n/a for this operation.
 	const not_allowed_rcn = [2, 3, 7, 9, 10, 12];
 	if (not_allowed_rcn.includes(req_prim.rcn)) {
 		resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
@@ -704,13 +706,36 @@ async function delete_a_res(req_prim, resp_prim) {
 	// below, which are deliberately left asynchronous).
 	const tmp_resp = {};
 	await retrieve_a_res(req_prim, tmp_resp);
+
+	// TS-0001:8.1.2 Table 8.1.2-1 marks rcn 4, 5, 6 and 8 valid for Delete as well as Retrieve:
+	// the Originator asks to be shown what is about to disappear. The snapshot has to be taken
+	// *before* delete_resources runs, because afterwards there is nothing left to describe.
+	//
+	// It is built separately from tmp_resp on purpose. tmp_resp is what the notification and the
+	// parent's cbs bookkeeping below read, and both expect the plain single-resource shape --
+	// handing them a nested tree or a reference list would break them quietly.
+	let deleted_content = tmp_resp.pc;
+	if (tmp_resp.pc) {
+		const snapshot = {};
+		if (req_prim.rcn === 4 || req_prim.rcn === 8) {
+			await rcn48_retrieve(req_prim, snapshot);
+			deleted_content = snapshot.pc;
+		} else if (req_prim.rcn === 5 || req_prim.rcn === 6) {
+			await rcn56_retrieve(req_prim, snapshot);
+			deleted_content = snapshot.pc;
+		}
+		// cnst/cnot ride along when the snapshot was truncated by lim, the same as on a retrieve.
+		if (snapshot.cnst !== undefined) resp_prim.cnst = snapshot.cnst;
+		if (snapshot.cnot !== undefined) resp_prim.cnot = snapshot.cnot;
+	}
+
 	if (tmp_resp.pc) {
 		await delete_resources([{ ri: req_prim.ri, ty: req_prim.to_ty }]);
 		// [C6] invalidate lookup cache for deleted resource
 		if (req_prim.sid) lookupCache.del(req_prim.sid);
 		if (req_prim.to)  lookupCache.del(req_prim.to);
 	}
-	resp_prim.pc = tmp_resp.pc;
+	resp_prim.pc = deleted_content;
 	resp_prim.rsc = enums.rsc_str["DELETED"];
 
 	// after deletion, check and send notification(s) if needed

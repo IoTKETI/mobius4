@@ -17,7 +17,8 @@ Mobius4 implements oneM2M Common Services Entity (CSE) which is the IoT middlewa
 
 oneM2M protocol bindings:
 - HTTP
-- MQTT
+- MQTT — as a server, and outbound to any broker a notificationURI or a `<remoteCSE>`'s
+  pointOfAccess names, not only the one this CSE listens on
 
 oneM2M primitive serialization:
 - JSON
@@ -39,7 +40,8 @@ Other features:
 - geo-query with _location_ common attribute (Rel-4 feature)
 - children resources retrieval with _Result Content_ parameter — nested representations
   (`rcn=4`/`rcn=8`) and child resource references (`rcn=5`/`rcn=6`), paginated with
-  _Filter Criteria_ `lvl`/`lim`/`ofst`
+  _Filter Criteria_ `lvl`/`lim`/`ofst`. The same four values work on DELETE, returning what was
+  removed
 
 ## Platform features
 
@@ -164,3 +166,4 @@ upgrade problems. A clean install needs none of it.
 | 4.10.0 | 2026-08-07 | **Breaking for `rcn=4`/`rcn=8` clients**: child resources are now nested inside their own parent instead of grouped by type at the top level (`TS-0004:8.4.3` EXAMPLE 3), and `lim` cuts on subtree boundaries while `ofst` counts direct children. Both fail silently against an old client. `rcn=5`/`rcn=6` are implemented — they previously returned attributes only, with RSC 2000. Truncated child-resource results now set `X-M2M-CTS`/`X-M2M-CTO` | [**Client-side changes required**](docs/upgrading.md#v4100) |
 | 4.11.0 | 2026-08-08 | **`contentSize` now counts bytes** (`TS-0001:9.6.7`) instead of JavaScript string units — a 10-byte payload was being refused by a `maxByteSizePerInstance` of 10, and `cbs`/`mbs`/`sizeAbove`/`sizeBelow` read the same figure. A database failure answers **5000 instead of 4004/4000/4103**, so a client retries rather than trying to recreate live resources. `/health` became a readiness check and now fails when the database is unreachable. `<subscription>` sets `creator` and notifications carry it (`TS-0004:7.4.8.2.1`, `7.5.1.2.2`); `creator` can no longer name another entity | [**Read before upgrading — `contentSize` values change**](docs/upgrading.md#v4110) |
 | 4.11.1 | 2026-08-08 | Forwarding to a `<remoteCSE>` kept the remote CSE's response status instead of replacing it with `2000`, and now tries every `pointOfAccess` before answering **5103 TARGET_NOT_REACHABLE**; an `mqtt:` access point is refused rather than reported as success. A generated `resourceName` is checked for collision before use. `<AE>` mandatory-attribute validation moved into the Joi schema. Dead module `cse/routing.js` removed | — |
+| 4.12.0 | 2026-08-08 | **DELETE honours `rcn` 4/5/6/8** (`TS-0001:8.1.2` Table 8.1.2-1) — the response can now carry the child resources, or references to them, as they were just before removal. **Notifications go to the broker their `mqtt://` URL names** instead of always to this CSE's own (`TS-0010:6.6.2`/`6.6.4`), and a `<remoteCSE>` whose `pointOfAccess` is `mqtt://` can now be forwarded to (`TS-0010:6.4.2`/`6.4.3`). All additive | — |

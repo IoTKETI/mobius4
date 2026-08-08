@@ -54,6 +54,75 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
   through the full TS-0010 text can use to settle them.
 
 
+## v4.12.0 (2026-08-08)
+
+### Added — Result Content on DELETE
+
+`TS-0001:8.1.2` Table 8.1.2-1 marks rcn **4** (attributes and child resources), **5** (attributes
+and child resource references), **6** (child resource references) and **8** (child resources) valid
+for Delete as well as Retrieve. The Originator is asking to be shown what is about to disappear,
+which is the only chance to see it.
+
+mobius4 accepted those values and then answered with the target's own attributes — the same as
+rcn=1 — with nothing to say the request had been half honoured.
+
+```bash
+DELETE /Mobius/sensors?rcn=4&lvl=2
+```
+
+```jsonc
+{"m2m:cnt": {"rn": "sensors", /* ... */
+   "m2m:cnt": [{"rn": "humid01", /* ... */ "m2m:cin": [{"rn": "h1"}]},
+               {"rn": "temp01",  /* ... */ "m2m:cin": [{"rn": "t1"}, {"rn": "t2"}]}],
+   "m2m:sub": [{"rn": "sub-a"}]}}
+```
+
+The snapshot follows the same rules as the equivalent retrieve: descendants nest under their own
+parent (`TS-0004:8.4.3` EXAMPLE 3), `lvl` bounds the depth, `lim` cuts on subtree boundaries, and a
+truncated result carries `X-M2M-CTS`/`X-M2M-CTO`.
+
+Unchanged: the default Result Content for Delete is still "nothing", rcn=1 still returns the
+target's attributes alone, and rcn 2, 3, 7, 9, 10 and 12 are still refused as n/a for this
+operation.
+
+### Added — notifications reach the broker their URL names
+
+A `<subscription>` whose `notificationURI` is `mqtt://…` was published through the one broker this
+CSE is itself connected to, whatever host the URL named. The topic was right and the server was
+wrong, which looks identical in the logs and delivers nothing.
+
+Outbound connections are now opened per broker and reused, with `TS-0010:6.6.2`'s default ports
+(1883 for `mqtt`, 8883 for `mqtts`) and `6.6.4`'s rule that the URL's path **is** the topic, whole.
+A URL naming this CSE's own broker still goes through the existing client rather than opening a
+second connection to it.
+
+**Connections are kept warm.** Opening one per message would turn MQTT into a slower HTTP and
+throw away the reason to use it, so a connection is opened on first use and stays. It is reclaimed
+two ways, both slow enough not to disturb an active path: a connection that has carried nothing for
+thirty minutes is closed, and at the ceiling of twenty a new broker evicts the least recently used
+idle one. Nothing with a request in flight is ever closed. Reconnection is automatic, and any
+response topic being listened on is re-subscribed, since MQTT subscriptions do not survive a
+session.
+
+### Added — forwarding to a `<remoteCSE>` over MQTT
+
+A `pointOfAccess` of `mqtt://…` fell into an empty branch and out through an unconditional `OK`, so
+**a request that was never sent anywhere was reported as having succeeded** (v4.11.1 made it an
+honest failure; this release makes it work).
+
+The request goes out on `TS-0010:6.4.2`'s request topic and the answer comes back on the matching
+response topic of `6.4.3`, matched by `rqi` because one subscription carries the answers to every
+request in flight to that CSE. That subscription is made once and left in place: subscribing per
+request would cost two extra round trips each time, and — worse — two concurrent forwards to the
+same CSE share the topic, so the first to finish would have unsubscribed the second. Identifiers are written into the topic as the clause requires — an
+SP-relative ID drops its leading `/`, an Absolute-CSE-ID's leading `//` becomes `:`, and every
+remaining `/` becomes `:`. A request that gets no answer within the timeout falls through to the
+next `pointOfAccess`, and then to 5103 TARGET_NOT_REACHABLE.
+
+**Why MINOR**: three oneM2M capabilities added — Result Content on an operation that lacked it, and
+two MQTT paths that did not work. All additive: a client that does not use them sees no difference,
+and nothing needs doing on upgrade. Deployments that never had a second broker are unaffected.
+
 ## v4.11.1 (2026-08-08)
 
 A sweep of the `to-do` comments left in the source. Twenty-six of them; roughly half described
