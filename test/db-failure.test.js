@@ -126,3 +126,27 @@ test("a delete answers 5000 too", async () => {
 
   assert.equal(res.rsc, "5000");
 });
+
+test("a contentInstance create answers 5000, not 4000, on a database failure", async () => {
+  // cse/create-error.js mapped everything that was not a unique violation to 4000 BAD_REQUEST,
+  // so during an outage the client was told its request was malformed. TS-0004:6.6.2 Table
+  // 6.6.2-1 reserves 4xxx for "malformed by the Originator" — which decides whether a client
+  // retries with backoff or stops sending.
+  const res = await request(srv.baseUrl, {
+    method: "POST",
+    to: `${CSE_BASE}/anything`,
+    ty: 4,
+    body: { "m2m:cin": { con: "x" } },
+  });
+
+  assert.equal(res.rsc, "5000");
+});
+
+test("the CSEBase retrieve does not report a database failure as access denied", async () => {
+  // cse/resources/cb.js caught its own error and returned a half-built resource; the access check
+  // downstream then answered 4103, reporting a connection fault as a permissions problem.
+  const res = await request(srv.baseUrl, { method: "GET", to: CSE_BASE });
+
+  assert.notEqual(res.rsc, "4103", "a connection fault is not a privileges problem");
+  assert.equal(res.rsc, "5000");
+});

@@ -1344,37 +1344,34 @@ function get_a_new_rn(ty) {
 	return rn;
 }
 
+/**
+ * The value of a `contentSize`-style attribute: the size **in bytes** of a content value.
+ *
+ * `TS-0001:9.6.7` Table 9.6.7-2 defines `contentSize` as "Size in bytes of the content
+ * attribute", and `TS-0004:7.4.37.2.1` uses the same wording for `<flexContainer>`.
+ *
+ * This used to report the JavaScript in-memory footprint instead — `string.length * 2` (UTF-16
+ * code units), 8 per number, 4 per boolean. That is not a byte count of anything on the wire, and
+ * it broke a real deployment: a `<container>` with `maxByteSizePerInstance` of 10 refused a
+ * 10-byte ASCII payload with 5207 NOT_ACCEPTABLE, because 10 characters were counted as 20. It
+ * also ran the other way for non-Latin text — "한글" is 6 bytes in UTF-8 and was counted as 4.
+ *
+ * A string is measured as its own UTF-8 bytes, not as its JSON encoding: the attribute being
+ * sized is the content value, and the surrounding quotes belong to the serialization rather than
+ * to the value. Structured content has no size until it is serialized, so it is measured as its
+ * JSON form — which is what mobius4 stores and returns.
+ *
+ * **This does not settle what the standard means.** "Size in bytes" is undefined as to *which*
+ * serialization, and the same resource has different sizes in JSON, XML and CBOR while
+ * `contentSize` is a single value (tracked as SQ-003 in mobius4-dev-tool). What is settled is
+ * that the previous figure was not a byte count under any reading.
+ */
 function get_mem_size(obj) {
-	let bytes = 0;
-
-	function sizeOf(obj) {
-		if (obj !== null && obj !== undefined) {
-			switch (typeof obj) {
-				case "number":
-					bytes += 8;
-					break;
-				case "string":
-					bytes += obj.length * 2;
-					break;
-				case "boolean":
-					bytes += 4;
-					break;
-				case "object":
-					var objClass = Object.prototype.toString.call(obj).slice(8, -1);
-					if (objClass === "Object" || objClass === "Array") {
-						for (var key in obj) {
-							if (!obj.hasOwnProperty(key)) continue;
-							sizeOf(obj[key]);
-						}
-					} else bytes += obj.toString().length * 2;
-					break;
-			}
-		}
-		return bytes;
-	}
-
-	return sizeOf(obj);
+	if (obj === null || obj === undefined) return 0;
+	if (typeof obj === "string") return Buffer.byteLength(obj, "utf8");
+	return Buffer.byteLength(JSON.stringify(obj), "utf8");
 }
+
 
 // Resource types whose access decision is their parent's. TS-0001:9.6.1.3.2 draws the line at
 // whether the *type* defines accessControlPolicyIDs at all: a type with no such definition is

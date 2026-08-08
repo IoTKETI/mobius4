@@ -14,6 +14,26 @@ const logger = require('../../logger').forFile(__filename);
 const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm"];
 
 
+// TS-0004:7.4.8.2.1 (Recv-6.5, step 2): "If the notificationURI is not the Originator, the Hosting
+// CSE shall set the Originator's ID as the <subscription> resource's creator attribute."
+//
+// Only the explicit form was implemented — a request carrying "cr": null got the Originator, and
+// a request that simply omitted cr got nothing. So the attribute was present exactly when a
+// client already knew to ask for it, and absent in the ordinary case the clause is about. A
+// notification consumer then had no standard way to tell whose subscription it was answering.
+//
+// "notificationURI is not the Originator" is read literally: if every nu entry names the
+// Originator itself, the clause does not apply and cr stays unset. Anything else — a URL, another
+// entity's ID, a mix — sets it.
+function creator_for(prim_res, originator) {
+  if (prim_res.cr === null) return originator; // explicit request, kept for compatibility
+  if (prim_res.cr !== undefined) return prim_res.cr;
+
+  const targets = Array.isArray(prim_res.nu) ? prim_res.nu : [prim_res.nu];
+  const all_self = targets.every((t) => t === originator);
+  return all_self ? null : originator;
+}
+
 async function create_a_sub(req_prim, resp_prim) {
   const prim_res = req_prim.pc["m2m:sub"];
 
@@ -79,7 +99,7 @@ async function create_a_sub(req_prim, resp_prim) {
         exc: prim_res.exc,
         nu: prim_res.nu,
         nct: prim_res.nct || 1,
-        cr: prim_res.cr === null ? req_prim.fr : null,
+        cr: creator_for(prim_res, req_prim.fr),
         su: prim_res.su || null,
       }, { transaction: t });
 
@@ -90,7 +110,7 @@ async function create_a_sub(req_prim, resp_prim) {
         sid: sub_sid,
         lvl: sub_sid.split("/").length,
         pi: sub_pi,
-        cr: prim_res.cr === null ? req_prim.fr : null,
+        cr: creator_for(prim_res, req_prim.fr),
         int_cr: req_prim.fr,
         loc: null
       }, { transaction: t });

@@ -35,7 +35,12 @@ async function retrieve_a_cb(resp_prim) {
             }
         }
     } catch (err) {
+        // Deliberately not swallowed. Returning the half-built cb_obj made a database failure look
+        // like a <CSEBase> with no attributes, and the access check downstream then answered
+        // 4103 "access denied" — a connection fault reported as a permissions problem. Letting it
+        // through reaches prim_handling, which answers 5000 (TS-0004:6.6.3.6).
         logger.error({ err }, 'retrieve_a_cb failed');
+        throw err;
     }
 
     resp_prim.pc = cb_obj;
