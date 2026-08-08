@@ -115,7 +115,11 @@ const ae_create_schema = Joi.object().keys({
     cr: create_common_attr.cr,
     loc: create_common_attr.loc,
 
-    api: Joi.string().required(),
+    // App-ID: 'N' for a non-registered App-ID, 'R' for a registered one (TS-0001:7.1.2). The
+    // rule used to be a hand-written check inside create_an_ae, one screen below the call
+    // that runs this schema — two places to keep in step, and the schema was the one a
+    // reader would check first.
+    api: Joi.string().regex(/^[NR]/).required(),
     rr: Joi.boolean().required(),
     aei: Joi.forbidden(),
     srv: Joi.array().optional().items(Joi.string()),

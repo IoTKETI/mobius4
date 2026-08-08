@@ -288,8 +288,9 @@ async function mqtt_noti(noti_target, sgn) {
         pc: sgn,
     };
 
-    // to-do: MQTT notify response handling
-    // to-do: support connection to different MQTT brokers other than the local one
+    // BACKLOG-054: the MQTT delivery result is logged but never turned into a retry or a
+    // subscription-side signal, and every mqtt: notificationURI is sent through the one broker
+    // this CSE is configured with, whatever host the URL names.
     const result = await mqtt.mqtt_transmitter(topic, req_prim);
     if (result === false) {
         logger.warn({ target: noti_target, topic }, 'mqtt notification delivery failed');

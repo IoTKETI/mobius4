@@ -371,8 +371,8 @@ async function aggregate_fanout_resp_prims(req_prim) {
     const mid_list = grp_res.mid;
 
     return await Promise.all(mid_list.map(async (mid) => {
-        // assume that all members are local resources
-        // to-do: implement for remote member resources
+        // BACKLOG-042: members are assumed to be local. How far a remote mid actually gets is
+        // unmeasured -- prim_handling may already forward an SP-relative one via request_forwarding.
         const fanout_req_prim = {
             fr: req_prim.fr,
             to: (req_prim.vr_path) ? mid + '/' + req_prim.vr_path : mid,

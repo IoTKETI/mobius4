@@ -323,7 +323,6 @@ async function delete_ol(req_prim, resp_prim) {
 }
 
 
-// to-do
 async function aggregate_cin_res(req_prim, ri_list) {
     // it is guaranteed that the ri_list is not empty
     return Promise.all(ri_list.map(async (ri) => {

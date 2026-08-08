@@ -37,7 +37,8 @@ async function create_an_ae(req_prim, resp_prim) {
     }
 
     let aei;
-    // to-do: no 'fr' is allowed in the spec only for AE registration
+    // An AE that has no identity yet registers without From, and the CSE assigns one. That is
+    // why an empty originator is accepted here and nowhere else.
     if (!req_prim.fr) {
         // set empty string to assign an ID
         req_prim.fr = '';
@@ -59,20 +60,9 @@ async function create_an_ae(req_prim, resp_prim) {
     const now = get_cur_time();
     const et = get_default_et();
 
-    // 'rr' is mandatory
-    // to-do: mandatory attribute validation by Joi
-    if (prim_res.rr === undefined || prim_res.rr === null) {
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': 'rr is missing' };
-        return;
-    }
-
-    // 'api' shall start with 'N' or 'R'
-    if (!prim_res.api || (prim_res.api.startsWith('N') === false && prim_res.api.startsWith('R') === false)) {
-        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
-        resp_prim.pc = { 'm2m:dbg': 'api shall start with N or R' };
-        return;
-    }
+    // 'rr' and 'api' are checked by ae_create_schema above, including the N/R prefix rule.
+    // The two checks that used to sit here were unreachable for 'rr' — Joi rejected it first —
+    // and the only copy of the prefix rule for 'api'.
 
     // check if the AE-ID already exists
     const exists = await AE.findByPk(aei);

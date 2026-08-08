@@ -38,7 +38,8 @@ async function prim_handling(req_prim) {
   resp_prim.rvi = req_prim.rvi || config.cse.versions[0];
 
   // request primitive validation
-  // to-do: allow empty 'to' parameter for AE registration
+  // BACKLOG-056: the schema requires To on every request. Whether AE registration may omit it
+  // is a specification question that has not been settled here.
   const validated = req_prim_schema.validate(req_prim);
   if (validated.error) {
     const { message, path } = validated.error.details[0];
@@ -98,15 +99,13 @@ async function prim_handling(req_prim) {
   }
 
   // check if the target is a virtual resource
-  await set_virtual_res_info(req_prim); // to-do: should change the function name? a bit misleading for the following code
+  await set_virtual_res_info(req_prim);
   // in case it is a normal resource and does not exist, return the response immediately
   if (!req_prim.vr && !ri) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
     resp_prim.pc = { "m2m:dbg": "target resource does not exist" };
 
     return resp_prim;
-  } else if (req_prim.vr && ri == null) {
-    // to-do
   }
 
   //
@@ -330,7 +329,8 @@ async function prim_handling(req_prim) {
         if (!resp_prim.rsc) {
           resp_prim.rsc = enums.rsc_str["DELETED"];
         }
-        // to-do: depending on 'rcn' options, 'pc' is set to empty or not
+        // rcn 4/5/6/8 are valid for Delete (TS-0001:8.1.2 Table 8.1.2-1) and would carry the
+        // child representations; only rcn 0/1 are honoured here. Tracked as BACKLOG-050.
         if (!req_prim.rcn) resp_prim.pc = undefined;
 
         break;
@@ -473,12 +473,19 @@ async function set_virtual_res_info(req_prim) {
         req_prim.parent_ty = parent_res.ty;
         req_prim.parent_ri = parent_res.ri;
       } else {
-        // to-do: return error info
+        // The parent is gone, so this is not a virtual resource of anything. Returning without
+        // setting req_prim.vr is what produces the right answer: vr is only assigned further down,
+        // once the parent and its type check out, so the caller's "no vr and no ri" guard answers
+        // 4004. Measured 2026-08-08: GET /Mobius/no-such-container/la -> 404 / RSC 4004.
+        //
+        // It reads like a missing error path and is not one, but it is fragile — moving the vr
+        // assignment above this point would turn the 4004 into an empty 2000.
         return;
       }
 
       if (vir_res_name == "la" || vir_res_name == "ol") {
-        // confirm that the parent is 'cnt' type => could be timeSeries, flexContainerInstance as well (to-do)
+        // <timeSeries> and <flexContainerInstance> also carry <latest>/<oldest>, but neither
+        // resource type exists in mobius4 yet, so there is nothing to add to this list.
         if (
           enums.ty_str[parent_res.ty] !== "cnt" &&
           enums.ty_str[parent_res.ty] !== "mrp" &&
@@ -557,9 +564,43 @@ async function request_forwarding(req_prim, shortest_to) {
   // get 'poa' of the <remoteCSE> resource
   // send the request to the other CSE by the 'poa', which may be over HTTP or MQTT
 
-  // to-do
-  // check whether we need to try other poa items if one of them is not working
-  const poa = csr_res.poa[0];
+  const poa_list = Array.isArray(csr_res.poa) ? csr_res.poa : [csr_res.poa];
+  return await forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_cse_id);
+}
+
+
+function get_http_method(op) {
+  switch (op) {
+    case 1: // CREATE
+      return 'POST';
+    case 2: // RETRIEVE
+      return 'GET';
+    case 3: // UPDATE
+      return 'PUT';
+    case 4: // DELETE
+      return 'DELETE';
+    case 5: // NOTIFY
+      return 'POST';
+  }
+}
+
+/**
+ * Tries each pointOfAccess in turn and fills resp_prim from the first that answers.
+ *
+ * Split out so it can be tested without a registered <remoteCSE>: what is worth pinning down is
+ * which access point gets dialled and what comes back, and a real registration exercises neither.
+ */
+async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_cse_id) {
+  // pointOfAccess is a list because a CSE may be reachable more than one way. Trying only the
+  // first made a <remoteCSE> unreachable as soon as that one stopped answering, however many
+  // others it advertised, so each is tried in turn until one answers.
+  //
+  // A transport failure is the only reason to move on. An answer from the remote CSE — including
+  // a 4xxx — is the answer to this request and is passed back as it stands: retrying it on
+  // another access point would ask the same CSE the same question twice.
+  let last_error = null;
+
+  for (const poa of poa_list) {
   logger.debug({ poa }, 'forwarding via poa');
 
   // step3: forward the request to that CSE
@@ -585,7 +626,6 @@ async function request_forwarding(req_prim, shortest_to) {
 
     try {
       const http_resp = await axios(http_req);
-      // console.log('http_resp: ', http_resp);
 
       // convert http response to response primitive
 
@@ -594,40 +634,51 @@ async function request_forwarding(req_prim, shortest_to) {
       resp_prim.rvi = http_resp.headers['x-m2m-rvi'];
 
       if (http_resp.data) {
-        // console.log('http response payload: ', http_resp.data);
         resp_prim.pc = http_resp.data;
       }
-    } catch (error) {
-      logger.error({ err: error, targetCseId: target_cse_id }, 'HTTP forwarding failed');
-      resp_prim.rsc = enums.rsc_str['INTERNAL_SERVER_ERROR'];
-      resp_prim.pc = { 'm2m:dbg': `HTTP forwarding failed: ${error.message}` };
+
+      // The remote CSE's status is the answer. This used to fall through to an unconditional
+      // "OK" below, so a forwarded 4004 -- or any other status the other CSE returned -- reached
+      // the Originator as 2000 with the error payload still attached.
       return resp_prim;
+    } catch (error) {
+      // axios rejects both on a transport failure and on a non-2xx status. Only the former means
+      // this access point is unusable; a status came from the CSE and is its answer.
+      if (error.response) {
+        resp_prim.rqi = error.response.headers['x-m2m-ri'];
+        resp_prim.rsc = error.response.headers['x-m2m-rsc'];
+        resp_prim.rvi = error.response.headers['x-m2m-rvi'];
+        if (error.response.data) resp_prim.pc = error.response.data;
+        if (resp_prim.rsc) return resp_prim;
+      }
+
+      last_error = error;
+      logger.warn({ err: error, targetCseId: target_cse_id, poa }, 'forwarding failed, trying the next poa');
+      continue;
     }
   } else if (poa.startsWith('mqtt')) {
-    // MQTT
-    // to-do: implement MQTT forwarding
+    // Not implemented. It used to fall through to the unconditional "OK" below, so a request that
+    // was never sent anywhere was reported as having succeeded. Reaching a CSE over MQTT means
+    // connecting to whatever broker its poa names, which this CSE cannot do yet (BACKLOG-054), so
+    // the honest answer is that the capability is absent (TS-0004:6.6.3.6 -- 5001).
+    logger.warn({ poa, targetCseId: target_cse_id }, 'MQTT forwarding is not implemented');
+    last_error = new Error('MQTT forwarding is not implemented');
+    continue;
+  } else {
+    logger.warn({ poa, targetCseId: target_cse_id }, 'unsupported poa scheme');
+    last_error = new Error(`unsupported poa scheme: ${poa}`);
+    continue;
+  }
   }
 
-  // step4: handle the response back from the other CSEs and send it back to the Originator
-  resp_prim.rsc = enums.rsc_str['OK'];
+  // Every access point failed. 5103 TARGET_NOT_REACHABLE (TS-0004:6.6.3.6) says what happened --
+  // the request was fine and the other CSE could not be reached.
+  logger.error({ err: last_error, targetCseId: target_cse_id, tried: poa_list.length },
+    'forwarding failed on every poa');
+  resp_prim.rsc = enums.rsc_str['TARGET_NOT_REACHABLE'];
+  resp_prim.pc = { 'm2m:dbg': `no pointOfAccess answered: ${last_error?.message ?? 'unknown'}` };
 
   return resp_prim;
 }
 
-
-function get_http_method(op) {
-  switch (op) {
-    case 1: // CREATE
-      return 'POST';
-    case 2: // RETRIEVE
-      return 'GET';
-    case 3: // UPDATE
-      return 'PUT';
-    case 4: // DELETE
-      return 'DELETE';
-    case 5: // NOTIFY
-      return 'POST';
-  }
-}
-
-module.exports = { prim_handling, get_to_info };
+module.exports = { prim_handling, get_to_info, forward_to_poa };
