@@ -23,6 +23,24 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## [Unreleased]
 
+### Removed: `docs/openapi.yaml`
+
+The published OpenAPI document described two things at once — the shape the oneM2M standard
+defines, and what this CSE actually answers — and nothing kept it honest. The drift check that
+was supposed to guard it looked at the development repository's copy, not this one, so the
+copy here stayed green while falling nine releases behind.
+
+The two questions are now answered by two files. The standard-only document is generated from
+the specification corpus and lives in the development repository at
+`features/onem2m-standard.yaml`; it covers every resource type the standard defines, whether or
+not any implementation exists. What this CSE supports stays here, in
+[`features/capabilities.json`](features/capabilities.json), which is observed rather than
+written down and is enforced by CI. Join the two on `operationId`.
+
+This supersedes the sentence in the entry below that calls `docs/openapi.yaml` "the third
+thing" — that was true when it was written, earlier in this same release cycle.
+
+
 ### Added: a format version on `features/capabilities.json`
 
 The file is produced here and read by tooling in the development repository — it crosses a
