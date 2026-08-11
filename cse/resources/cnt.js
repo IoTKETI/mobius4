@@ -1,7 +1,7 @@
 const config = require('config');
 const { cnt_create_schema, cnt_update_schema } = require('../validation/res_schema');
 
-const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute, not_obsolete_where } = require('../utils');
 const sequelize = require('../../db/sequelize');
 
 const enums = require('../../config/enums');
@@ -246,11 +246,7 @@ async function update_a_cnt(req_prim, resp_prim) {
 }
 
 async function retrieve_ol(req_prim, resp_prim) {
-    const oldest = await CIN.findOne({
-        where: { pi: req_prim.parent_ri },
-        order: [['st', 'ASC']],
-        attributes: ['ri'],
-    });
+    const oldest = await find_edge_cin(req_prim.parent_ri, 'ASC');
     if (!oldest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no <cin> resource' };
@@ -262,13 +258,29 @@ async function retrieve_ol(req_prim, resp_prim) {
     resp_prim.pc = tmp_resp.pc;
 }
 
-// if we want to apply 'attrl' filter here, then we can use "retrieve_a_res" function, rather than "retrieve_a_cin"
-async function retrieve_la(req_prim, resp_prim) {
-    const latest = await CIN.findOne({
-        where: { pi: req_prim.parent_ri },
-        order: [['st', 'DESC']],
+// The newest ('DESC') or oldest ('ASC') <contentInstance> under a <container> that is not
+// obsolete. All four virtual-resource handlers below go through this so that <latest>, <oldest>
+// and their DELETE forms cannot disagree about which instances count.
+//
+// Obsolete instances are skipped rather than waited on: TS-0001:10.2.4.4 treats a <container>
+// whose content instances are all obsolete the same as one with none at all ("there is no
+// <contentInstance> resource in the parent **or if all existing ones are obsolete**"), and the
+// error this function's callers already return for an empty <container> is what that clause asks
+// for. Until the expired-resource sweep runs, the rows are still there, so leaving them in made
+// <latest> serve content the CSE had already declared expired — and, since maxInstanceAge is
+// enforced by capping et (see WRITE_CIN_SQL in cse/resources/cin.js), it made mia effectively
+// unenforced on reads too (DEC-095).
+async function find_edge_cin(parent_ri, order) {
+    return CIN.findOne({
+        where: { pi: parent_ri, ...not_obsolete_where() },
+        order: [['st', order]],
         attributes: ['ri'],
     });
+}
+
+// if we want to apply 'attrl' filter here, then we can use "retrieve_a_res" function, rather than "retrieve_a_cin"
+async function retrieve_la(req_prim, resp_prim) {
+    const latest = await find_edge_cin(req_prim.parent_ri, 'DESC');
     if (!latest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no <cin> resource' };
@@ -281,11 +293,7 @@ async function retrieve_la(req_prim, resp_prim) {
 }
 
 async function delete_la(req_prim, resp_prim) {
-    const latest = await CIN.findOne({
-        where: { pi: req_prim.parent_ri },
-        order: [['st', 'DESC']],
-        attributes: ['ri'],
-    });
+    const latest = await find_edge_cin(req_prim.parent_ri, 'DESC');
     if (!latest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };
@@ -302,11 +310,7 @@ async function delete_la(req_prim, resp_prim) {
 }
 
 async function delete_ol(req_prim, resp_prim) {
-    const oldest = await CIN.findOne({
-        where: { pi: req_prim.parent_ri },
-        order: [['st', 'ASC']],
-        attributes: ['ri'],
-    });
+    const oldest = await find_edge_cin(req_prim.parent_ri, 'ASC');
     if (!oldest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'there is no cin resource' };

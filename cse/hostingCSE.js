@@ -9,6 +9,7 @@ const moment = require('moment');
 
 const metrics = require('../metrics');
 const { Op, Sequelize } = require('sequelize');
+const { not_obsolete_where } = require('./utils');
 const Lookup = require('../models/lookup-model');
 // oneM2M standard resources
 const ACP = require('../models/acp-model');
@@ -395,11 +396,33 @@ function subtree_size(node) {
  *
  * Returns the subtrees to include plus the resume point, or null when nothing is left over.
  */
-function paginate_subtrees(direct_children, ofst, lim) {
+// The offset filter condition is 1-based; every array index in this file is 0-based. These two
+// functions are the only bridge between them, so the base cannot be applied twice or not at all.
+//
+// TS-0004:7.3.3.17.15 states it outright — "An **offset of 1** shall indicate the **first** direct
+// child resource" — and TS-0001:8.1.2 agrees ("The offset shall start at 1"). Both clauses also
+// describe offset as "the number of ... resources the Hosting CSE shall skip over", which reads
+// one lower; that contradiction is SQ-005. It is settled in favour of the explicit statements,
+// since a skip-count reading makes "shall start at 1" false and leaves the first child
+// unreachable by any value (DEC-096, superseding the 0-based holding of DEC-078).
+//
+// An absent offset means "from the beginning", i.e. the same as 1.
+function ofst_to_skip(fc_ofst) {
+	return fc_ofst ? fc_ofst - 1 : 0;
+}
+
+// The value a client sends back as ofst to resume at 0-based index i. Content Offset (cnot) is the
+// same filter condition travelling in the other direction (TS-0001:8.1.3), so it is emitted in the
+// same base — a client that echoes cnot into ofst must land exactly where processing stopped.
+function skip_to_ofst(i) {
+	return i + 1;
+}
+
+function paginate_subtrees(direct_children, skip, lim) {
 	const included = [];
 	let used = 0;
 
-	for (let i = ofst; i < direct_children.length; i++) {
+	for (let i = skip; i < direct_children.length; i++) {
 		const size = subtree_size(direct_children[i]);
 		if (used + size > lim) {
 			// Deliberately no "skip this one and try the next": the offset a client sends back
@@ -429,14 +452,17 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 	if (8 == req_prim.rcn) aggr_res[res_key] = {};
 
 	// Pagination is done here, on whole subtrees, so discovery must not pre-cut the flat list.
-	const { ids_list_per_ty } = await discovery_core(req_prim, { paginate: false });
+	const { ids_list_per_ty } = await discovery_core(req_prim, {
+		paginate: false,
+		exclude_obsolete_cin: true,
+	});
 
 	const node_by_ri = await fetch_nodes_by_ri(req_prim, ids_list_per_ty);
 	const direct_children = build_nested(node_by_ri);
 
-	const ofst = req_prim.fc.ofst || 0;
+	const skip = ofst_to_skip(req_prim.fc.ofst);
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
-	const { included, next_ofst } = paginate_subtrees(direct_children, ofst, lim);
+	const { included, next_ofst } = paginate_subtrees(direct_children, skip, lim);
 
 	if (included.length === 0 && next_ofst !== null) {
 		// The first subtree alone is bigger than lim, so nothing fits and raising ofst cannot
@@ -456,7 +482,7 @@ async function rcn48_retrieve(req_prim, resp_prim) {
 	resp_prim.pc = aggr_res;
 	if (next_ofst !== null) {
 		resp_prim.cnst = 1;
-		resp_prim.cnot = next_ofst;
+		resp_prim.cnot = skip_to_ofst(next_ofst);
 	}
 
 	return resp_prim;
@@ -524,10 +550,10 @@ async function rcn56_retrieve(req_prim, resp_prim) {
  */
 function set_partial_content(req_prim, resp_prim, is_partial) {
 	if (!is_partial) return;
-	const ofst = req_prim.fc.ofst || 0;
+	const skip = ofst_to_skip(req_prim.fc.ofst);
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
 	resp_prim.cnst = 1;
-	resp_prim.cnot = ofst + lim;
+	resp_prim.cnot = skip_to_ofst(skip + lim);
 }
 
 async function aggr_reses_per_ty(req_prim, ri_list, ty) {
@@ -854,14 +880,14 @@ async function discovery_core(req_prim, opts = {}) {
 	}
 
 	const lim = req_prim.fc.lim || config.cse.discovery_limit;
-	const ofst = req_prim.fc.ofst || 0;
+	const skip = ofst_to_skip(req_prim.fc.ofst);
 	const ty_list = req_prim.fc.ty || Object.keys(enums.ty_str);
 
 	// fetch enough per-type to cover offset + limit + 1 (for partial detection).
 	// With paginate=false the caller slices by subtree instead, so the only bound left is the
 	// protective cap — a subtree can hold more rows than ofst+lim would suggest.
 	const fetch_lim = paginate
-		? Math.min(ofst + lim + 1, config.cse.discovery_limit)
+		? Math.min(skip + lim + 1, config.cse.discovery_limit)
 		: config.cse.discovery_limit;
 
 	// model registry: type code → { model, no_geo }
@@ -900,7 +926,18 @@ async function discovery_core(req_prim, opts = {}) {
 		})
 		.map(ty => {
 			const { model } = TYPE_MODEL[ty];
-			const ty_where = where_per_ty[ty] ? { ...where, ...where_per_ty[ty] } : where;
+			let ty_where = where_per_ty[ty] ? { ...where, ...where_per_ty[ty] } : where;
+			// rcn=4/8 asks for the children's representations, and TS-0001:10.2.4.4 says an
+			// obsolete <contentInstance> is not among them. Wrapped in Op.and rather than merged
+			// in: `where` already carries an Op.and array of its own (lvl, and the attribute
+			// conditions), and spreading a second one over it would drop those silently.
+			//
+			// Only ty=4 and only for this caller — fu=1 discovery keeps returning obsolete
+			// resources until the sweep removes them, which no clause forbids and which the
+			// reporting client relies on to find its own leftovers (DEC-095).
+			if (ty === 4 && opts.exclude_obsolete_cin) {
+				ty_where = { [Op.and]: [ty_where, not_obsolete_where()] };
+			}
 			// 'pi' is only needed to key the access-decision memo below, but every one of these
 			// tables is being read anyway, so the extra column is free.
 			return model.findAll({ where: ty_where, attributes: ['sid', 'ri', 'ty', 'pi'], limit: fetch_lim })
@@ -990,7 +1027,7 @@ async function discovery_core(req_prim, opts = {}) {
 	}
 
 	// apply offset and limit to aggregated result
-	const paged = paginate ? ids_list.slice(ofst) : ids_list;
+	const paged = paginate ? ids_list.slice(skip) : ids_list;
 	const is_partial = paginate ? paged.length > lim : false;
 	const final_list = paginate ? paged.slice(0, lim) : paged;
 
@@ -1263,10 +1300,10 @@ async function fu1_discovery(req_prim, resp_prim) {
 
 	// set pagination response parameters when result is partial
 	if (is_partial) {
-		const ofst = req_prim.fc.ofst || 0;
+		const skip = ofst_to_skip(req_prim.fc.ofst);
 		const lim = req_prim.fc.lim || config.cse.discovery_limit;
-		resp_prim.cnst = 1;          // partial
-		resp_prim.cnot = ofst + lim; // offset for next request
+		resp_prim.cnst = 1;                           // partial
+		resp_prim.cnot = skip_to_ofst(skip + lim);    // offset for next request
 	}
 
 	return;

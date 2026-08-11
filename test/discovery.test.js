@@ -161,3 +161,62 @@ test("an underscore in a name does not drag in sibling resources (discovery)", a
     const list = urils(await discover(srv.baseUrl, `${root.sid}/${under}`));
     assert.deepEqual(list, [], `a sibling's descendants leaked into the underscore-name query: ${JSON.stringify(list)}`);
 });
+
+// --- the offset filter condition is 1-based (DEC-096, closing SQ-005) ----------------------
+
+test("ofst=1 returns the first result rather than skipping it", async () => {
+    // TS-0004:7.3.3.17.15: "An offset of 1 shall indicate the first direct child resource", and
+    // TS-0001:8.1.2: "The offset shall start at 1". Both clauses also describe offset as a count
+    // of resources to "skip over", which reads one lower — SQ-005. mobius4 previously took the
+    // skip-count reading while the request schema enforced a minimum of 1, so the two together
+    // left the first result unreachable by any legal value: ofst=1 skipped it and ofst=0 was 4000.
+    const parent = uniqueRn("ofs");
+    await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: parent } });
+    const kids = ["a", "b", "c"];
+    for (const k of kids) {
+        await create(srv.baseUrl, `${root.sid}/${parent}`, 3, { "m2m:cnt": { rn: k } });
+    }
+    const all = urils(await discover(srv.baseUrl, `${root.sid}/${parent}`, { ty: "3" }));
+    assert.equal(all.length, 3, "three children before paging is applied");
+
+    const first = await discover(srv.baseUrl, `${root.sid}/${parent}`, { ty: "3", ofst: "1" });
+    assert.equal(first.rsc, "2000");
+    assert.deepEqual(urils(first), all, "ofst=1 is the whole list, starting at the first");
+
+    const second = await discover(srv.baseUrl, `${root.sid}/${parent}`, { ty: "3", ofst: "2" });
+    assert.deepEqual(urils(second), all.slice(1), "ofst=2 starts at the second");
+
+    const past_end = await discover(srv.baseUrl, `${root.sid}/${parent}`, { ty: "3", ofst: "4" });
+    assert.deepEqual(urils(past_end), [], "an offset past the last result is empty, not an error");
+});
+
+test("ofst=0 is still refused", async () => {
+    // The base being 1 is what makes 0 invalid; the schema's minimum was never the bug.
+    const res = await discover(srv.baseUrl, root.sid, { ty: "3", ofst: "0" });
+    assert.equal(res.rsc, "4000");
+});
+
+test("cnot resumes a paged discovery without losing or repeating a result", async () => {
+    // TS-0001:8.1.3 makes Content Offset "the offset where processing can restart", i.e. the same
+    // filter condition travelling back, so it has to be in the same base. This is the usage the
+    // docs endorse over computing offsets client-side (DEC-078).
+    const parent = uniqueRn("pag");
+    await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: parent } });
+    for (const k of ["a", "b", "c"]) {
+        await create(srv.baseUrl, `${root.sid}/${parent}`, 3, { "m2m:cnt": { rn: k } });
+    }
+
+    const seen = [];
+    let ofst = null;
+    for (let page = 0; page < 5; page++) {
+        const q = { ty: "3", lim: "1", ...(ofst === null ? {} : { ofst: String(ofst) }) };
+        const res = await discover(srv.baseUrl, `${root.sid}/${parent}`, q);
+        assert.equal(res.rsc, "2000", `page ${page} should be a legal request`);
+        seen.push(...urils(res));
+        if (res.cnst !== "1") break;
+        ofst = res.cnot;
+    }
+
+    assert.equal(seen.length, 3, `every result arrived exactly once: ${JSON.stringify(seen)}`);
+    assert.equal(new Set(seen).size, 3, "and none of them twice");
+});
