@@ -179,12 +179,13 @@ test("a truncated rcn=4 result reports Content Status and Content Offset", async
   //
   // Direct children sort by sid: humid01 (subtree of 2), sub-a (1), temp01 (3). lim=2 admits
   // humid01 and stops, because adding sub-a would make 3 — and a subtree goes in whole or not at
-  // all (TS-0001:8.1.2). cnot is the index of the next unprocessed *direct child* (DEC-078).
+  // all (TS-0001:8.1.2). cnot names the next unprocessed *direct child* (DEC-078) as a 1-based
+  // offset (DEC-096), so the second of three children is 2, not 1.
   const res = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=2`);
   assert.equal(res.rsc, "2000");
 
   assert.equal(res.cnst, "1", "1 = PARTIAL_CONTENT (TS-0004:6.3.4.2.44)");
-  assert.equal(res.cnot, "1", "resume at direct child index 1 (sub-a)");
+  assert.equal(res.cnot, "2", "resume at the second direct child (sub-a), 1-based");
   assert.deepEqual(res.body["m2m:cnt"]["m2m:cnt"].map((c) => c.rn), ["humid01"]);
 });
 
@@ -199,7 +200,7 @@ test("rcn=4 pagination never splits a subtree", async () => {
   assert.deepEqual(top["m2m:cnt"].map((c) => c.rn).sort(), ["humid01"]);
   assert.deepEqual(top["m2m:sub"].map((c) => c.rn), ["sub-a"]);
   assert.equal(top["m2m:cin"], undefined, "no orphaned grandchild at the top level");
-  assert.equal(res.cnot, "2", "temp01 is direct child index 2 and was not started");
+  assert.equal(res.cnot, "3", "temp01 is the third direct child and was not started");
 });
 
 test("rcn=4 resumes from cnot without losing or repeating a subtree", async () => {
@@ -227,7 +228,14 @@ test("rcn=4 returns no children when the first subtree alone exceeds lim", async
   assert.equal(res.body["m2m:cnt"]["m2m:cnt"], undefined);
   assert.equal(res.body["m2m:cnt"].rn, "sensors", "the target's own attributes still come back");
   assert.equal(res.cnst, "1");
-  assert.equal(res.cnot, "0", "still stuck at the first direct child");
+  assert.equal(res.cnot, "1", "still stuck at the first direct child, which is offset 1");
+
+  // The dead end must not also be a protocol error. While cnot was 0-based this response told the
+  // client to send ofst=0, which the request schema rejects with 4000 (ofst has a minimum of 1) —
+  // so a client that echoed Content Offset, the only usage the docs endorse, got a bad-request
+  // answer to a value the CSE itself had just handed it.
+  const echoed = await retrieve(srv.baseUrl, `${sensors}?rcn=4&lim=1&ofst=${res.cnot}`);
+  assert.equal(echoed.rsc, "2000", "echoing cnot back is a legal request");
 });
 
 test("a complete rcn=4 result reports no Content Status", async () => {

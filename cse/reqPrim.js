@@ -280,7 +280,11 @@ async function prim_handling(req_prim) {
             // lvl work surfaced as an empty result rather than an error and delayed diagnosis.
             logger.error({ err }, 'fu1 discovery failed');
             resp_prim.rsc = enums.rsc_str[err.rsc_hint || "INTERNAL_SERVER_ERROR"];
-            resp_prim.pc = { "m2m:dbg": err.message || "discovery failed" };
+            // rsc_hint marks an error this code raised on purpose, with a message written for the
+            // client ("unsupported geometry type"). Without it the throw came from somewhere
+            // below and the message is an internal detail — see the catch at the end of
+            // prim_handling for why that must not be forwarded.
+            resp_prim.pc = { "m2m:dbg": err.rsc_hint ? err.message : "discovery failed" };
           }
         } else if (req_prim.fc.fu === 2) {
           // assumption: 'to' is in CSE-relative
@@ -350,7 +354,13 @@ async function prim_handling(req_prim) {
   } catch (err) {
     logger.error({ err }, 'prim_handling uncaught error');
     resp_prim.rsc = enums.rsc_str["INTERNAL_SERVER_ERROR"];
-    resp_prim.pc = { "m2m:dbg": err.message || "Internal server error" };
+    // A fixed string, not err.message. Anything reaching here is by definition unanticipated, so
+    // the message is whatever the failing layer happened to say — reported from a deployment as
+    // `{"m2m:dbg":"column \"or\" does not exist"}`, which is a schema detail travelling to an
+    // unauthenticated client and tells that client nothing it can act on. The full error, with
+    // its stack, is on the line above; the request identifier is in the same log entry, so an
+    // operator can still tie a client's report to the cause.
+    resp_prim.pc = { "m2m:dbg": "internal server error" };
     return resp_prim;
   } finally {
     logger.info({ rsc: resp_prim.rsc, rqi: resp_prim.rqi, ri: req_prim.ri, prim: resp_prim.pc }, 'response primitive');

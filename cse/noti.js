@@ -7,6 +7,7 @@ const mqtt = require("../bindings/mqtt");
 const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');
 const Lookup = require('../models/lookup-model');
+const { not_obsolete_where } = require('./utils');
 
 
 // supported notificationEventType (net) = {
@@ -25,7 +26,15 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
     // SUB.destroy in delete_resources would get there first and this resource's net=2
     // notification would silently vanish. Issuing the SELECT in the same tick, before the net=4
     // await, eliminates that race.
-    const sub_res_p = SUB.findAll({ where: { pi: sub_res_pi } });
+    // Obsolete subscriptions are excluded here, not left to the sweep. TS-0004:7.5.1.2.2 does not
+    // name expirationTime among its steps, but a notification is the one externally visible proof
+    // that a subscription is still live, and TS-0001:9.6.1.3.2 calls the resource 'obsolete' from
+    // the moment its et passes. The same clause pairing is already made for aggregation in
+    // TS-0004:7.5.1.2.6 — "the group-hosting CSE shall perform notification aggregation **while
+    // the <group> resource has not expired**". Reported by a client whose crash-recovery design
+    // leaned on et as a lease: notifications kept being published for a whole sweep interval to
+    // targets that had gone away (DEC-094).
+    const sub_res_p = SUB.findAll({ where: { pi: sub_res_pi, ...not_obsolete_where() } });
 
     // net=4 has to look at the subscriptions under the **parent** of the deleted resource, so it
     // is handled **before** the self-based query below and its "return early if there are zero
@@ -84,7 +93,9 @@ async function notify_parent_of_child_deletion(deleted_pc, deleted_ty) {
     const parent_ri = deleted_res && deleted_res.pi;
     if (!parent_ri) return false;
 
-    const parent_subs = (await SUB.findAll({ where: { pi: parent_ri } }))
+    // Same expiry gate as check_and_send_noti — net=4 reads a different row set (the parent's
+    // subscriptions), so it needs the predicate of its own.
+    const parent_subs = (await SUB.findAll({ where: { pi: parent_ri, ...not_obsolete_where() } }))
         .map(sub => sub.toJSON());
     if (parent_subs.length === 0) return false;
 

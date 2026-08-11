@@ -1,6 +1,7 @@
 const { customAlphabet } = require('nanoid');
 const moment = require('moment');
 const config = require('config');
+const { Op } = require('sequelize');
 const logger = require('../logger').forFile(__filename);
 
 const timestamp_format = config.get('cse.timestamp_format');
@@ -15,6 +16,22 @@ function get_cur_time () {
 
 function get_default_et () {
   return moment().utc().add(config.default.common.et_month, 'month').format(timestamp_format);
+}
+
+// A resource is 'obsolete' from the moment its expirationTime passes — TS-0001:9.6.1.3.2: "A
+// resource is known as 'obsolete' when the resource contains the attribute expirationTime and the
+// lifetime of this resource has reached the value of this attribute". Deletion is a separate
+// event: expired_resource_cleanup sweeps on an interval, so between expiry and the sweep the row
+// is still in the table. Every path that must not act on an obsolete resource asks for this
+// predicate rather than comparing timestamps of its own — a second copy of the comparison is how
+// the notification path came to keep firing for subscriptions the CSE considered expired.
+//
+// et is stored as "YYYYMMDDTHHmmss", so a plain string comparison is chronological. A NULL et
+// means no expiry, and has to be spelled out: in SQL `et > now` is NULL — not true — for those
+// rows, which would quietly exclude every resource that never expires.
+function not_obsolete_where () {
+  const now = get_cur_time();
+  return { [Op.or]: [{ et: null }, { et: { [Op.gt]: now } }] };
 }
 
 function get_geometryType_from_enum(typ) {
@@ -183,6 +200,7 @@ module.exports = {
   generate_ri,
   get_cur_time,
   get_default_et,
+  not_obsolete_where,
   convert_loc_to_geoJson,
   get_loc_attribute,
 };

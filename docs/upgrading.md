@@ -21,6 +21,56 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.14.0
+
+### Required only if your client computes `ofst` itself: the offset filter is 1-based
+
+`ofst=1` now means "start at the first result" rather than "skip one result", per
+`TS-0004:7.3.3.17.15` ("An offset of 1 shall indicate the first direct child resource") and
+`TS-0001:8.1.2` ("The offset shall start at 1"). Every `X-M2M-CTO` the CSE emits is one higher than
+it was.
+
+**Nothing to do if you echo `X-M2M-CTO` back as `ofst`** — the value and its meaning changed
+together, so the round trip lands where it always did. This is the usage
+[§ v4.10.0 below](#v4100) already asks for.
+
+**If you add `lim` to a counter of your own**, subtract one from the result, or switch to echoing
+`X-M2M-CTO`. Left alone, each page after the first now repeats one result (`rcn=4`/`rcn=8`: one
+subtree) instead of starting after the last one. It repeats rather than skips, so no data goes
+missing and a client that keys on resource ID is unaffected in practice.
+
+One case gets strictly better: for `rcn=4`/`rcn=8`, `X-M2M-CTO` could previously be `0`, and
+sending `ofst=0` back is refused with 4000. That value no longer occurs.
+
+### Worth knowing: an expired resource now stops working before it is deleted
+
+If you rely on `expirationTime` as a lease — set a short `et` so that a crash cannot leave a
+resource behind — the behaviour during the window between expiry and deletion has changed:
+
+- An expired `<subscription>` **no longer publishes notifications**. Previously it kept notifying
+  until the sweep ran, by default up to a day later.
+- An obsolete `<contentInstance>` is **no longer returned by `<latest>`/`<oldest>`** and is not
+  among `rcn=4`/`rcn=8` children. A `<container>` whose instances are all obsolete answers
+  `<latest>` with 4004, the same as one that never had any.
+- Because `maxInstanceAge` is enforced by capping `et` (since v4.9.0), the second point means `mia`
+  now applies to reads too. **A `<container>` with a short `mia` can start answering `<latest>` with
+  4004 where it used to return stale content.** If you were reading content older than the `mia` you
+  configured, raise `mia` or drop it.
+
+An expired resource is still retrievable at its own address and still appears in `fu=1` discovery
+until the sweep removes it. The whole boundary is tabulated in
+[docs/configuration.md § expirationTime](configuration.md#expirationtime).
+
+### Worth knowing: the sweep now runs at startup
+
+`expired_resource_cleanup` was scheduled with an interval only, so its first run came a full
+interval after boot. A deployment restarting more often than that never swept. The first boot on
+this version therefore deletes everything that expired while the old version was skipping the
+sweep, which can be a much larger batch than a day's worth. It runs in the background and does not
+delay readiness, but expect the accompanying database load once.
+
+---
+
 ## v4.13.0
 
 ### Required: DB migration

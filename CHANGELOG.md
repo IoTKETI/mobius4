@@ -21,7 +21,94 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## [Unreleased]
+## v4.14.0 (2026-08-11)
+
+### ⚠️ Breaking for clients that compute `ofst` themselves: the offset filter is 1-based
+
+`TS-0004:7.3.3.17.15` says it outright — "An **offset of 1** shall indicate the **first** direct
+child resource" — and `TS-0001:8.1.2` agrees: "The offset shall start at 1". mobius4 instead read
+`ofst` as a count of results to skip, so `ofst=1` returned the *second* result onward. Since the
+request schema also rejects `ofst=0`, the two together left **the first result unreachable by any
+legal value** — a client that wanted it had to omit `ofst` entirely.
+
+`X-M2M-CTO` (Content Offset) moves with it, since `TS-0001:8.1.3` makes it the same filter
+condition travelling back. Every value the CSE emits is therefore one higher than before. That
+also fixes a case where the round trip was not merely off by one but invalid: for `rcn=4`/`rcn=8`,
+`X-M2M-CTO` could be `0`, and echoing it back — the usage
+[docs/upgrading.md](docs/upgrading.md#v4100) tells clients to prefer — was answered with 4000.
+
+**If your client echoes `X-M2M-CTO` back as `ofst`, nothing changes for you.** If it computes
+offsets by adding `lim` to a counter, it now overlaps by one result per page rather than paging
+cleanly. Overlap, not a gap — the same result arrives twice instead of being skipped — so a client
+that keys on resource ID recovers on its own.
+
+Both readings are present in the specification, in the same clauses; the contradiction is recorded
+as SQ-005 in the development repository and DEC-078 held the old reading pending its resolution.
+It is settled in favour of the explicit statements, because a skip-count reading makes "shall start
+at 1" false and cannot address the first result at all (DEC-096).
+
+### Fixed: an expired `<subscription>` no longer publishes notifications
+
+Reported from a client that creates `<subscription>` resources for monitoring and sets a short
+`et` as a lease, so that a crash cannot leave them behind: notifications kept being published for
+the whole sweep interval — by default a day — to a target that had gone away. Measured on 4.13.1:
+a subscription 2 minutes past its `et` still notified, still answered RETRIEVE with 2000, and was
+still discoverable.
+
+`TS-0004:7.5.1.2.2` does not name `expirationTime` among the steps of the notification procedure,
+so this is not a clause being violated. It is `TS-0001:9.6.1.3.2` calling the resource **obsolete**
+from the moment its `et` passes, and a notification being the one externally visible claim that a
+subscription is live. The specification makes exactly this pairing elsewhere:
+`TS-0004:7.5.1.2.6` gates aggregation on "while the `<group>` resource **has not expired**"
+(DEC-094).
+
+Both notification paths are gated: a subscription's own events (`net` 1/2/3) and the parent-based
+`net=4` lookup. A subscription with no `et` is unaffected — that case is a test of its own, since
+in SQL `et > now` is neither true nor false for those rows.
+
+### Fixed: an obsolete `<contentInstance>` is no longer served as content
+
+`TS-0001:10.2.4.4` treats a `<container>` whose content instances are all obsolete exactly like one
+that has none — "there is no `<contentInstance>` resource in the parent **or if all existing ones
+are obsolete**". `<latest>`, `<oldest>` and the `rcn=4`/`rcn=8` child list ignored `et` and served
+them anyway.
+
+This mattered more than the window suggests, because since 4.9.0 `maxInstanceAge` **is** enforced
+by capping a `<contentInstance>`'s `et`. An obsolete instance is therefore precisely one that `mia`
+has retired, so `<latest>` was returning content older than the `<container>`'s own `mia` allows —
+`mia` was enforced on writes and ignored on reads.
+
+`<latest>` and `<oldest>` now answer with the newest or oldest instance that is not obsolete, and
+4004 when there is none. `cni` and `cbs` still count obsolete instances until the sweep removes
+them; they are maintained by the write path and are not recomputed on read.
+
+Deliberately unchanged: an obsolete resource is still retrievable at its own address and still
+listed by `fu=1` discovery. `TS-0001:9.6.1.3.2` sets no deadline for the deletion, so neither is a
+violation, and the reporting client uses discovery to find its own leftovers after a crash
+(DEC-095). The whole boundary is tabulated in
+[docs/configuration.md § expirationTime](docs/configuration.md#expirationtime).
+
+### Fixed: the expired-resource sweep runs at startup
+
+It was scheduled with `setInterval` alone, which first fires after a full interval. With the
+default interval of one day and `restart: unless-stopped` in `docker-compose.yml`, a deployment
+that restarts more often than daily **never swept at all** — and "expired resources are cleaned up
+daily" was not a true statement about it.
+
+A sweep now runs once at startup as well. It is not awaited, so readiness does not wait on it. The
+first sweep after upgrading from a version that never swept can be large, since it is proportional
+to what accumulated rather than to a day's worth.
+
+### Fixed: internal error text no longer reaches the client in `m2m:dbg`
+
+Reported as `RSC 5000` with `{"m2m:dbg":"column \"or\" does not exist"}` — a raw PostgreSQL message,
+and with it a schema detail, going to an unauthenticated requester who can do nothing with it. The
+5000 was correct (fixed in 4.11.0); the message was whatever the failing layer happened to say.
+
+Unanticipated failures now answer with a fixed `"internal server error"`, while errors this code
+raises deliberately for the client keep their message (`"unsupported geometry type"`, for
+instance). The full error and its stack are logged with the request identifier, so an operator can
+still tie a client's report to the cause.
 
 ### Removed: `docs/openapi.yaml`
 
@@ -98,6 +185,13 @@ Test count 289 → 300.
   `Key (datname)=(mobius4_test_reg_a) already exists`. `npm test` passes
   `--test-concurrency=1` and was never affected, but the failure read as the *feature* being
   broken rather than the fixture colliding. The names now carry the process id.
+
+**Why MINOR** — by the table above these are bug fixes, which would make them PATCH: no resource
+type, operation, filter condition or notification event type is added. But three of them change
+what an existing client sees for a request it already sends. `ofst` shifts by one, `<latest>` can
+return a different instance than it did yesterday, and a subscription that used to keep notifying
+stops. As in v4.11.0, that is more than a bug fix from a client's point of view, and the version
+number is where a client is entitled to see it.
 
 
 ## v4.13.1 (2026-08-08)

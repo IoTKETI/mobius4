@@ -134,9 +134,14 @@ For better performance, it is suggested to limit the level and resource type (e.
 **Pagination.** `lim` bounds the number of resources returned and cuts only on subtree
 boundaries — a direct child whose descendants do not all fit is left out whole, as
 `TS-0001:8.1.2` requires. When that happens the response carries `X-M2M-CTS: 1` (partial) and
-`X-M2M-CTO`, the index of the next unprocessed **direct child**; send that value back as `ofst`
+`X-M2M-CTO`, which names the next unprocessed **direct child**; send that value back as `ofst`
 to continue. If a single direct child's subtree is larger than `lim` the response has no children
 at all and only a larger `lim` helps — the server logs a warning in that case.
+
+`ofst` is **1-based**: `ofst=1` starts at the first direct child, so it returns the same thing as
+omitting `ofst` altogether (`TS-0004:7.3.3.17.15`, "An offset of 1 shall indicate the first direct
+child resource"). `X-M2M-CTO` is emitted in the same base, so echoing it back always lands exactly
+where the previous response stopped.
 
 Check the response format with the following examples.
 

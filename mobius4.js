@@ -50,6 +50,15 @@ async function main() {
         const cleanupIntervalMs = config.cse.expired_resource_cleanup_interval_days * 24 * 60 * 60 * 1000;
         cleanupIntervalId = setInterval(expired_resource_cleanup, cleanupIntervalMs);
         logger.info({ intervalDays: config.cse.expired_resource_cleanup_interval_days }, 'expired resource cleanup scheduled');
+
+        // Sweep once now as well. setInterval alone fires first only after a full interval, so a
+        // deployment restarted more often than the interval — `restart: unless-stopped` plus any
+        // redeploy cadence under a day — never swept at all, and "cleanup runs daily" was not a
+        // true statement about it. Deliberately not awaited: readiness must not wait on a sweep
+        // whose size is a property of the data, and the first sweep after an upgrade from a
+        // version that never swept can be large.
+        expired_resource_cleanup().catch((err) =>
+            logger.error({ err }, 'startup expired resource cleanup failed'));
     } else {
         logger.info({ instance: process.env.NODE_APP_INSTANCE }, 'expired resource cleanup runs on instance 0; skipped here');
     }

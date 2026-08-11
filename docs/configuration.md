@@ -76,7 +76,7 @@ cp config/local.json.example config/local.json
 | `cse.registrar.versions` | Supported oneM2M versions of the Registrar |
 | `cse.admin` | **Required, no default.** Identity the admin `<accessControlPolicy>` grants all six operations to. See the warning below |
 | `cse.aeid_length` | String length of AE ID |
-| `cse.expired_resource_cleanup_interval_days` | Interval for expired resource cleanup in days |
+| `cse.expired_resource_cleanup_interval_days` | Interval for expired resource cleanup in days. A sweep also runs at startup, so the interval is the gap between sweeps of a process that stays up, not the worst case. What an expired resource does before its sweep is documented under [expirationTime](#expirationtime) |
 | `cse.discovery_limit` | Max number of resource IDs in a discovery response |
 | `cse.allow_discovery_for_any` | If `true`, access control is skipped for discovery (faster responses) |
 | `cse.keep_alive_timeout` | HTTP keep-alive session timeout in seconds |
@@ -302,3 +302,28 @@ deleting resources against it, see
 > are rejected with 5001 rather than stored. Consequently `<latest>` and `<oldest>` are not
 > available under a `<flexContainer>` either — TS-0001:9.6.35 scopes them to the case where
 > instances are being created.
+
+### expirationTime
+
+Every resource has an `expirationTime` (`et`). If the requester does not supply one, the CSE
+assigns `now + default.common.et_month`; a supplied value is taken as-is provided it is in the
+future, and a value in the past is refused with 4000. Under a `<container>` with a
+`maxInstanceAge`, a `<contentInstance>`'s `et` is capped to `ct + mia`.
+
+`TS-0001:9.6.1.3.2` defines the attribute as the "time/date **after which** the resource will be
+deleted by the Hosting CSE" and calls the resource **obsolete** from the moment that time passes.
+Deletion is a separate event: `expired_resource_cleanup` performs it, at startup and then every
+`cse.expired_resource_cleanup_interval_days`. So there is a window in which an obsolete resource
+has not yet been deleted, and what happens in that window is deliberate:
+
+| In the window, an obsolete resource… | |
+|---|---|
+| is **not** notified about by an obsolete `<subscription>` | no notification is published once the subscription's own `et` has passed |
+| is **not** returned by `<latest>`/`<oldest>` | those answer with the newest/oldest instance that is not obsolete, or 4004 if there is none |
+| is **not** among `rcn=4`/`rcn=8` child resources | `TS-0001:10.2.4.4` equates "all existing ones are obsolete" with having none |
+| **is** still retrievable by its own address | RSC 2000, with the past `et` in the representation |
+| **is** still listed by `fu=1` discovery | so that a client can find and clean up what it left behind |
+
+The last two are why `et` is a weak basis for reclaiming resources promptly. If a client needs a
+resource gone at a specific time, it should delete it rather than rely on the sweep; `et` is a
+backstop for the case where the client never comes back.
