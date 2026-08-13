@@ -1,0 +1,23 @@
+-- Mobius4 v4.15.0 Migration
+-- Description: Rename mrp.mid to mrp.mmd_list
+--
+-- Why this is needed
+-- -------------------
+-- The <modelRepo> table was copied from <group>'s table definition and kept the column name
+-- "mid" (group uses it for memberIDs), but models/mrp-model.js's Sequelize definition has
+-- always called the same column "mmd_list" (the list of <mlModel> children, TR-0071). Every
+-- INSERT/UPDATE Sequelize builds for the mrp table therefore references a column that does not
+-- exist, so every <modelRepo> CREATE fails with RSC 4000. Found by
+-- scripts/probe-capabilities.js (feat/tr0071-ai-ml-tests, ty 101 CREATE).
+--
+-- The sibling resources that hold the same kind of child-list column do not have this problem:
+-- mdp.dpm_list and dts.dsf_list already agree between db/init.js and their models.
+--
+-- ALTER TABLE ... RENAME COLUMN is a metadata-only change in PostgreSQL -- it does not rewrite
+-- the table and does not touch existing data, it only makes the column addressable under the
+-- name Sequelize already expects. Since CREATE has always failed for this table, there is no
+-- row on any existing deployment with a non-null "mid" to lose.
+--
+-- A fresh install does not need this file: db/init.js creates the column as mmd_list directly.
+
+ALTER TABLE mrp RENAME COLUMN mid TO mmd_list;

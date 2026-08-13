@@ -38,6 +38,7 @@ async function create_a_dpm(req_prim, resp_prim) {
       rn: prim_res.rn,
       pi: dpm_pi,
       sid: dpm_sid,
+      int_cr: req_prim.fr,
       et: prim_res.et || et,
       ct: now,
       lt: now,
@@ -128,6 +129,10 @@ async function retrieve_a_dpm(req_prim, resp_prim) {
       resp_prim.pc = { 'm2m:dbg': 'DPM resource not found' };
       return;
     }
+
+    // provide int_cr if required by internal API call
+    if (req_prim && req_prim.int_cr_req === true)
+      dpm_obj["m2m:dpm"].int_cr = db_res.int_cr;
 
     // copy attributes that shall be stored in the db
     dpm_obj["m2m:dpm"].ty = db_res.ty;

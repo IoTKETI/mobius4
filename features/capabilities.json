@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "probed_at": "2026-08-13",
   "probed_against": {
-    "commit": "86871b5",
+    "commit": "c4ba000",
     "version": "4.14.0"
   },
   "entries": [
@@ -208,8 +208,20 @@
       "source": "TR-0071",
       "operations": {
         "create": {
-          "supported": false,
-          "rsc": 4000
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
         }
       }
     },
@@ -218,7 +230,12 @@
       "short_name": "mmd",
       "long_name": "mlModel",
       "source": "TR-0071",
-      "operations": {}
+      "operations": {
+        "create": {
+          "supported": false,
+          "rsc": 4000
+        }
+      }
     },
     {
       "ty": 103,
@@ -255,16 +272,16 @@
           "rsc": 2001
         },
         "retrieve": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2000
         },
         "update": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2004
         },
         "delete": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2002
         }
       }
     },
@@ -279,16 +296,16 @@
           "rsc": 2001
         },
         "retrieve": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2000
         },
         "update": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2004
         },
         "delete": {
-          "supported": false,
-          "rsc": 4103
+          "supported": true,
+          "rsc": 2002
         }
       }
     },
@@ -297,7 +314,16 @@
       "short_name": "dts",
       "long_name": "dataset",
       "source": "TR-0071",
-      "operations": {}
+      "operations": {
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
     },
     {
       "ty": 107,

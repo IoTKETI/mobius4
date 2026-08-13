@@ -299,7 +299,7 @@ async function create_tables(client) {
               cbmo INTEGER DEFAULT 0,
               mnmo INTEGER,
               mbmo INTEGER,
-              mid VARCHAR(${len.structured_res_id})[]
+              mmd_list VARCHAR(${len.structured_res_id})[]
             );
         `);
 

@@ -98,6 +98,10 @@ async function retrieve_a_dts(req_prim, resp_prim) {
             return;
         }
 
+        // provide int_cr if required by internal API call
+        if (req_prim && req_prim.int_cr_req === true)
+            dts_obj["m2m:dts"].int_cr = db_res.int_cr;
+
         // copy mandatory attributes
         dts_obj["m2m:dts"].ty = db_res.ty;
         dts_obj["m2m:dts"].et = db_res.et;

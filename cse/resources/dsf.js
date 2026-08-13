@@ -48,6 +48,7 @@ async function create_a_dsf(req_prim, resp_prim) {
             rn: prim_res.rn,
             pi: dsf_pi,
             sid: dsf_sid,
+            int_cr: req_prim.fr,
             et: prim_res.et || et,
             ct: now,
             lt: now,
@@ -80,6 +81,7 @@ async function create_a_dsf(req_prim, resp_prim) {
             lvl: dsf_sid.split("/").length,
             pi: dsf_pi,
             cr: prim_res.cr === null ? req_prim.fr : prim_res.cr,
+            int_cr: req_prim.fr,
         });
 
         const tmp_req = { ri }, tmp_resp = {};
@@ -108,6 +110,10 @@ async function retrieve_a_dsf(req_prim, resp_prim) {
             resp_prim.pc = { 'm2m:dbg': '<dsf> resource not found' };
             return;
         }
+
+        // provide int_cr if required by internal API call
+        if (req_prim && req_prim.int_cr_req === true)
+            dsf_obj["m2m:dsf"].int_cr = db_res.int_cr;
 
         // copy mandatory attributes
         dsf_obj["m2m:dsf"].ty = db_res.ty;

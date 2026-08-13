@@ -142,6 +142,10 @@ async function retrieve_a_dsp(req_prim, resp_prim) {
             return;
         }
 
+        // provide int_cr if required by internal API call
+        if (req_prim && req_prim.int_cr_req === true)
+            dsp_obj["m2m:dsp"].int_cr = db_res.int_cr;
+
         // copy mandatory attributes
         dsp_obj["m2m:dsp"].ty = db_res.ty;
         dsp_obj["m2m:dsp"].et = db_res.et;
