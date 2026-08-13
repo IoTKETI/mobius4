@@ -48,14 +48,25 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
+const { startBroker } = require("./helpers/broker");
 const { create, retrieve, update, remove, discover, uniqueRn, urils, CSE_BASE } = require("./helpers/onem2m");
 const { startSink } = require("./helpers/noti-sink");
 
 const TY = { AE: 2, CNT: 3, CIN: 4, SUB: 23, MRP: 101, MMD: 102, MDP: 103, DPM: 104, DSP: 105, DTS: 106, DSF: 107 };
 
-let srv;
-before(async () => { srv = await startServer(); });
-after(async () => { if (srv) await srv.stop(); });
+let broker, srv;
+before(async () => {
+  // TC_TR0071_SCN_DST_02's live-data half of the flow needs a real broker: create_a_live_dataset
+  // (cse/datasetManager.js) batches newly-arrived sensor data via its own internal MQTT
+  // subscription. See test/ai-dataset-management.test.js's `before` hook for the same setup and
+  // why config/test.json can't be used instead (DEC-037, test/helpers/server.js header).
+  broker = await startBroker();
+  srv = await startServer({ mqttPort: broker.port });
+});
+after(async () => {
+  if (srv) await srv.stop();
+  if (broker) await broker.stop();
+});
 
 // -------------------------------------------------------------------------------------------
 // Fixture helpers. Where a helper corresponds directly to a numbered TR-0068 step (repository
@@ -483,32 +494,28 @@ test("TC_TR0071_SCN_DST_01: TP/TR-0071/CSE/SCN/DST/001 — historical data to a 
 });
 
 // TP/TR-0071/CSE/SCN/DST/002: TR-0068:7.7.6 Steps 6-9, the live-data half of the flow that
-// TC_TR0071_SCN_DST_01 covers historically. Was blocked at Step 6, then Step 7; now blocked at
-// Step 8, for a reason an MQTT fixture would not fix either.
+// TC_TR0071_SCN_DST_01 covers historically.
 //
-// FIXED 2026-08-14: two prior blockers are resolved. BACKLOG-092 (cse/datasetManager.js's
-// `dsp_ri` referenced outside the callback scope that defines it, in create_a_live_dataset) was
-// blocking Step 6 -- every live-dataset policy create threw a synchronous ReferenceError, which
-// create_a_dsp's catch reported as a generic 4000. BACKLOG-094 (cse/resources/sub.js's
-// sub_parent_res_types missing "dsp" and "dts") was blocking Step 7 -- a <subscription> under a
-// <dataset> came back 5203 (TARGET_NOT_SUBSCRIBABLE). Both are fixed; Steps 6 and 7 below now
-// pass.
-//
-// FAILS 2026-08-14 at Step 8: the periodic collector never creates a <datasetFragment> in this
-// harness, because it runs with mqtt.enabled=false (test/helpers/server.js's startServer() only
-// enables mqtt when a caller passes mqttPort, which this file's `before` hook does not) and the
-// live-collection path batches newly-arrived sensor data via the MQTT binding (cse/noti.js's
-// self_noti_handler, only invoked from bindings/mqtt.js) into datasetManager.js's batch_data[].
-// But verified by hand outside this harness (real mobius4 process + real mosquitto broker on the
-// port cse/datasetManager.js:329 hard-codes) that fixing only the MQTT gap would still not get
-// Step 9 to pass: the <datasetFragment> for Step 8 *does* get created once MQTT works, but the
-// Step 9 notification never arrives, because create_a_live_dsf creates it by calling
-// cse/resources/dsf.js's create_a_dsf(...) directly -- and CREATE notifications are only ever
-// sent from cse/hostingCSE.js's create_a_res (`noti.check_and_send_noti(...)`, right after the
-// same dispatch call), which datasetManager.js bypasses entirely. This is a third, independent
-// gap (not BACKLOG-092, not BACKLOG-094, not covered by the revision proposal), documented in
-// full at TC_TR0071_DST_NTF_001 (test/ai-dataset-management.test.js).
-test("TC_TR0071_SCN_DST_02: TP/TR-0071/CSE/SCN/DST/002 — live path notifies a subscriber of new fragments", { todo: true }, async () => {
+// FIXED 2026-08-14. Three blockers, one per step, are now resolved. BACKLOG-092
+// (cse/datasetManager.js's `dsp_ri` referenced outside the callback scope that defines it, in
+// create_a_live_dataset) was blocking Step 6 -- every live-dataset policy create threw a
+// synchronous ReferenceError, which create_a_dsp's catch reported as a generic 4000. BACKLOG-094
+// (cse/resources/sub.js's sub_parent_res_types missing "dsp" and "dts") was blocking Step 7 -- a
+// <subscription> under a <dataset> came back 5203 (TARGET_NOT_SUBSCRIBABLE). Step 8 was blocked
+// two ways at once: create_a_live_dataset hard-coded 'mqtt://localhost:1883/...' for its own
+// self-notification loop, which this harness's private broker (test/helpers/broker.js, a random
+// port) never matched, so the periodic collector's batch_data[] never received the new reading at
+// all; cse/datasetManager.js now reads config.mqtt.ip/port instead, and this file's `before` hook
+// starts a broker and passes its port to startServer(). Step 9 was blocked because
+// create_a_live_dsf and create_dataset_fragments (cse/datasetManager.js) created
+// <datasetFragment> resources by calling cse/resources/dsf.js's create_a_dsf(...) directly --
+// CREATE notifications are only ever sent from cse/hostingCSE.js's create_a_res, right after its
+// dispatch switch calls `case 107: await dsf.create_a_dsf(...)`
+// (`noti.check_and_send_noti(req_prim, resp_prim_copy, "create")`); dsf.js's create_a_dsf has no
+// notification call of its own. Both call sites now go through create_a_res instead -- see the
+// comment there for why that was chosen over calling check_and_send_noti directly. Full detail at
+// TC_TR0071_DST_NTF_001 (test/ai-dataset-management.test.js).
+test("TC_TR0071_SCN_DST_02: TP/TR-0071/CSE/SCN/DST/002 — live path notifies a subscriber of new fragments", async () => {
   const src = await makeSource("live-src", [{ v: 0 }]);
 
   // Step 6 (TR-0068:7.7.6 Step 6): "the data scientist requests inference input data" (with a
@@ -531,7 +538,16 @@ test("TC_TR0071_SCN_DST_02: TP/TR-0071/CSE/SCN/DST/002 — live path notifies a 
     // new <datasetFragment>, per the Step 6 policy.
     const newReading = await create(srv.baseUrl, src.sid, TY.CIN, { "m2m:cin": { con: { v: 1 } } });
     assert.equal(newReading.rsc, "2001", `Step 8 (TR-0068:7.7.6): storing a new sensor reading failed: ${newReading.raw.slice(0, 200)}`);
-    const frags = urils(await discover(srv.baseUrl, dtsSid, { ty: String(TY.DSF) }));
+    // The collector runs on Step 6's tcd-second interval timer, not on this CIN's arrival, so the
+    // <datasetFragment> is not necessarily there the instant create() returns -- poll for it
+    // instead of checking once.
+    const discoveryDeadline = Date.now() + 8000;
+    let frags = [];
+    while (Date.now() < discoveryDeadline) {
+      frags = urils(await discover(srv.baseUrl, dtsSid, { ty: String(TY.DSF) }));
+      if (frags.length > 0) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
     assert.ok(frags.length > 0, "Step 8 (TR-0068:7.7.6): expected the periodic collector to have created at least one <datasetFragment>");
 
     // Step 9 (TR-0068:7.7.6 Step 9): the Step 7 subscriber is notified of the new fragment.

@@ -18,20 +18,30 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
+const { startBroker } = require("./helpers/broker");
 const { create, retrieve, update, discover, uniqueRn, urils, CSE_BASE } = require("./helpers/onem2m");
 const { startSink } = require("./helpers/noti-sink");
 
 const TY = { CNT: 3, CIN: 4, DSP: 105, DTS: 106, DSF: 107 };
 
-let srv, root;
+let broker, srv, root;
 before(async () => {
-  srv = await startServer();
+  // A real broker (test/helpers/broker.js, its own ephemeral instance -- see DEC-037 in the
+  // file header of test/helpers/server.js for why this can't just be config/test.json) is
+  // needed for the live-dataset path: create_a_live_dataset (cse/datasetManager.js) subscribes
+  // its own <dataset> row-batching logic to source <container>s over MQTT, and TC_TR0071_DST_NTF_001
+  // below exercises that path end to end.
+  broker = await startBroker();
+  srv = await startServer({ mqttPort: broker.port });
   const rn = uniqueRn("dstroot");
   const res = await create(srv.baseUrl, CSE_BASE, TY.CNT, { "m2m:cnt": { rn } });
   assert.equal(res.rsc, "2001");
   root = { rn, sid: `${CSE_BASE}/${rn}` };
 });
-after(async () => { if (srv) await srv.stop(); });
+after(async () => {
+  if (srv) await srv.stop();
+  if (broker) await broker.stop();
+});
 
 /**
  * A source <container> holding one <contentInstance> per value in `values`, oldest first, each
@@ -380,32 +390,22 @@ test("TC_TR0071_DST_UPD_001: TP/TR-0071/CSE/DST/UPD/001 — <datasetFragment> is
   assert.equal(res.rsc, "4005", `expected OPERATION_NOT_ALLOWED: ${res.raw.slice(0, 200)}`);
 });
 
-// FAILS 2026-08-14 -- but for a different reason than before, and not one this harness can work
-// around by adding an MQTT broker fixture. Two prior blockers are gone: BACKLOG-092
-// (create_a_live_dataset's `dsp_ri` referenced outside the callback scope that defines it,
-// cse/datasetManager.js) and BACKLOG-094 (<dataset> missing from sub.js's sub_parent_res_types)
-// are both fixed, so the policy CREATE now returns 2001 with a liveDatasetID and the
-// <subscription> under it now returns 2001 too. This harness also still runs with
-// mqtt.enabled=false (test/helpers/server.js's startServer() only enables mqtt when a caller
-// passes mqttPort, which this file's `before` hook does not), so create_a_live_dsf's
-// batch_data[dsp_ri] stays empty here too -- BUT a real MQTT broker would not fix this test
-// either, verified by hand outside this harness (real mobius4 process + real mosquitto broker on
-// the port cse/datasetManager.js:329 hard-codes, 'mqtt://localhost:1883/...'): batch_data *did*
-// populate and a <datasetFragment> *was* created under the live <dataset> -- but no notification
-// ever reached the subscriber. The reason: create_a_live_dsf (cse/datasetManager.js) creates the
-// <datasetFragment> by calling cse/resources/dsf.js's create_a_dsf(...) directly. CREATE
-// notifications are only ever sent from cse/hostingCSE.js's create_a_res, in the block right
-// after its dispatch switch calls `case 107: await dsf.create_a_dsf(...)` (the same call
-// datasetManager.js makes standalone) -- `noti.check_and_send_noti(req_prim, resp_prim_copy,
-// "create")`. dsf.js's create_a_dsf has no notification call of its own. So every internally
-// created <datasetFragment> (live or historical) is notification-silent regardless of whether
-// MQTT works. This is a third, independent gap -- not BACKLOG-092, not BACKLOG-094, and not
-// covered by the revision proposal. Marked todo rather than worked around with the still-open
-// direct-CREATE gap (CRE/006) -- that would test the generic notification mechanism through the
-// normal client path, not this TP's specific claim about the live-collection flow notifying
-// through its actual (internal) creation path, and would misrepresent what was actually
-// verified.
-test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetFragment> notifies a subscriber", { todo: true }, async () => {
+// Fixed 2026-08-14. The gap was real and was exactly what this TP claims: create_a_live_dsf and
+// create_dataset_fragments (cse/datasetManager.js) created <datasetFragment> resources by calling
+// cse/resources/dsf.js's create_a_dsf(...) directly. CREATE notifications are only ever sent from
+// cse/hostingCSE.js's create_a_res, in the block right after its dispatch switch calls `case 107:
+// await dsf.create_a_dsf(...)` -- `noti.check_and_send_noti(req_prim, resp_prim_copy, "create")`.
+// dsf.js's create_a_dsf has no notification call of its own, so every internally created
+// <datasetFragment> was notification-silent. Both call sites now go through create_a_res instead
+// (see the comment there for why that is the chosen fix over calling check_and_send_noti
+// directly). A second, independent bug sat in the same path: create_a_live_dataset hard-coded
+// 'mqtt://localhost:1883/...' for its own self-notification loop, which only coincidentally
+// matched config/default.json -- under this harness (test/helpers/broker.js, a private broker on
+// a random port) it never matched config.mqtt.ip/port, so bindings/mqtt-outbound.js's
+// is_own_broker() check failed and create_a_live_dsf's batch_data[dsp_ri] never got populated at
+// all. Both are fixed now: this file's `before` hook starts a broker and passes its port to
+// startServer(), and cse/datasetManager.js reads config.mqtt.ip/port instead of a literal.
+test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetFragment> notifies a subscriber", async () => {
   const sink = await startSink();
   try {
     const src = await makeSource("src", [{ x: 1 }]);
@@ -417,6 +417,14 @@ test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetF
     const sub = await create(srv.baseUrl, dtsSid, 23,
       { "m2m:sub": { rn: uniqueRn("s"), nu: [sink.url], enc: { net: [3], chty: [TY.DSF] } } });
     assert.equal(sub.rsc, "2001");
+
+    // The live-dataset watcher subscription (create_a_live_dataset's own internal <subscription>
+    // on `src`) only starts existing once the policy above is created, so the single instance
+    // makeSource() already put in `src` predates it and is invisible to it. A fresh instance is
+    // needed here so the periodic collector (create_a_live_dsf, tcd=2s) has something to batch
+    // and turn into a <datasetFragment> for the subscriber above to be notified about.
+    const newReading = await create(srv.baseUrl, src.sid, TY.CIN, { "m2m:cin": { con: { x: 2 } } });
+    assert.equal(newReading.rsc, "2001", `new sensor reading failed: ${newReading.raw.slice(0, 200)}`);
 
     const noti = await sink.waitFor((i) => i.body && i.body["m2m:sgn"], { timeoutMs: 8000 });
     assert.ok(noti.body["m2m:sgn"].nev.rep["m2m:dsf"], "notification should carry the new <datasetFragment>");

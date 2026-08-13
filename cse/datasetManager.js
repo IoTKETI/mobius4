@@ -8,7 +8,6 @@ const moment = require('moment');
 
 const cb = require('./resources/cb');
 const dts = require('./resources/dts');
-const dsf = require('./resources/dsf');
 
 const CNT = require('../models/cnt-model');
 const CIN = require('../models/cin-model');
@@ -281,13 +280,13 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
             formatted_fragment = convert_to_JSON(fragmentRows);
               
         // create <dsf> resources
-        const { get_structuredID, get_a_new_rn } = require('./hostingCSE');
+        const { get_structuredID, get_a_new_rn, create_a_res } = require('./hostingCSE');
         const dts_sid = await get_structuredID(dts_ri);
         const dsf_rn = await get_a_new_rn(107);
 
         const dsf_res = {
             rn: dsf_rn,
-            dsfr: formatted_fragment, 
+            dsfr: formatted_fragment,
             dsfm: dsfm, // dataset format
             nrf: fragmentRows.length, // numberOfRowsInFragment
             dfst: fragmentRows[0].time, // datasetFragmentStartTime
@@ -298,13 +297,31 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
             pc: { "m2m:dsf": dsf_res },
             ri: dts_ri,
             sid: dts_sid,
+            ty: 107, // dsf resource type -- selects hostingCSE.create_a_res's dispatch case.
+                     // Distinct from 'to_ty' below (the *parent's* type, which dsf.create_a_dsf
+                     // still reads for its own parent-type check).
             to_ty: 106, // dts resource type
             fr: admin_id
         };
         const tmp_resp = {};
-        
+
         try {
-            await dsf.create_a_dsf(tmp_req, tmp_resp);
+            // Routed through create_a_res rather than calling dsf.create_a_dsf directly, so this
+            // CSE-initiated create fires the same noti.check_and_send_noti(..., "create") a
+            // client-issued CREATE gets (hostingCSE.js, right after its dispatch switch).
+            // TR-0071:7.2.2.1 requires newly created inference input data to be notifiable to
+            // subscribers on <dataset>, and TS-0018/DEC-history aside, dsf.create_a_dsf itself has
+            // no notification call of its own -- create_a_res's post-dispatch block is the only
+            // place that fires one. hostingCSE.js's own `case 107` comment ("not called by
+            // client, temporary for testing") already marks this as the intended entry point.
+            // create_a_res's other additions are no-ops here: 'rn' is already generated and
+            // unique (the duplicate-name recheck it does is an extra but harmless query), no 'et'
+            // is set, and 'rcn' is left undefined so the full representation still comes back
+            // unchanged. Unlike a client CREATE this never goes through reqPrim.js, so
+            // access_decision (which lives outside create_a_res) never runs for it -- correctly:
+            // there is no external originator to check privileges for, the CSE is creating this
+            // on its own authority.
+            await create_a_res(tmp_req, tmp_resp);
 
             if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
                 logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'dsf fragment creation failed');
@@ -326,7 +343,14 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
         	net : [3],
             chty: [4]
         },
-        nu : ['mqtt://localhost:1883/self/datasetManager/' + dsp_res.sid],
+        // Read from config.mqtt rather than hard-coded, so this matches whatever broker the
+        // running CSE is actually connected to. Under config/default.json both are
+        // ("localhost", 1883) so this was invisible in normal operation, but the test harness
+        // (test/helpers/broker.js) starts a private broker on a random free port per DEC-037 --
+        // against the old hard-coded URL, bindings/mqtt-outbound.js's is_own_broker() check never
+        // matched, the "self" delivery shortcut never fired, and batch_data (this module's
+        // per-policy row buffer) never got populated for the live-dataset path.
+        nu : [`mqtt://${config.mqtt.ip}:${config.mqtt.port}/self/datasetManager/${dsp_res.sid}`],
         nct: 1
     };
 
@@ -437,10 +461,10 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
     logger.debug({ dsp_ri, rowCount: dsf_data.length }, 'dsf_data ready');
     // console.log('batch_data: ', batch_data);
 
-    const { get_a_new_rn } = require('./hostingCSE');
+    const { get_a_new_rn, create_a_res } = require('./hostingCSE');
     const dsf_rn = get_a_new_rn(107);
     const timestamps = Object.keys(dsf_data);
-    
+
     // create a <dsf> resource
     const dsf_res = {
         rn: dsf_rn,
@@ -454,11 +478,13 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
         pc: { "m2m:dsf": dsf_res },
         ri: dts_ri,
         sid: dts_sid,
+        ty: 107, // dsf resource type -- see create_dataset_fragments() above for why this goes
+                 // through create_a_res (notification) rather than dsf.create_a_dsf directly.
         to_ty: 106, // dts resource type
         fr: admin_id
     };
     const tmp_resp = {};
-    await dsf.create_a_dsf(tmp_req, tmp_resp);
+    await create_a_res(tmp_req, tmp_resp);
     if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
         logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'live dsf resource creation failed');
         return;
