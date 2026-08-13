@@ -66,5 +66,19 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Time series (TS) | ❌ none | 0 / 1 | — |
 | **total** | | **41 / 103** | **67** |
 
+## Candidate features from Technical Reports (non-normative)
+
+These entries are **not part of the ratified oneM2M standard**. They come from a
+Technical Report — a candidate solution still under study, not yet folded into a TS —
+so there is no official ATS and no TS-0018 test purpose for them, and they cannot appear
+in the Areas table above or count toward its totals. They are listed here, separately,
+so this file never reads as "the CSE supports part of the standard that does not exist
+yet". Where these are verified, it is by this project's own test purposes
+(`TP/<source>/...`), not TS-0018's.
+
+| area | source | status | entries implemented |
+|---|---|---|---|
+| AI/ML (AI/ML) | TR-0071 | ⚠️ partial | 0 / 7 |
+
 Source: `features/inventory.yaml (mobius4-dev-tool)`.
 

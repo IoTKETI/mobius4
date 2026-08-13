@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
-  "probed_at": "2026-08-11",
+  "probed_at": "2026-08-13",
   "probed_against": {
-    "commit": "3642759",
+    "commit": "86871b5",
     "version": "4.14.0"
   },
   "entries": [
@@ -200,6 +200,111 @@
           "rsc": 2002
         }
       }
+    },
+    {
+      "ty": 101,
+      "short_name": "mrp",
+      "long_name": "modelRepo",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": false,
+          "rsc": 4000
+        }
+      }
+    },
+    {
+      "ty": 102,
+      "short_name": "mmd",
+      "long_name": "mlModel",
+      "source": "TR-0071",
+      "operations": {}
+    },
+    {
+      "ty": 103,
+      "short_name": "mdp",
+      "long_name": "modelDeploymentList",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 104,
+      "short_name": "dpm",
+      "long_name": "modelDeployment",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": false,
+          "rsc": 4103
+        },
+        "update": {
+          "supported": false,
+          "rsc": 4103
+        },
+        "delete": {
+          "supported": false,
+          "rsc": 4103
+        }
+      }
+    },
+    {
+      "ty": 105,
+      "short_name": "dsp",
+      "long_name": "mlDatasetPolicy",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": false,
+          "rsc": 4103
+        },
+        "update": {
+          "supported": false,
+          "rsc": 4103
+        },
+        "delete": {
+          "supported": false,
+          "rsc": 4103
+        }
+      }
+    },
+    {
+      "ty": 106,
+      "short_name": "dts",
+      "long_name": "dataset",
+      "source": "TR-0071",
+      "operations": {}
+    },
+    {
+      "ty": 107,
+      "short_name": "dsf",
+      "long_name": "datasetFragment",
+      "source": "TR-0071",
+      "operations": {}
     }
   ],
   "procedures": [
