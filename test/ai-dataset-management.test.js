@@ -380,19 +380,31 @@ test("TC_TR0071_DST_UPD_001: TP/TR-0071/CSE/DST/UPD/001 — <datasetFragment> is
   assert.equal(res.rsc, "4005", `expected OPERATION_NOT_ALLOWED: ${res.raw.slice(0, 200)}`);
 });
 
-// FAILS 2026-08-13, before it can even test what it means to: creating a live-dataset policy
-// hits the same create_a_live_dataset bug documented at CRE/004 (cse/datasetManager.js:399,
-// `dsp_ri` referenced outside the callback scope that defines it) -- the policy CREATE itself
-// comes back 4000, so there is no liveDatasetID and no subscription target to test notification
-// against. Even with that bug fixed, exercising the *intended* live-collection path (a periodic
-// interval populating <datasetFragment> from MQTT-ingested data) needs a running MQTT broker:
-// batch_data[] is only ever populated by the MQTT binding, and this harness runs with
-// mqtt.enabled=false (test/helpers/server.js), so create_a_live_dsf's batch would stay empty and
-// it would return before creating anything. Marked todo rather than worked around with the
-// still-open direct-CREATE gap (CRE/006) -- that would test the generic notification mechanism,
-// not this TP's specific claim about the live-collection flow, and would misrepresent what was
-// actually verified. Not covered by the revision proposal; owner judgement needed on whether to
-// fix the dsp_ri bug and add an MQTT-broker test fixture for this path.
+// FAILS 2026-08-14 -- but for a different reason than before, and not one this harness can work
+// around by adding an MQTT broker fixture. Two prior blockers are gone: BACKLOG-092
+// (create_a_live_dataset's `dsp_ri` referenced outside the callback scope that defines it,
+// cse/datasetManager.js) and BACKLOG-094 (<dataset> missing from sub.js's sub_parent_res_types)
+// are both fixed, so the policy CREATE now returns 2001 with a liveDatasetID and the
+// <subscription> under it now returns 2001 too. This harness also still runs with
+// mqtt.enabled=false (test/helpers/server.js's startServer() only enables mqtt when a caller
+// passes mqttPort, which this file's `before` hook does not), so create_a_live_dsf's
+// batch_data[dsp_ri] stays empty here too -- BUT a real MQTT broker would not fix this test
+// either, verified by hand outside this harness (real mobius4 process + real mosquitto broker on
+// the port cse/datasetManager.js:329 hard-codes, 'mqtt://localhost:1883/...'): batch_data *did*
+// populate and a <datasetFragment> *was* created under the live <dataset> -- but no notification
+// ever reached the subscriber. The reason: create_a_live_dsf (cse/datasetManager.js) creates the
+// <datasetFragment> by calling cse/resources/dsf.js's create_a_dsf(...) directly. CREATE
+// notifications are only ever sent from cse/hostingCSE.js's create_a_res, in the block right
+// after its dispatch switch calls `case 107: await dsf.create_a_dsf(...)` (the same call
+// datasetManager.js makes standalone) -- `noti.check_and_send_noti(req_prim, resp_prim_copy,
+// "create")`. dsf.js's create_a_dsf has no notification call of its own. So every internally
+// created <datasetFragment> (live or historical) is notification-silent regardless of whether
+// MQTT works. This is a third, independent gap -- not BACKLOG-092, not BACKLOG-094, and not
+// covered by the revision proposal. Marked todo rather than worked around with the still-open
+// direct-CREATE gap (CRE/006) -- that would test the generic notification mechanism through the
+// normal client path, not this TP's specific claim about the live-collection flow notifying
+// through its actual (internal) creation path, and would misrepresent what was actually
+// verified.
 test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetFragment> notifies a subscriber", { todo: true }, async () => {
   const sink = await startSink();
   try {

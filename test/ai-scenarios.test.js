@@ -483,25 +483,31 @@ test("TC_TR0071_SCN_DST_01: TP/TR-0071/CSE/SCN/DST/001 — historical data to a 
 });
 
 // TP/TR-0071/CSE/SCN/DST/002: TR-0068:7.7.6 Steps 6-9, the live-data half of the flow that
-// TC_TR0071_SCN_DST_01 covers historically. Blocked at Step 6.
+// TC_TR0071_SCN_DST_01 covers historically. Was blocked at Step 6, then Step 7; now blocked at
+// Step 8, for a reason an MQTT fixture would not fix either.
 //
-// FAILS 2026-08-13: identical root cause to TC_TR0071_DST_CRE_004 (test/ai-dataset-management.test.js)
-// -- cse/datasetManager.js:399 references `dsp_ri` outside the callback scope that defines it, so
-// every live-dataset policy create throws a synchronous ReferenceError, which create_a_dsp's
-// catch reports as a generic 4000. There is no liveDatasetID to subscribe to (Step 7) or collect
-// into (Step 8), so Steps 7-9 below are unreachable while the bug stands. Per the instruction to
-// write a blocked scenario in full rather than truncate it, they are kept as the intended
-// continuation.
+// FIXED 2026-08-14: two prior blockers are resolved. BACKLOG-092 (cse/datasetManager.js's
+// `dsp_ri` referenced outside the callback scope that defines it, in create_a_live_dataset) was
+// blocking Step 6 -- every live-dataset policy create threw a synchronous ReferenceError, which
+// create_a_dsp's catch reported as a generic 4000. BACKLOG-094 (cse/resources/sub.js's
+// sub_parent_res_types missing "dsp" and "dts") was blocking Step 7 -- a <subscription> under a
+// <dataset> came back 5203 (TARGET_NOT_SUBSCRIBABLE). Both are fixed; Steps 6 and 7 below now
+// pass.
 //
-// A second, independent problem sits behind Step 7 even once the above is fixed, discovered while
-// writing this file (not one of the eight defects already known going in): a <subscription>
-// cannot be created under a <dataset> at all. cse/resources/sub.js's sub_parent_res_types is
-// ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm"] -- "dts" (106) is
-// not in that list. Verified directly (not merely read from source): using the same open
-// direct-CREATE gap that TC_TR0071_DST_CRE_005 documents, a <dataset> was created straight under
-// <CSEBase> and a <subscription> creation attempted under it returned 5203
-// (TARGET_NOT_SUBSCRIBABLE, "cannot subscribe to this parent resource type"), not 2001. So even a
-// fixed dsp_ri would only move the failure from Step 6 to Step 7.
+// FAILS 2026-08-14 at Step 8: the periodic collector never creates a <datasetFragment> in this
+// harness, because it runs with mqtt.enabled=false (test/helpers/server.js's startServer() only
+// enables mqtt when a caller passes mqttPort, which this file's `before` hook does not) and the
+// live-collection path batches newly-arrived sensor data via the MQTT binding (cse/noti.js's
+// self_noti_handler, only invoked from bindings/mqtt.js) into datasetManager.js's batch_data[].
+// But verified by hand outside this harness (real mobius4 process + real mosquitto broker on the
+// port cse/datasetManager.js:329 hard-codes) that fixing only the MQTT gap would still not get
+// Step 9 to pass: the <datasetFragment> for Step 8 *does* get created once MQTT works, but the
+// Step 9 notification never arrives, because create_a_live_dsf creates it by calling
+// cse/resources/dsf.js's create_a_dsf(...) directly -- and CREATE notifications are only ever
+// sent from cse/hostingCSE.js's create_a_res (`noti.check_and_send_noti(...)`, right after the
+// same dispatch call), which datasetManager.js bypasses entirely. This is a third, independent
+// gap (not BACKLOG-092, not BACKLOG-094, not covered by the revision proposal), documented in
+// full at TC_TR0071_DST_NTF_001 (test/ai-dataset-management.test.js).
 test("TC_TR0071_SCN_DST_02: TP/TR-0071/CSE/SCN/DST/002 — live path notifies a subscriber of new fragments", { todo: true }, async () => {
   const src = await makeSource("live-src", [{ v: 0 }]);
 
