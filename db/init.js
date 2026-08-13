@@ -298,8 +298,7 @@ async function create_tables(client) {
               cnmo INTEGER DEFAULT 0,
               cbmo INTEGER DEFAULT 0,
               mnmo INTEGER,
-              mbmo INTEGER,
-              mmd_list VARCHAR(${len.structured_res_id})[]
+              mbmo INTEGER
             );
         `);
 
@@ -348,8 +347,7 @@ async function create_tables(client) {
               cr VARCHAR(255),
               ndm INTEGER DEFAULT 0,
               nrm INTEGER DEFAULT 0,
-              nsm INTEGER DEFAULT 0,
-              dpm_list VARCHAR(255)[]
+              nsm INTEGER DEFAULT 0
             );
         `);
 
@@ -421,8 +419,7 @@ async function create_tables(client) {
               acpi VARCHAR(${len.structured_res_id})[],
               lbl VARCHAR(${len.str_token})[],
               dspi VARCHAR(${len.structured_res_id}),
-              lof VARCHAR(${len.str_token})[],
-              dsf_list VARCHAR(${len.structured_res_id})[]
+              lof VARCHAR(${len.str_token})[]
             );
         `);
 

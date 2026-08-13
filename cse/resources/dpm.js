@@ -1,6 +1,6 @@
 const enums = require("../../config/enums");
 const { classify_create_error } = require("../create-error");
-const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, not_obsolete_where } = require('../utils');
 
 const Lookup = require('../../models/lookup-model');
 const MDP = require('../../models/mdp-model');
@@ -55,7 +55,6 @@ async function create_a_dpm(req_prim, resp_prim) {
     // update meta info of its parent (last three arguments order: ndm, nrm, nsm)
     await update_parent_mdp({
       mdp_res,
-      dpm_id: db_res.ri,
       ndm_delta: 1,
       nrm_delta: 0,
       nsm_delta: 0
@@ -90,15 +89,11 @@ async function create_a_dpm(req_prim, resp_prim) {
 
 async function update_parent_mdp({
   mdp_res,
-  dpm_id,
   ndm_delta,
   nrm_delta,
   nsm_delta
 }) {
-  let { ri: mdp_ri, ndm, nrm, nsm, dpm_list } = mdp_res;
-
-  // add this dpm_id into the dpm_list of the parent
-  if (dpm_id) dpm_list.push(dpm_id);
+  let { ri: mdp_ri, ndm, nrm, nsm } = mdp_res;
 
   ndm += ndm_delta;
   nrm += nrm_delta;
@@ -106,7 +101,6 @@ async function update_parent_mdp({
 
   // finally update the above parent attributes
   await MDP.update({
-    dpm_list,
     ndm,
     nrm,
     nsm,
@@ -115,6 +109,19 @@ async function update_parent_mdp({
   });
 
   return;
+}
+
+// The newest ('DESC') or oldest ('ASC') <deployment> under a <modelDeploymentList> that is not
+// obsolete. Mirrors find_edge_cin in cse/resources/cnt.js -- <deployment> has no stateTag, so
+// creationTime is the ordering basis, with 'ri' as a deterministic tiebreaker (this codebase's
+// 'ct' has only second granularity, so two deployments created in the same second would
+// otherwise tie).
+async function find_edge_dpm(parent_ri, order) {
+  return DPM.findOne({
+    where: { pi: parent_ri, ...not_obsolete_where() },
+    order: [['ct', order], ['ri', order]],
+    attributes: ['ri'],
+  });
 }
 
 async function retrieve_a_dpm(req_prim, resp_prim) {
@@ -193,7 +200,6 @@ async function update_a_dpm(req_prim, resp_prim) {
       if (db_res.mds === 0 && prim_res.mcmd === 1) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: -1,
           nrm_delta: 1,
           nsm_delta: 0
@@ -204,7 +210,6 @@ async function update_a_dpm(req_prim, resp_prim) {
       if (db_res.mds === 1 && prim_res.mcmd === 0) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: 0,
           nrm_delta: -1,
           nsm_delta: 1
@@ -215,7 +220,6 @@ async function update_a_dpm(req_prim, resp_prim) {
       if (db_res.mds === 2 && prim_res.mcmd === 1) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: 0,
           nrm_delta: 1,
           nsm_delta: -1
@@ -250,5 +254,6 @@ async function update_a_dpm(req_prim, resp_prim) {
 module.exports = {
   create_a_dpm,
   retrieve_a_dpm,
-  update_a_dpm
+  update_a_dpm,
+  find_edge_dpm,
 };

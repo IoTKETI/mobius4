@@ -40,10 +40,6 @@ const MDP = sequelize.define('mdp', {
     type: DataTypes.INTEGER,
     defaultValue: 0,
   }, // numberOfStoppedModels
-  dpm_list: {
-    type: DataTypes.ARRAY(DataTypes.STRING),
-    defaultValue: [],
-  }, // list of children <deployments> resources
 }, {
   tableName: 'mdp',
   timestamps: false,

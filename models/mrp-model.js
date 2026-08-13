@@ -32,10 +32,6 @@ const MRP = sequelize.define('mrp', {
   },
   mnmo: DataTypes.INTEGER,
   mbmo: DataTypes.INTEGER,
-  mmd_list: {
-    type: DataTypes.ARRAY(DataTypes.STRING),
-    defaultValue: [],
-  },
 }, {
   tableName: 'mrp',
   timestamps: false,

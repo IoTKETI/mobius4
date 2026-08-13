@@ -32,7 +32,6 @@ const DTS = sequelize.define('dts', {
   // resource specific attributes
   dspi: DataTypes.STRING(255), // datasetPolicyID (Read Only)
   lof: DataTypes.ARRAY(DataTypes.STRING), // listOfFeatures (Read Only)
-  dsf_list: DataTypes.ARRAY(DataTypes.STRING), // list of dsf resources (Read Only)
 }, {
   tableName: 'dts',
   timestamps: false,

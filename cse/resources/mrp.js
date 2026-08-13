@@ -44,8 +44,12 @@ async function create_an_mrp(req_prim, resp_prim) {
       acpi: prim_res.acpi || null,
       lbl: prim_res.lbl || null,
       // resource specific attributes
-      mnmo: prim_res.mnmo || 0,
-      mbmo: prim_res.mbmo || 0,
+      // maxNumberOfModels/maxByteOfModels are optional (TR-0071:7.1.2.1, multiplicity 0..1).
+      // `?? null` keeps that: a client that omits them gets no limit, not a limit of 0 -- see
+      // update_parent_mrp in cse/resources/mmd.js, which relies on this being null rather than
+      // a falsy 0 to know "no limit" from "limit of zero".
+      mnmo: prim_res.mnmo ?? null,
+      mbmo: prim_res.mbmo ?? null,
     });
 
     await Lookup.create({
@@ -167,63 +171,41 @@ async function update_an_mrp(req_prim, resp_prim) {
   return;
 }
 
-// BACKLOG-060: the <modelRepo> family is non-standard and its virtual-resource handling has
-// never been reviewed or covered by tests.
+// <ol> ("oldest") resolves to the oldest non-obsolete <mlModel> under this <modelRepo>, found
+// the same way <container>'s <ol> finds its oldest <contentInstance> (find_edge_cin in
+// cse/resources/cnt.js) -- a query ordered by creationTime that excludes expired children,
+// rather than array position in a list. See mmd.js's find_edge_mmd for why the ordering uses
+// 'ct'+'ri' where <container> uses 'st'+'ct'+'ri' (<mlModel> has no stateTag).
 async function retrieve_ol(req_prim, resp_prim) {
-  const mrp_res = await MRP.findOne({
-    where: { ri: req_prim.parent_ri },
-    attributes: ['mmd_list']
-  });
-  if (!mrp_res) {
+  const oldest = await mmd.find_edge_mmd(req_prim.parent_ri, 'ASC');
+  if (!oldest) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "<mrp> resource which is the parent of <ol> not found" };
+    resp_prim.pc = { "m2m:dbg": "there is no <mmd> resource" };
     return;
   }
 
-  const mmd_list = mrp_res.mmd_list;
-  if (mmd_list.length > 0) {
-    const mmd_ri = mmd_list[0];
-    const tmp_req = { ri: mmd_ri }, tmp_resp = {};
-    await mmd.retrieve_an_mmd(tmp_req, tmp_resp);
+  const tmp_req = { ri: oldest.ri }, tmp_resp = {};
+  await mmd.retrieve_an_mmd(tmp_req, tmp_resp);
 
-    // set successful RCS in case of virtual resource
-    resp_prim.rsc = enums.rsc_str["OK"];
-    resp_prim.pc = tmp_resp.pc;
-  } else {
-    resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "there is no <mmd> resource" };
-  }
-
+  resp_prim.rsc = enums.rsc_str["OK"];
+  resp_prim.pc = tmp_resp.pc;
   return;
 };
 
 // if we want to apply 'attrl' filter here, then we can use "retrieve_a_res" function, rather than "retrieve_a_cin"
 async function retrieve_la(req_prim, resp_prim) {
-  const mrp_res = await MRP.findOne({
-    where: { ri: req_prim.parent_ri },
-    attributes: ['mmd_list']
-  });
-  if (!mrp_res) {
+  const latest = await mmd.find_edge_mmd(req_prim.parent_ri, 'DESC');
+  if (!latest) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
     resp_prim.pc = { "m2m:dbg": "there is no <mmd> resource" };
     return;
   }
 
-  const mmd_list = mrp_res.mmd_list;
-  if (mmd_list.length > 0) {
-    const mmd_ri = mmd_list[mmd_list.length - 1];
+  const tmp_req = { ri: latest.ri }, tmp_resp = {};
+  await mmd.retrieve_an_mmd(tmp_req, tmp_resp);
 
-    const tmp_req = { ri: mmd_ri }, tmp_resp = {};
-    await mmd.retrieve_an_mmd(tmp_req, tmp_resp);
-
-    // set successful RCS in case of virtual resource
-    resp_prim.rsc = enums.rsc_str["OK"];
-    resp_prim.pc = tmp_resp.pc;
-  } else {
-    resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "there is no <mmd> resource" };
-  }
-
+  resp_prim.rsc = enums.rsc_str["OK"];
+  resp_prim.pc = tmp_resp.pc;
   return;
 };
 

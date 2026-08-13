@@ -1,7 +1,7 @@
-const config = require("config");
+const { Op } = require("sequelize");
 const enums = require("../../config/enums");
 
-const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, not_obsolete_where } = require('../utils');
 
 const Lookup = require('../../models/lookup-model');
 const MMD = require('../../models/mmd-model');
@@ -45,8 +45,15 @@ async function create_an_mmd(req_prim, resp_prim) {
   try {
     const mrp_res = await MRP.findByPk(mmd_pi);
 
-    // deleting the oldest mmd when mms is bigger than (mbmo - cbmo) is not defined in the oneM2M TR yet
-    if (mms > mrp_res.mbmo - mrp_res.cbmo) {
+    // maxByteOfModels is optional (TR-0071:7.1.2.1, multiplicity 0..1); mrp_res.mbmo is null
+    // when the parent <modelRepo> was created without it (cse/resources/mrp.js), and an absent
+    // limit means no limit here too. Without the null guard, `mms > null - cbmo` coerces the
+    // null to 0 and rejects every non-empty model.
+    //
+    // Deleting the oldest mmd when mms is bigger than (mbmo - cbmo) is not defined in the
+    // oneM2M TR yet, so this only refuses the create -- it does not evict (see BACKLOG-060 in
+    // update_parent_mrp below for the same open question on the post-create side).
+    if (mrp_res.mbmo != null && mms > mrp_res.mbmo - mrp_res.cbmo) {
       resp_prim.rsc = enums.rsc_str["NOT_ACCEPTABLE"];
       resp_prim.pc = { "m2m:dbg": "modelSize of a new <mmd> is bigger than (mbmo - cbmo)" };
       return;
@@ -109,34 +116,60 @@ async function create_an_mmd(req_prim, resp_prim) {
   return;
 }
 
+// The newest ('DESC') or oldest ('ASC') <mlModel> under a <modelRepo> that is not obsolete.
+// Mirrors find_edge_cin in cse/resources/cnt.js -- <mlModel> has no stateTag, so creationTime
+// is the ordering basis, with 'ri' as a deterministic tiebreaker (this codebase's 'ct' has only
+// second granularity, so two models created in the same second would otherwise tie).
+//
+// exclude_ri lets the eviction check below guarantee the model just created can never be its
+// own victim, even if it and its oldest sibling land in the same second and would otherwise
+// tie on the sort above.
+async function find_edge_mmd(parent_ri, order, exclude_ri) {
+  const where = { pi: parent_ri, ...not_obsolete_where() };
+  if (exclude_ri) where.ri = { [Op.ne]: exclude_ri };
+  return MMD.findOne({
+    where,
+    order: [['ct', order], ['ri', order]],
+    attributes: ['ri'],
+  });
+}
+
 async function update_parent_mrp(mrp_db_res, mmd_id, model_size) {
-  let { ri: mrp_id, cnmo, cbmo, mnmo, mbmo, mmd_list } = mrp_db_res;
+  let { ri: mrp_id, cnmo, cbmo, mnmo, mbmo } = mrp_db_res;
 
-  // add this mmd_id into the mmd_list of the parent
-  mmd_list = mmd_list || [];
-  mmd_list.push(mmd_id);
-
-  // if 'mnmo' goes over than its limit, delete the oldest (shift)
   cnmo++;
-  if (cnmo > mnmo) {
-    const deleted_ri = mmd_list.shift();
 
-    const tmp_resp = {};
-    // BACKLOG-060: each member is fetched separately instead of being carried in mms_list.
-    const { delete_a_res } = require('../hostingCSE');
-    await delete_a_res({ fr: config.cse.admin, to: deleted_ri, rqi: "1234" }, tmp_resp);
-    cbmo = cbmo - tmp_resp.pc["m2m:mmd"].mms;
-    cnmo--;
+  // maxNumberOfModels is optional (TR-0071:7.1.2.1, multiplicity 0..1), and
+  // cse/resources/mrp.js stores an unset mnmo as null -- an absent limit means no limit, the
+  // same as <container>'s maxNrOfInstances when unset. Without the null guard, `cnmo > mnmo`
+  // compared against a falsy default and evicted on the very first <mlModel> insert, and the
+  // only sibling in a just-populated <modelRepo> was the model just created.
+  if (mnmo != null && cnmo > mnmo) {
+    // Evict the oldest sibling by the same query <latest>/<oldest> use (find_edge_mmd), not by
+    // array position. mmd_id is excluded so the model just created can never be its own victim.
+    const oldest = await find_edge_mmd(mrp_id, 'ASC', mmd_id);
+    if (oldest) {
+      const { delete_a_res } = require('../hostingCSE');
+      const tmp_resp = {};
+      await delete_a_res({ ri: oldest.ri, to_ty: 102 }, tmp_resp);
+      const deleted_mms = tmp_resp.pc?.['m2m:mmd']?.mms || 0;
+      cbmo -= deleted_mms;
+      cnmo--;
+    }
   }
 
   // update 'cbmo' of the parent
   cbmo += model_size;
-  if (cbmo > mbmo) {
-    // BACKLOG-060: maxByteSize is not enforced for this resource family.
+  if (mbmo != null && cbmo > mbmo) {
+    // BACKLOG-060: maxByteOfModels is not enforced for this resource family. Unlike mnmo above,
+    // TR-0071 says nothing about what should happen here, and evicting by byte budget on top of
+    // the count-based eviction above would need its own answer for which limit wins when both
+    // are set and disagree on the victim -- left as an observation, not an eviction, until that
+    // is decided (see the same note on the create-time check above).
   }
 
   // finally update the above parent attributes
-  await MRP.update({ cnmo, cbmo, mmd_list }, { where: { ri: mrp_id } });
+  await MRP.update({ cnmo, cbmo }, { where: { ri: mrp_id } });
 
   return;
 }
@@ -281,4 +314,5 @@ module.exports = {
   create_an_mmd,
   retrieve_an_mmd,
   update_an_mmd,
+  find_edge_mmd,
 };
