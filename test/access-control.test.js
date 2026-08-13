@@ -1,15 +1,16 @@
 "use strict";
-// The administrator's privileges come from an <accessControlPolicy>, not from a short-circuit.
+// Two things decide access for the administrator, and both are pinned here.
 //
-// Until v4.6.0, cse/hostingCSE.js granted the administrator every operation before any policy
-// was read. That check is gone; db/init.js now creates an admin <accessControlPolicy>
-// (config.cb.admin_acp) granting acop 63, and the administrator reaches a resource the same
-// way anyone else does.
+// cse/hostingCSE.js grants the administrator every operation before any policy is read — the
+// short-circuit this project has always had, removed in v4.6.0 and restored afterwards because
+// resources with no acpi became unreachable and unfixable. db/init.js also creates an admin
+// <accessControlPolicy> (config.cb.admin_acp) granting acop 63, which the short-circuit makes
+// redundant for the administrator but which still governs anyone else named in it.
 //
-// These tests pin the replacement down. Passing the suite without them would prove little:
-// most resources in the other tests are created by the administrator itself, so they would go
-// on working through the creator fallback (Case D in access_decision) even if the admin policy
-// did nothing at all.
+// Because the short-circuit answers first, the interesting assertions below are the ones about
+// *other* originators: they are what would notice if restoring it had widened access for
+// anybody but the administrator. Passing the suite without them would prove little — most
+// resources in the other tests are created by the administrator itself.
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
@@ -38,10 +39,9 @@ before(async () => {
   root = await createRoot(srv.baseUrl, "acl");
 
   // The parent has to carry the default policy for these tests to be able to set up at all.
-  // createRoot makes its container as the administrator with no acpi, which now means the
-  // creator fallback governs it and nobody else can create underneath — a direct consequence
-  // of removing the administrator short-circuit, and worth seeing here rather than only in
-  // the assertions below.
+  // createRoot makes its container as the administrator with no acpi, so the creator fallback
+  // governs it and nobody else can create underneath. The administrator's short-circuit does
+  // not help here — OTHER_AE and THIRD_AE are the originators that have to get in.
   const rn = uniqueRn("p");
   const res = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn, acpi: [DEFAULT_ACP] } });
   assert.equal(res.rsc, "2001", `setup failed: ${res.raw.slice(0, 200)}`);
@@ -101,31 +101,41 @@ test("an ordinary originator still cannot delete someone else's resource", async
   assert.equal(res.rsc, "4103", "only the identity named in the admin policy gets these rights");
 });
 
-test("without the admin policy the administrator has no special rights", async () => {
-  // The point of the change: there is no longer an identity that bypasses access control. A
-  // resource carrying only the default policy is not deletable by the administrator, because
-  // that policy grants create/retrieve/discovery and nothing else.
+test("the administrator gets through a policy that grants it nothing", async () => {
+  // The cheat-key, on the case where policy evaluation would refuse. The default policy grants
+  // acop 35 — create, retrieve, discovery — so a resource carrying only that one has no delete
+  // bit for anybody, the administrator included. Between v4.6.0 and its restoration this
+  // answered 4103.
   const sid = await containerOwnedByOther([DEFAULT_ACP]);
 
   const res = await remove(srv.baseUrl, sid);
-  assert.equal(res.rsc, "4103",
-    "the administrator should be refused when no policy on the resource grants it delete");
+  assert.equal(res.rsc, "2002",
+    "the short-circuit runs before any policy is read, so the missing delete bit does not decide");
 });
 
-test("a resource with no acpi still falls back to its creator, and the administrator is not it", async () => {
-  // Resources with an empty acpi are deliberately left alone by db/migrations/v4.6.0.sql:
-  // giving them a policy would switch them from the creator fallback to policy evaluation and
-  // their creator would lose update and delete. The consequence is asserted here rather than
-  // left implicit — the administrator's reach into such resources now follows the same rule as
-  // everyone else's.
+test("the administrator gets through the creator fallback of a resource it did not create", async () => {
+  // The case that motivated bringing the short-circuit back. A resource with an empty acpi is
+  // governed by the creator comparison (Case D), and db/migrations/v4.6.0.sql deliberately
+  // leaves such resources without a policy — so under policy evaluation alone the administrator
+  // could neither read the resource nor attach a policy to it (the acpi_update path in
+  // cse/reqPrim.js reads privileges off the acpi that is not there), and nothing short of a
+  // direct DB write could undo that.
   const sid = await containerOwnedByOther(undefined);
 
   const res = await remove(srv.baseUrl, sid);
-  assert.equal(res.rsc, "4103", "creator fallback applies to the administrator too");
+  assert.equal(res.rsc, "2002", "the creator fallback is not reached for the administrator");
+});
 
-  // ...and the creator itself is still able to delete it, which is what the fallback protects.
+test("the creator fallback still governs everyone else", async () => {
+  // The mirror of the test above: restoring the administrator's short-circuit must not turn
+  // Case D into a general amnesty. The creator gets in, a third party does not.
+  const sid = await containerOwnedByOther(undefined);
+
+  const byThird = await remove(srv.baseUrl, sid, { originator: THIRD_AE });
+  assert.equal(byThird.rsc, "4103", "a third party is neither the creator nor the administrator");
+
   const byCreator = await remove(srv.baseUrl, sid, { originator: OTHER_AE });
-  assert.equal(byCreator.rsc, "2002");
+  assert.equal(byCreator.rsc, "2002", "the creator is still able to delete it");
 });
 
 // ---------------------------------------------------------------------------

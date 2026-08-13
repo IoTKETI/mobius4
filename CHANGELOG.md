@@ -21,6 +21,52 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## [Unreleased]
+
+### The administrator bypasses access control again
+
+v4.6.0 removed the short-circuit in `cse/hostingCSE.js` that granted `cse.admin` every
+operation before any `<accessControlPolicy>` was read, and replaced it with an admin policy
+(`cb.admin_acp`) granting `acop` 63. The reasoning still holds — oneM2M has no superuser
+identity, privileges are `<accessControlPolicy>` resources and nothing else — but the
+replacement does not cover the case that matters most in operation.
+
+A resource created with no `accessControlPolicyIDs` is governed by the creator comparison
+(Case D in `access_decision`). The admin policy is never consulted for it, because the
+resource names no policy at all. So an AE that creates a `<flexContainer>` or `<container>`
+without an `acpi` owns it outright, and the administrator gets 4103 on RETRIEVE, UPDATE and
+DELETE alike.
+
+What makes that worse than a bad default is that **there is no request that repairs it**. The
+obvious fix — attach the admin policy to the resource — goes through the `acpi` branch of
+`access_decision`, which decides by reading `selfPrivileges` off the policies the resource
+already names. A resource with an empty `acpi` names none, the loop body never runs, and the
+UPDATE is refused for every originator including the creator. `db/migrations/v4.6.0.sql`
+deliberately leaves such resources alone, so an upgraded deployment keeps producing them.
+Recovery meant writing to the `acpi` column in PostgreSQL by hand.
+
+The short-circuit is therefore restored, at its original position and with one addition: it is
+guarded on `cse.admin` being set. `fr` is `undefined` on a request carrying no `X-M2M-Origin`,
+and an unset admin identity would otherwise match every anonymous request — `config/validate.js`
+already refuses to start without `cse.admin`, so this is unreachable in a running CSE, but the
+cost of being wrong is total.
+
+**This is non-conformant, deliberately.** Everything v4.6.0 said about the value remains true
+and matters more now, not less: whoever sends `cse.admin` as `X-M2M-Origin` has full control of
+the CSE over plain HTTP, on every resource, regardless of policy. It is a credential. The
+startup refusals from v4.6.0 (no default, `SM` rejected, `Superuser` warned) are unchanged, and
+so is the admin `<accessControlPolicy>` — it is still created and still evaluated for anyone
+else named in it; it is simply no longer the only way the administrator gets in.
+
+Nothing is required to upgrade. No DB migration, no configuration change. Deployments that
+worked around the v4.6.0 behaviour by naming `cb_admin_acp` in every resource's `acpi` can stop
+doing so, but nothing breaks if they do not.
+
+Pinned by `test/access-control.test.js` — "the administrator gets through a policy that grants
+it nothing", "the administrator gets through the creator fallback of a resource it did not
+create", and "the creator fallback still governs everyone else", the last of which is what
+would notice if the restoration had widened access for anybody but the administrator.
+
 ## v4.14.0 (2026-08-11)
 
 ### ⚠️ Breaking for clients that compute `ofst` themselves: the offset filter is 1-based
