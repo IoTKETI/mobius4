@@ -101,16 +101,22 @@ cp config/local.json.example config/local.json
 
 > #### ⚠️ `cse.admin` is a privileged identity
 >
-> `cse.admin` names the identity that the admin `<accessControlPolicy>`
-> (`cb.admin_acp.rn`, created at startup) grants all six operations to. Whoever knows this
-> value and can reach the port has whatever that policy allows, on every resource that carries
-> it — over plain HTTP exactly as over TLS. Treat it as a credential.
+> `cse.admin` names the identity that bypasses access control. `cse/hostingCSE.js` grants it
+> every operation **before any `<accessControlPolicy>` is consulted**, on every resource
+> regardless of policy, creator or `acpi`. Whoever knows this value and can reach the port has
+> full control of the CSE — including DELETE, over plain HTTP exactly as over TLS. Treat it as
+> a credential, not as a name.
 >
-> Up to v4.5.1 it was worse than that: `cse/hostingCSE.js` granted the identity every
-> operation **before any `<accessControlPolicy>` was consulted**, on every resource
-> regardless of policy. That short-circuit is gone as of v4.6.0 — the administrator now
-> reaches a resource only through a policy that names it, or through the creator fallback
-> when the resource carries no `acpi`.
+> v4.6.0 removed the bypass and left the identity reaching resources only through the admin
+> `<accessControlPolicy>` (`cb.admin_acp.rn`, created at startup, granting `acop` 63). That
+> policy is still created and still evaluated, but the bypass answers first and so decides for
+> the administrator. See the changelog for why it came back: a resource created with no `acpi`
+> is governed by its creator, and the administrator could neither reach it nor attach a policy
+> to it, with no request that could undo the state.
+>
+> This is a deliberate departure from oneM2M, which expresses all privileges as
+> `<accessControlPolicy>` resources and has no notion of a superuser identity. If your
+> deployment needs conformant behaviour, do not distribute the `cse.admin` value.
 >
 > Because of that there is **no default**. Up to v4.5.1 the shipped value was `SM`, which meant
 > every deployment that never overrode it could be taken over by anyone who had read this
