@@ -395,9 +395,12 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
     interval_managers[dsp_res.ri] = interval_manager.createInterval(async (intervalId, dsp_ri, dts_ri, dts_sid, duration) => {
         // start creating <dsf> resources for live dataset
         await create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration);
-    }, duration * 1000, { 
-        id: `interval-${dsp_ri}`,
-        params: [dsp_res.ri, dts_ri, dts_sid, duration] 
+    }, duration * 1000, {
+        // BACKLOG-092: `dsp_ri` is a callback parameter (bound at call time via `params` below),
+        // not a binding in this enclosing scope. The id must use the same value the enclosing
+        // scope already has: `dsp_res.ri`.
+        id: `interval-${dsp_res.ri}`,
+        params: [dsp_res.ri, dts_ri, dts_sid, duration]
     });
 
     return ldi;

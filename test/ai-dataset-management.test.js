@@ -129,25 +129,7 @@ test("TC_TR0071_DST_CRE_003: TP/TR-0071/CSE/DST/CRE/003 — historicalDatasetID 
   assert.equal(got.body["m2m:dts"].ty, TY.DTS);
 });
 
-// FAILS 2026-08-13: every liveDatasetID creation crashes with a ReferenceError, never mind what
-// TR-0071 says. cse/datasetManager.js's create_a_live_dataset (321-404) sets up the periodic
-// collection interval with:
-//   interval_managers[dsp_res.ri] = interval_manager.createInterval(async (intervalId, dsp_ri,
-//     dts_ri, dts_sid, duration) => { ... }, duration * 1000, {
-//       id: `interval-${dsp_ri}`,       // line 399
-//       params: [dsp_res.ri, dts_ri, dts_sid, duration]
-//     });
-// `dsp_ri` is only a parameter name of the callback on line 395 -- it does not exist in the
-// scope where the options object literal on line 399 is evaluated. That options object is built
-// eagerly (not lazily inside the callback), so `id: \`interval-${dsp_ri}\`` throws
-// "dsp_ri is not defined" synchronously, every time, before any live dataset is created. The
-// throw propagates out of create_a_live_dataset -> create_a_dsp's try/catch ->
-// classify_create_error, which reports it as a generic BAD_REQUEST (4000) with the raw error
-// message as m2m:dbg. This is a plain implementation bug (most likely `dsp_res.ri` was intended),
-// not a TR ambiguity -- not one of the six gaps named in features/test-purposes/TR-0071.md's
-// framing note, and not covered by the revision proposal. Every test in this file that asks for
-// a live dataset (this one and NTF/001) is blocked by it.
-test("TC_TR0071_DST_CRE_004: TP/TR-0071/CSE/DST/CRE/004 — liveDatasetID resolves to a <dataset>", { todo: true }, async () => {
+test("TC_TR0071_DST_CRE_004: TP/TR-0071/CSE/DST/CRE/004 — liveDatasetID resolves to a <dataset>", async () => {
   // TR-0071:7.2.2.1 — liveDatasetID "The ID of the <dataset> resource for a dataset which gets
   // generated with newly created source resources". The TR's own description of this attribute
   // ("When the is numberOfDataForInference set...") names a non-existent attribute -- revision
