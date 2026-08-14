@@ -44,7 +44,7 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Device automation (DAU) | ❌ none | 0 / 1 | — |
 | Discovery (DIS) | ⚠️ partial | 0 / 1 | — |
 | Data management and repository (DMR) | ⚠️ partial | 25 / 33 | — |
-| flexContainer (FLXC) | ⚠️ partial | 2 / 4 | — |
+| flexContainer (FLXC) | ⚠️ partial | 0 / 2 | — |
 | General capability (GEN) | ⚠️ partial | 4 / 8 | — |
 | Group management (GMG) | ⚠️ partial | 3 / 4 | 21 |
 | Inter-service provider (ISP) | ❌ none | 0 / 1 | — |
@@ -64,21 +64,26 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Subscription and notification (SUB) | ⚠️ partial | 2 / 6 | — |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
 | Time series (TS) | ❌ none | 0 / 1 | — |
-| **total** | | **41 / 103** | **67** |
+| **total** | | **39 / 101** | **67** |
 
-## Candidate features from Technical Reports (non-normative)
+## Non-normative entries (candidate solutions and project proposals)
 
-These entries are **not part of the ratified oneM2M standard**. They come from a
-Technical Report — a candidate solution still under study, not yet folded into a TS —
-so there is no official ATS and no TS-0018 test purpose for them, and they cannot appear
-in the Areas table above or count toward its totals. They are listed here, separately,
-so this file never reads as "the CSE supports part of the standard that does not exist
-yet". Where these are verified, it is by this project's own test purposes
-(`TP/<source>/...`), not TS-0018's.
+These entries are **not part of the ratified oneM2M standard**. The `source` column
+says why: `TR-<NNNN>` — a candidate solution from a oneM2M Technical Report, still
+under study and not yet folded into a TS; `project` — an extension this codebase
+proposes on its own, with no oneM2M document behind it at all; `manual` — a standard
+feature the automated ATS scan cannot find on its own, added by hand. None of these
+have an official ATS or a TS-0018 test purpose, so none can appear in the Areas table
+above or count toward its totals — that table would otherwise misread as "the CSE
+supports part of the standard that does not exist yet" (or supports something the
+standard never described at all). Where these are verified, it is by this project's
+own test purposes (`TP/<source>/...`), not TS-0018's.
 
 | area | source | status | entries implemented |
 |---|---|---|---|
-| AI/ML (AI/ML) | TR-0071 | ⚠️ partial | 0 / 7 |
+| AI/ML (AI/ML) | project | ✅ full | 1 / 1 |
+| AI/ML (AI/ML) | TR-0071 | ⚠️ partial | 3 / 7 |
+| flexContainer (FLXC) | manual | ✅ full | 2 / 2 |
 
 Source: `features/inventory.yaml (mobius4-dev-tool)`.
 

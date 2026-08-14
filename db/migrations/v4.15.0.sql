@@ -1,5 +1,8 @@
 -- Mobius4 v4.15.0 Migration
--- Description: Rename mrp.mid to mrp.mmd_list
+-- Description: Four AI/ML (TR-0071) schema changes -- see each section below for its own
+--   rationale: (1) rename mrp.mid to mrp.mmd_list, (2) drop the now-dead mrp/mdp/dts list
+--   columns, (3) convert mmd.mmd from base64 TEXT to BYTEA, (4) add five project-proposed
+--   <mlModel> attributes (tdi/ipd/oud/ppr/msr).
 --
 -- Why this is needed
 -- -------------------
