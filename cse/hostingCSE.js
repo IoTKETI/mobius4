@@ -782,6 +782,24 @@ async function delete_a_res(req_prim, resp_prim) {
 		await cnt_res.save();
 	}
 
+	// BACKLOG-088: deleting an <mlModel> shrinks the parent <modelRepo>'s
+	// currentNumberOfModels/currentByteOfModels the same way deleting a <cin> shrinks its
+	// <container>'s cni/cbs above -- TR-0071:7.1.2.1 calls cnmo/cbmo "current", so a model that no
+	// longer exists must not still be counted.
+	//
+	// No int_cr_req guard here (unlike the ty===4 case above): the only internal caller is
+	// cse/resources/mmd.js's update_parent_mrp (the eviction path), and it computes the parent's
+	// *final* absolute cnmo/cbmo in memory and writes them with its own MRP.update after this
+	// function returns -- that later absolute write overwrites whatever MRP.decrement does here,
+	// so decrementing unconditionally is safe for both eviction and a direct client DELETE
+	// (which has no such follow-up write of its own).
+	if (req_prim.to_ty === 102 && tmp_resp.pc && tmp_resp.pc['m2m:mmd']) {
+		const parent_mrp_ri = tmp_resp.pc['m2m:mmd'].pi;
+		const mms = tmp_resp.pc['m2m:mmd'].mms || 0;
+
+		await MRP.decrement({ cnmo: 1, cbmo: mms }, { where: { ri: parent_mrp_ri } });
+	}
+
 	//
 	// delete child/decendant resources
 	//

@@ -288,18 +288,14 @@ test("TC_TR0071_MDL_UPD_001: TP/TR-0071/CSE/MDL/UPD/001 — mlModelSize is immut
   assert.equal(res.rsc, "4000", `expected mms update to be rejected: ${res.raw.slice(0, 200)}`);
 });
 
-// FAILS 2026-08-13: currentNumberOfModels/currentByteOfModels do not decrease when a client
-// deletes an <mlModel> directly. hostingCSE.js's generic delete_a_res (692-799) special-cases
-// only ty===4 (<contentInstance>, updating the parent <container>'s cni/cbs) — there is no
-// equivalent case for ty===102 (<mlModel>). The only place cnmo/cbmo ever decrease is the
-// eviction path in cse/resources/mmd.js's update_parent_mrp (CRE/006), which calls
-// delete_a_res itself and then manually adjusts the counters afterwards; a client-initiated
-// DELETE never goes through that function. Flagged in features/test-purposes/TR-0071.md
-// TP/TR-0071/CSE/MDL/DEL/001 as a newly discovered gap -- neither the TR nor the revision
-// proposal addresses direct-delete bookkeeping.
-test("TC_TR0071_MDL_DEL_001: TP/TR-0071/CSE/MDL/DEL/001 — deleting an <mlModel> decrements the parent's counters", { todo: true }, async () => {
+// Fixed 2026-08-14 (BACKLOG-088). hostingCSE.js's delete_a_res now special-cases ty===102
+// (<mlModel>) the same way it already special-cased ty===4 (<contentInstance>): decrement the
+// parent <modelRepo>'s cnmo/cbmo by 1 and the deleted model's mms. See the comment at that call
+// site for why this is safe for the eviction path too (cse/resources/mmd.js's update_parent_mrp),
+// which also goes through delete_a_res and adjusts the counters itself afterwards.
+test("TC_TR0071_MDL_DEL_001: TP/TR-0071/CSE/MDL/DEL/001 — deleting an <mlModel> decrements the parent's counters", async () => {
   const repo = await makeRepo();
-  const model = await makeModel(repo.sid, { mmd: "z".repeat(100) }); // mms = 100
+  const model = await makeModel(repo.sid, { mmd: base64Bytes(100) }); // mms = 100
   let gotRepo = await retrieve(srv.baseUrl, repo.sid);
   assert.equal(gotRepo.body["m2m:mrp"].cnmo, 1);
   assert.equal(gotRepo.body["m2m:mrp"].cbmo, 100);
