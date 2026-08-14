@@ -330,7 +330,19 @@ async function create_tables(client) {
               ous TEXT,
               mmd BYTEA,
               mms INTEGER DEFAULT 0,
-              mmu VARCHAR(${len.url})
+              mmu VARCHAR(${len.url}),
+              -- trainingDatasetID/inputDescriptor/outputDescriptor/preprocessingRef/
+              -- modelSignatureRef: NOT part of any oneM2M TS or of TR-0071 itself. This
+              -- project's own proposal (docs/tr-0071-revision-proposal.md section F in
+              -- mobius4-dev-tool) for an input/output schema on <mlModel>, built here to
+              -- measure whether a CSE-side compatibility check is possible and useful
+              -- (see cse/resources/dpm.js's create_a_dpm). short names tdi/ipd/oud/ppr/msr
+              -- are provisional (corpus/symbols/tr-0071.yaml), not TS-0004-registered.
+              tdi VARCHAR(${len.structured_res_id}), -- trainingDatasetID: WO, the <dataset> this model was trained on (self-reported, not verifiable by the CSE)
+              ipd JSONB, -- inputDescriptor: list of { name, dataType, unit, optional }
+              oud JSONB, -- outputDescriptor: same shape as ipd, for inference output
+              ppr VARCHAR(${len.url}), -- preprocessingRef: URI to a preprocessing definition; the CSE does not interpret this value
+              msr VARCHAR(${len.url}) -- modelSignatureRef: URI to an external schema (e.g. ONNX); the CSE does not interpret this value
             );
         `);
 

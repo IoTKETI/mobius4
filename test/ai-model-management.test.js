@@ -29,7 +29,7 @@ const { startServer } = require("./helpers/server");
 const { create, retrieve, update, remove, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
 const { startSink } = require("./helpers/noti-sink");
 
-const TY = { MRP: 101, MMD: 102, MDP: 103, DPM: 104, CNT: 3 };
+const TY = { MRP: 101, MMD: 102, MDP: 103, DPM: 104, CNT: 3, CIN: 4, DSP: 105 };
 
 let srv;
 
@@ -89,6 +89,37 @@ async function makeContainer() {
   const res = await create(srv.baseUrl, CSE_BASE, TY.CNT, { "m2m:cnt": { rn } });
   assert.equal(res.rsc, "2001");
   return `${CSE_BASE}/${rn}`;
+}
+
+// A source <container> for the MDL/SIG and DPL/CPT groups below -- one <contentInstance>
+// holding `value` (e.g. { temperature: 21.5 }), so a <mlDatasetPolicy> built from it produces a
+// <dataset> whose listOfFeatures is exactly Object.keys(value) (cse/datasetManager.js's
+// get_feature_list extracts leaf keys from con). Trimmed down from
+// test/ai-dataset-management.test.js's makeSource (that file needs many instances per source to
+// build fragments across time windows; these tests only need a <dataset>'s listOfFeatures to
+// exist, not its fragment contents).
+async function makeSource(name, value) {
+  const rn = uniqueRn(name);
+  const c = await create(srv.baseUrl, CSE_BASE, TY.CNT, { "m2m:cnt": { rn } });
+  assert.equal(c.rsc, "2001", `source container create failed: ${c.raw.slice(0, 200)}`);
+  const sid = `${CSE_BASE}/${rn}`;
+  const cin = await create(srv.baseUrl, sid, TY.CIN, { "m2m:cin": { con: value } });
+  assert.equal(cin.rsc, "2001", `cin create failed: ${cin.raw.slice(0, 200)}`);
+  return sid;
+}
+
+// A historical <dataset>, created the only way TR-0071:7.2.3.2 allows (via a
+// <mlDatasetPolicy>, not a direct CREATE -- see test/ai-dataset-management.test.js's
+// makePolicy/makeDatasetWithFragment for the same pattern). Returns the <dataset>'s sid
+// (historicalDatasetID), which is what the DPL/CPT tests below use as inputResource (inr) and
+// what MDL/SIG/001 uses as trainingDatasetID (tdi).
+async function makeDataset(sourceSids) {
+  const rn = uniqueRn("dsp");
+  const res = await create(srv.baseUrl, CSE_BASE, TY.DSP, { "m2m:dsp": { rn, dsfm: 1, sri: sourceSids, nrhd: 100 } });
+  assert.equal(res.rsc, "2001", `policy create failed: ${res.raw.slice(0, 200)}`);
+  const hdi = res.body["m2m:dsp"].hdi;
+  assert.ok(hdi, `historicalDatasetID was not set: ${JSON.stringify(res.body)}`);
+  return hdi;
 }
 
 // A <modelDeployment> referencing a real (if unused) <mlModel>, with real input/output
@@ -311,6 +342,63 @@ test("TC_TR0071_MDL_DEL_001: TP/TR-0071/CSE/MDL/DEL/001 — deleting an <mlModel
 });
 
 // -------------------------------------------------------------------------------------------
+// MDL/SIG group -- trainingDatasetID/inputDescriptor/outputDescriptor/preprocessingRef/
+// modelSignatureRef. These five attributes are NOT part of TR-0071 -- they are this project's
+// own proposal (docs/tr-0071-revision-proposal.md section F in mobius4-dev-tool, design doc
+// docs/superpowers/specs/2026-08-14-mlmodel-signature-design.md), built to measure whether a
+// CSE-side input/output compatibility check is possible and useful. See
+// features/test-purposes/TR-0071.md TP/TR-0071/CSE/MDL/SIG/* for why these get a dedicated
+// subgroup instead of folding into CRE/RET/UPD above (short version: every TP in this file up
+// to here cites a TR-0071 clause; these can't, because the clause does not exist).
+// -------------------------------------------------------------------------------------------
+
+test("TC_TR0071_MDL_SIG_001: TP/TR-0071/CSE/MDL/SIG/001 — the five proposal attributes round-trip through create and retrieve", async () => {
+  const repo = await makeRepo();
+  const src = await makeSource("sig-src", { temperature: 21.5 });
+  const dtsSid = await makeDataset([src]);
+
+  const ipd = [{ name: "temperature", dataType: "xs:float", unit: "Cel", optional: false }];
+  const oud = [{ name: "y", dataType: "xs:float" }];
+  const model = await makeModel(repo.sid, {
+    tdi: dtsSid,
+    ipd,
+    oud,
+    ppr: "https://example.invalid/preprocess.json",
+    msr: "https://example.invalid/model.onnx",
+  });
+  assert.equal(model.body.tdi, dtsSid);
+  assert.deepEqual(model.body.ipd, ipd);
+  assert.deepEqual(model.body.oud, oud);
+  assert.equal(model.body.ppr, "https://example.invalid/preprocess.json");
+  assert.equal(model.body.msr, "https://example.invalid/model.onnx");
+
+  const got = await retrieve(srv.baseUrl, model.sid);
+  assert.equal(got.body["m2m:mmd"].tdi, dtsSid);
+  assert.deepEqual(got.body["m2m:mmd"].ipd, ipd);
+  assert.deepEqual(got.body["m2m:mmd"].oud, oud);
+  assert.equal(got.body["m2m:mmd"].ppr, "https://example.invalid/preprocess.json");
+  assert.equal(got.body["m2m:mmd"].msr, "https://example.invalid/model.onnx");
+});
+
+test("TC_TR0071_MDL_SIG_002: TP/TR-0071/CSE/MDL/SIG/002 — trainingDatasetID is write-once", async () => {
+  // Design doc "trainingDatasetID는 WO다" section: the CSE cannot verify a *changed* claim any
+  // more than the original one, so any attempt to touch it via Update is rejected outright
+  // (cse/resources/mmd.js update_an_mmd), regardless of whether it was set at create time.
+  const repo = await makeRepo();
+  const model = await makeModel(repo.sid);
+  const res = await update(srv.baseUrl, model.sid, { "m2m:mmd": { tdi: "whatever-ri" } });
+  assert.equal(res.rsc, "4000", `expected trainingDatasetID update to be rejected: ${res.raw.slice(0, 200)}`);
+});
+
+test("TC_TR0071_MDL_SIG_003: TP/TR-0071/CSE/MDL/SIG/003 — trainingDatasetID must name an existing <dataset>", async () => {
+  // The CSE can only check "does this ID name a real <dataset>" -- never "was the model really
+  // trained on it" (self-reported, same design doc section as SIG/002).
+  const repo = await makeRepo();
+  const res = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { tdi: "nonexistent-ri-12345" }));
+  assert.equal(res.rsc, "4000", `expected a nonexistent trainingDatasetID to be rejected: ${res.raw.slice(0, 200)}`);
+});
+
+// -------------------------------------------------------------------------------------------
 // DPL group -- <modelDeploymentList>, <modelDeployment>
 // -------------------------------------------------------------------------------------------
 
@@ -446,4 +534,79 @@ test("TC_TR0071_DPL_NTF_001: TP/TR-0071/CSE/DPL/NTF/001 — creating a <modelDep
   } finally {
     await sink.stop();
   }
+});
+
+// -------------------------------------------------------------------------------------------
+// DPL/CPT group -- the deployment-time compatibility check: does inputResource (inr) supply
+// every feature the model's inputDescriptor (ipd) requires? NOT TR-0071 -- this project's own
+// proposal, same origin as the MDL/SIG group above. See features/test-purposes/TR-0071.md
+// TP/TR-0071/CSE/DPL/CPT/* and cse/resources/dpm.js's create_a_dpm for the check itself and why
+// its scope is deliberately narrow (only runs when inr resolves to a <dataset>, because only
+// <dataset> declares listOfFeatures -- TR-0071:7.2.2.2).
+// -------------------------------------------------------------------------------------------
+
+test("TC_TR0071_DPL_CPT_001: TP/TR-0071/CSE/DPL/CPT/001 — deployment is rejected when the <dataset> is missing a required feature", async () => {
+  const repo = await makeRepo();
+  const model = await makeModel(repo.sid, {
+    ipd: [{ name: "temperature", optional: false }, { name: "humidity", optional: false }],
+  });
+  const list = await makeDeploymentList();
+  const humiSrc = await makeSource("cpt-humi", { humidity: 50 });
+  const dtsSid = await makeDataset([humiSrc]); // no temperature source -> listOfFeatures = ["humidity"]
+  const our = await makeContainer();
+
+  const res = await create(srv.baseUrl, list.sid, TY.DPM,
+    { "m2m:dpm": { rn: uniqueRn("dpm"), moid: model.ri, inr: dtsSid, our } });
+  assert.equal(res.rsc, "5207", `expected NOT_ACCEPTABLE: ${res.raw.slice(0, 200)}`);
+});
+
+test("TC_TR0071_DPL_CPT_002: TP/TR-0071/CSE/DPL/CPT/002 — deployment succeeds when the <dataset> supplies every required feature", async () => {
+  const repo = await makeRepo();
+  const model = await makeModel(repo.sid, {
+    ipd: [{ name: "temperature", optional: false }, { name: "humidity", optional: false }],
+  });
+  const list = await makeDeploymentList();
+  const tempSrc = await makeSource("cpt-temp", { temperature: 21 });
+  const humiSrc = await makeSource("cpt-humi-ok", { humidity: 50 });
+  const dtsSid = await makeDataset([tempSrc, humiSrc]); // listOfFeatures = ["temperature", "humidity"]
+  const our = await makeContainer();
+
+  const res = await create(srv.baseUrl, list.sid, TY.DPM,
+    { "m2m:dpm": { rn: uniqueRn("dpm"), moid: model.ri, inr: dtsSid, our } });
+  assert.equal(res.rsc, "2001", `expected CREATED: ${res.raw.slice(0, 200)}`);
+});
+
+test("TC_TR0071_DPL_CPT_003: TP/TR-0071/CSE/DPL/CPT/003 — deployment is allowed when the model has no inputDescriptor", async () => {
+  // No ipd -> nothing to compare against -> the check does not run at all, even though the
+  // <dataset> below is just as incomplete as in CPT/001. This is also a backward-compatibility
+  // guard: an <mlModel> created before this proposal existed has no ipd and must keep deploying
+  // exactly as it did before (design doc risk #1).
+  const repo = await makeRepo();
+  const model = await makeModel(repo.sid); // no ipd
+  const list = await makeDeploymentList();
+  const humiSrc = await makeSource("cpt-humi-2", { humidity: 50 });
+  const dtsSid = await makeDataset([humiSrc]);
+  const our = await makeContainer();
+
+  const res = await create(srv.baseUrl, list.sid, TY.DPM,
+    { "m2m:dpm": { rn: uniqueRn("dpm"), moid: model.ri, inr: dtsSid, our } });
+  assert.equal(res.rsc, "2001", `expected CREATED (no inputDescriptor -> no check): ${res.raw.slice(0, 200)}`);
+});
+
+test("TC_TR0071_DPL_CPT_004: TP/TR-0071/CSE/DPL/CPT/004 — deployment is allowed when inputResource is not a <dataset>", async () => {
+  // A plain <container> declares no listOfFeatures, so there is nothing to compare against --
+  // this is the common case today (every deployment in the DPL group above and in
+  // poc/tr0071-ai-ml/step5-deploy.js uses a <container> as inr) and the design doc calls this
+  // scope limit out explicitly: "이 범위 제한 자체가 발견이다".
+  const repo = await makeRepo();
+  const model = await makeModel(repo.sid, {
+    ipd: [{ name: "temperature", optional: false }, { name: "humidity", optional: false }],
+  });
+  const list = await makeDeploymentList();
+  const inr = await makeContainer();
+  const our = await makeContainer();
+
+  const res = await create(srv.baseUrl, list.sid, TY.DPM,
+    { "m2m:dpm": { rn: uniqueRn("dpm"), moid: model.ri, inr, our } });
+  assert.equal(res.rsc, "2001", `expected CREATED (inputResource is not a <dataset> -> no check): ${res.raw.slice(0, 200)}`);
 });

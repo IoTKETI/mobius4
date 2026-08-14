@@ -5,10 +5,24 @@ const { generate_ri, get_cur_time, get_default_et, not_obsolete_where } = requir
 const Lookup = require('../../models/lookup-model');
 const MDP = require('../../models/mdp-model');
 const DPM = require('../../models/dpm-model');
+// <mlModel>/<dataset> -- only needed for the compatibility check below (project proposal,
+// docs/tr-0071-revision-proposal.md section F), not for any TR-0071 attribute of <modelDeployment>.
+const MMD = require('../../models/mmd-model');
+const DTS = require('../../models/dts-model');
 
 const logger = require('../../logger').forFile(__filename);
 
 const mmd_parent_res_types = ["mdp"];
+
+// Resolves inputResource (inr) -- a structured sid (e.g. "Mobius/poc-device-.../in-a-...") or
+// unstructured ri -- to its ri, or null if it does not resolve to anything. Duplicated from the
+// same logic in cse/resources/mmd.js (resolve_resource_by_id) rather than shared, matching this
+// codebase's per-resource-file style (e.g. each resource file has its own find_edge_* helper).
+async function resolve_unstructured_ri(id) {
+  if (!id) return null;
+  const { get_unstructuredID } = require('../hostingCSE');
+  return get_unstructuredID(id);
+}
 
 async function create_a_dpm(req_prim, resp_prim) {
   const prim_res = req_prim.pc["m2m:dpm"];
@@ -30,6 +44,40 @@ async function create_a_dpm(req_prim, resp_prim) {
 
   try {
     const mdp_res = await MDP.findByPk(dpm_pi);
+
+    // Compatibility check -- project proposal (docs/tr-0071-revision-proposal.md section F in
+    // mobius4-dev-tool), NOT part of TR-0071. TR-0071:7.1.2.4 lets inputResource (inr) point to
+    // any data-sharing resource; only <dataset> declares a feature list at all
+    // (listOfFeatures/lof, TR-0071:7.2.2.2, multiplicity 1 RO -- cse/datasetManager.js's
+    // get_feature_list). So this check only runs when BOTH hold:
+    //   (a) the model being deployed (moid) has an inputDescriptor (ipd), and
+    //   (b) inputResource (inr) resolves to a <dataset>.
+    // If either is missing there is nothing to compare against, and the deployment passes
+    // through unchecked -- a deliberate limit of this design, not an oversight: a <container>
+    // target (the common case today) never declares its features, so requiring the check to
+    // always run would either reject every existing deployment or force every <container> to
+    // start declaring a schema it was never asked to have.
+    if (prim_res.moid && prim_res.inr) {
+      const model_res = await MMD.findByPk(prim_res.moid);
+      if (model_res && Array.isArray(model_res.ipd) && model_res.ipd.length > 0) {
+        const input_ri = await resolve_unstructured_ri(prim_res.inr);
+        const dataset_res = input_ri ? await DTS.findByPk(input_ri) : null;
+        if (dataset_res) {
+          const supplied = new Set(dataset_res.lof || []);
+          const missing = model_res.ipd.filter((f) => f && f.optional !== true && !supplied.has(f.name));
+          if (missing.length > 0) {
+            resp_prim.rsc = enums.rsc_str["NOT_ACCEPTABLE"];
+            resp_prim.pc = {
+              "m2m:dbg": `inputResource's <dataset> does not supply required feature(s) the model's inputDescriptor requires: ${missing.map((f) => f.name).join(", ")}`,
+            };
+            return;
+          }
+        }
+        // dataset_res === null: inr is not a <dataset> (e.g. a plain <container>, which does
+        // not declare listOfFeatures) -- nothing to compare against, so this deployment is not
+        // checked. See the comment above.
+      }
+    }
 
     // create DPM resource
     const db_res = await DPM.create({

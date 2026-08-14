@@ -79,3 +79,35 @@ ALTER TABLE dts DROP COLUMN IF EXISTS dsf_list;
 -- finds out at migration time, not weeks later reading corrupted model bytes back.
 
 ALTER TABLE mmd ALTER COLUMN mmd TYPE BYTEA USING decode(mmd, 'base64');
+
+-- Fourth change in this release
+-- ------------------------------
+-- Description: add trainingDatasetID/inputDescriptor/outputDescriptor/preprocessingRef/
+-- modelSignatureRef to <mlModel> -- project proposal, not a TS or TR-0071 attribute
+--
+-- These five attributes are NOT part of any oneM2M TS, and not part of TR-0071 itself.
+-- They are this project's own proposal (docs/tr-0071-revision-proposal.md section F in
+-- mobius4-dev-tool, "input/output schema for <mlModel>") -- an attempt to make a device's
+-- required input shape mechanically derivable instead of hardcoded, and to let the Hosting
+-- CSE check a <modelDeployment>'s inputResource against it (cse/resources/dpm.js
+-- create_a_dpm). The short names (tdi/ipd/oud/ppr/msr) are provisional
+-- (corpus/symbols/tr-0071.yaml) and not registered in TS-0004.
+--
+-- All five are optional (0..1); an existing <mlModel> row with none of them set keeps its
+-- current behaviour exactly (create_a_dpm only runs the compatibility check when both the
+-- model has inputDescriptor and inputResource resolves to a <dataset> -- see that function's
+-- comment for why the check cannot always run).
+--
+-- trainingDatasetID (tdi) is Write-Once by design (WO): the Hosting CSE has no way to know
+-- which <dataset> a model was actually trained on, so this is registered by whoever creates
+-- the <mlModel>. The CSE can check that the ID *names an existing <dataset>*
+-- (cse/resources/mmd.js create_an_mmd), but it cannot check that the model was truly trained
+-- on it -- that is a self-reported claim, not a verified fact.
+
+-- VARCHAR lengths match config/default.json's "length" table (structured_res_id/url = 255),
+-- the same values db/init.js uses via `len.structured_res_id`/`len.url` for a fresh install.
+ALTER TABLE mmd ADD COLUMN IF NOT EXISTS tdi VARCHAR(255);
+ALTER TABLE mmd ADD COLUMN IF NOT EXISTS ipd JSONB;
+ALTER TABLE mmd ADD COLUMN IF NOT EXISTS oud JSONB;
+ALTER TABLE mmd ADD COLUMN IF NOT EXISTS ppr VARCHAR(255);
+ALTER TABLE mmd ADD COLUMN IF NOT EXISTS msr VARCHAR(255);

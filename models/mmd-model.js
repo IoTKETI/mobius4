@@ -49,6 +49,17 @@ const MMD = sequelize.define('mmd', {
     defaultValue: 0,
   }, // mlModelSize
   mmu: DataTypes.STRING, // mlModelURL
+  // trainingDatasetID/inputDescriptor/outputDescriptor/preprocessingRef/modelSignatureRef:
+  // NOT part of any oneM2M TS, and not part of TR-0071 itself -- this project's own proposal
+  // (docs/tr-0071-revision-proposal.md section F, mobius4-dev-tool) for a structured
+  // input/output schema on <mlModel>. short names (tdi/ipd/oud/ppr/msr) are provisional
+  // (corpus/symbols/tr-0071.yaml), not registered in TS-0004. See cse/resources/mmd.js and
+  // cse/resources/dpm.js for how these are validated and used.
+  tdi: DataTypes.STRING, // trainingDatasetID -- WO, the <dataset> this model was trained on (self-reported)
+  ipd: DataTypes.JSONB, // inputDescriptor -- [{ name, dataType, unit, optional }]
+  oud: DataTypes.JSONB, // outputDescriptor -- same shape as ipd
+  ppr: DataTypes.STRING, // preprocessingRef -- URI, not interpreted by the CSE
+  msr: DataTypes.STRING, // modelSignatureRef -- URI, not interpreted by the CSE
 }, {
   tableName: 'mmd',
   timestamps: false,
