@@ -425,3 +425,94 @@ test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetF
     await sink.stop();
   }
 });
+
+// BACKLOG-101 regression. TS-0018 has no TP for this and neither does TR-0071 itself (same gap
+// noted at CRE/010/011 above) -- but features/test-purposes/TR-0071.md's own SCN/E2E walkthrough
+// (mobius4-dev-tool, table row for Step 8) already cites CRE/009-011 as covering "새
+// <datasetFragment> 생성, nvp 정책대로 결측값 처리" for the *live* fragment created at that step,
+// not only the historical path -- i.e. the project's own test-purpose mapping already treats
+// nullValuePolicy as applying to both <dataset> kinds, TR-0071:7.2.2.1 draws no such distinction
+// either. So this test carries CRE/011's identifier applied to the live path, rather than a new
+// TP number invented for the occasion.
+//
+// Before the fix, cse/datasetManager.js's create_a_live_dsf never read nullValuePolicy at all --
+// every row in a live <datasetFragment> carried only the one source's feature(s) that produced
+// its notification (cse/noti.js's get_flat_data/batch_noti_data build one flat_data object per
+// notification, i.e. per source). NTF/001 above uses a single source and so never exercises the
+// merge at all; this needs two sources to fail against the pre-fix code the way NTF/001 cannot.
+test("TC_TR0071_DST_NTF_002: TP/TR-0071/CSE/DST/CRE/011 applied to the live path -- nullValuePolicy=1 fills a live fragment row from the other source's last known value", async () => {
+  const sink = await startSink();
+  try {
+    const srcA = await makeSource("srcA", [{ temperature: 20 }]); // seed instance, predates the live sub (see NTF/001)
+    const srcB = await makeSource("srcB", [{ humidity: 50 }]);
+    const { res } = await makePolicy({ sri: [srcA.sid, srcB.sid], nrld: 100, tcd: 5, nvp: 1 });
+    assert.equal(res.rsc, "2001", `policy create failed: ${res.raw.slice(0, 200)}`);
+    const dtsSid = res.body["m2m:dsp"].ldi;
+    assert.ok(dtsSid, "liveDatasetID was not set");
+
+    const sub = await create(srv.baseUrl, dtsSid, 23,
+      { "m2m:sub": { rn: uniqueRn("s"), nu: [sink.url], enc: { net: [3], chty: [TY.DSF] } } });
+    assert.equal(sub.rsc, "2001");
+
+    // Fresh instances after the live sub exists, temperature first (so it becomes the last known
+    // value) then humidity (so its own row should pick temperature up under nvp=1) -- same
+    // written-first/written-after shape as CRE/011's historical test above.
+    const readingA = await create(srv.baseUrl, srcA.sid, TY.CIN, { "m2m:cin": { con: { temperature: 24.95 } } });
+    assert.equal(readingA.rsc, "2001", `srcA reading failed: ${readingA.raw.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 1100));
+    const readingB = await create(srv.baseUrl, srcB.sid, TY.CIN, { "m2m:cin": { con: { humidity: 63.06 } } });
+    assert.equal(readingB.rsc, "2001", `srcB reading failed: ${readingB.raw.slice(0, 200)}`);
+
+    // waitFor also scans notifications already received (test/helpers/noti-sink.js), so this
+    // still passes if the merge happens to land in whichever live <datasetFragment> notification
+    // arrives first, not necessarily the very first one.
+    const noti = await sink.waitFor((item) => {
+      const rows = item.body?.["m2m:sgn"]?.nev?.rep?.["m2m:dsf"]?.dsfr || [];
+      return rows.some((r) => r.temperature === 24.95 && r.humidity === 63.06);
+    }, { timeoutMs: 9000 });
+
+    const rows = noti.body["m2m:sgn"].nev.rep["m2m:dsf"].dsfr;
+    const row = rows.find((r) => r.temperature === 24.95 && r.humidity === 63.06);
+    assert.ok(row, `expected a live fragment row carrying both features: ${JSON.stringify(rows)}`);
+  } finally {
+    await sink.stop();
+  }
+});
+
+// nvp=0 counterpart to NTF/002, pinning the two policies apart on the live path the same way
+// CRE/010 and CRE/011 pin them apart on the historical path.
+test("TC_TR0071_DST_NTF_003: TP/TR-0071/CSE/DST/CRE/010 applied to the live path -- nullValuePolicy=0 leaves a live fragment row's other-source feature as an empty string", async () => {
+  const sink = await startSink();
+  try {
+    const srcA = await makeSource("srcA", [{ temperature: 20 }]);
+    const srcB = await makeSource("srcB", [{ humidity: 50 }]);
+    const { res } = await makePolicy({ sri: [srcA.sid, srcB.sid], nrld: 100, tcd: 5, nvp: 0 });
+    assert.equal(res.rsc, "2001", `policy create failed: ${res.raw.slice(0, 200)}`);
+    const dtsSid = res.body["m2m:dsp"].ldi;
+    assert.ok(dtsSid, "liveDatasetID was not set");
+
+    const sub = await create(srv.baseUrl, dtsSid, 23,
+      { "m2m:sub": { rn: uniqueRn("s"), nu: [sink.url], enc: { net: [3], chty: [TY.DSF] } } });
+    assert.equal(sub.rsc, "2001");
+
+    // humidity first this time, so a last known value for it exists by the time temperature's row
+    // is built -- nvp=0 must still leave that row's humidity as '', unlike NTF/002's nvp=1.
+    const readingB = await create(srv.baseUrl, srcB.sid, TY.CIN, { "m2m:cin": { con: { humidity: 63.06 } } });
+    assert.equal(readingB.rsc, "2001", `srcB reading failed: ${readingB.raw.slice(0, 200)}`);
+    await new Promise((r) => setTimeout(r, 1100));
+    const readingA = await create(srv.baseUrl, srcA.sid, TY.CIN, { "m2m:cin": { con: { temperature: 24.95 } } });
+    assert.equal(readingA.rsc, "2001", `srcA reading failed: ${readingA.raw.slice(0, 200)}`);
+
+    const noti = await sink.waitFor((item) => {
+      const rows = item.body?.["m2m:sgn"]?.nev?.rep?.["m2m:dsf"]?.dsfr || [];
+      return rows.some((r) => r.temperature === 24.95);
+    }, { timeoutMs: 9000 });
+
+    const rows = noti.body["m2m:sgn"].nev.rep["m2m:dsf"].dsfr;
+    const row = rows.find((r) => r.temperature === 24.95);
+    assert.ok(row, `expected a live fragment row carrying temperature=24.95: ${JSON.stringify(rows)}`);
+    assert.equal(row.humidity, "", "nullValuePolicy=0 should leave the other source's feature empty on the live path too, not fill it from the last known value");
+  } finally {
+    await sink.stop();
+  }
+});
