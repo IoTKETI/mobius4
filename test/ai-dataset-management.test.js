@@ -201,25 +201,18 @@ test("TC_TR0071_DST_CRE_007: TP/TR-0071/CSE/DST/CRE/007 — no datasetStartTime/
 });
 
 // The dst/det this test sends are what TR-0071:7.2.2.1 calls "The timestamp filter as the
-// start/end time of source data resources ... gets filtered." Whether mobius4 honours that is
-// checked empirically below rather than assumed, per features/test-purposes/TR-0071.md
-// TP/TR-0071/CSE/DST/CRE/008's note that the exact boundary behaviour needed re-confirming by
-// running it.
-test("TC_TR0071_DST_CRE_008: TP/TR-0071/CSE/DST/CRE/008 — datasetStartTime/EndTime filter source instances", { todo: true }, async () => {
-  // FAILS 2026-08-13: the policy's own dst/det never reach the filtering logic. In
-  // cse/resources/dsp.js, `create_a_dsp` calls `get_dataset_info(dsp_res.sri)` (line 51), which
-  // recomputes dst/det from the source containers' own <latest>/<oldest> <contentInstance> --
-  // and *those* recomputed values (not prim_res.dst/prim_res.det) are what gets passed into
-  // `create_a_historical_dataset(dsp_res, dst, det, lof)` (line 57) and from there into
-  // `create_historical_dataset_fragments` (cse/datasetManager.js:60), which is the function that
-  // does the actual `data.ct >= current_tcst && data.ct < current_tcd_end` filtering (line
-  // 201-203). The client-supplied dst/det are stored on the <mlDatasetPolicy> resource itself
-  // (dsp.js:93-94, visible on RETRIEVE) but never consulted for fragment generation -- so a
-  // narrower dst/det has no effect on which source instances end up in the dataset. Measured:
-  // this test's fragment(s) contain all 5 source rows, not the ~2 inside [dst, det). This is a
-  // newly discovered gap -- neither features/test-purposes/TR-0071.md's existing note nor the
-  // revision proposal names it this precisely; it goes beyond "the exact boundary needs
-  // re-checking" to "the boundary is not applied at all".
+// start/end time of source data resources ... gets filtered."
+//
+// Fixed 2026-08-14 (BACKLOG-093). create_a_dsp (cse/resources/dsp.js) now prefers the
+// client-supplied prim_res.dst/det over the source's own full range (get_dataset_info), and
+// create_historical_dataset_fragments (cse/datasetManager.js) now clips its per-window filter to
+// `data.ct <= det` in addition to the tcd-sized window bound -- previously a window's end could
+// extend past det (tcd defaults to 60s, far wider than this fixture's ~1.1s instance spacing), so
+// instances after det were included anyway, decided by window size rather than by det itself.
+// Both bounds are inclusive (documented at the filter): with dst = the third instance's
+// creationTime and det = the fourth's, exactly those two instances -- not the fifth -- should
+// land in the dataset.
+test("TC_TR0071_DST_CRE_008: TP/TR-0071/CSE/DST/CRE/008 — datasetStartTime/EndTime filter source instances", async () => {
   const src = await makeSource("src", [{ v: 0 }, { v: 1 }, { v: 2 }, { v: 3 }, { v: 4 }]);
   const dst = src.cts[2]; // third instance's creationTime
   const det = src.cts[3]; // fourth instance's creationTime
@@ -231,7 +224,7 @@ test("TC_TR0071_DST_CRE_008: TP/TR-0071/CSE/DST/CRE/008 — datasetStartTime/End
   const frags = urils(await discover(srv.baseUrl, dtsSid, { ty: String(TY.DSF) }));
   let totalRows = 0;
   for (const f of frags) totalRows += (await retrieve(srv.baseUrl, f)).body["m2m:dsf"].nrf;
-  assert.ok(totalRows < 5, `dst/det should have filtered out at least one instance, got ${totalRows} rows`);
+  assert.equal(totalRows, 2, "dst/det are inclusive bounds -- exactly the 3rd and 4th source instances should be included");
 });
 
 test("TC_TR0071_DST_CRE_009: TP/TR-0071/CSE/DST/CRE/009 — data from two sources in the same time window merge into one row", async () => {

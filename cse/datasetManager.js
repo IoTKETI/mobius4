@@ -195,10 +195,20 @@ async function create_historical_dataset_fragments(dts_ri, sri, dst, det, tcst, 
     while (current_tcst < det) {
         const timestamp_format = config.get('cse.timestamp_format');
         const current_tcd_end = moment(current_tcst, timestamp_format).add(tcd, 'seconds').format(timestamp_format);
-        
-        // filter data instances for the current time window
-        const timeWindowData = timeSortedData.filter(data => 
-            data.ct >= current_tcst && data.ct < current_tcd_end
+
+        // filter data instances for the current time window. `data.ct <= det` is BACKLOG-093's
+        // upper bound: without it, a window whose tcd-sized end extends past det (the common
+        // case -- tcd defaults to 60s, but a source's own instances are usually much closer
+        // together) would include instances after the caller's requested end time, decided by
+        // window size rather than by det itself. Both bounds are inclusive -- TR-0071:7.2.2.1
+        // calls dst/det "the timestamp filter as the start/end time", without stating open vs.
+        // closed, and a source instance timestamped exactly at dst or det reads more naturally as
+        // being "at" the filtered range than excluded from it. mobius4's `ct` has only
+        // second-granularity precision (config/default.json "timestamp_format"), so this decision
+        // is the difference between a source instance created in the same second as dst/det being
+        // in or out.
+        const timeWindowData = timeSortedData.filter(data =>
+            data.ct >= current_tcst && data.ct < current_tcd_end && data.ct <= det
         );
 
         if (timeWindowData.length > 0) {

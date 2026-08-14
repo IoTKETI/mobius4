@@ -47,8 +47,23 @@ async function create_a_dsp(req_prim, resp_prim) {
         dsp_res.sid = dsp_sid;
         dsp_res.ri = ri;
 
-        // get dataset info first
-        const { dst, det, lof } = await dataset_manager.get_dataset_info(dsp_res.sri);
+        // get dataset info first -- srcDst/srcDet are the full range covered by the source
+        // resources themselves (oldest/newest <contentInstance> creationTime), used as the
+        // fallback bounds when the client did not supply its own filter, and to resolve tcst
+        // below.
+        const { dst: srcDst, det: srcDet, lof } = await dataset_manager.get_dataset_info(dsp_res.sri);
+
+        // BACKLOG-093: TR-0071:7.2.2.1 -- datasetStartTime/datasetEndTime are "the timestamp
+        // filter as the start/end time of source data resources ... gets filtered. If
+        // datasetStartTime and datasetEndTime both are not provided, then all data instances of
+        // source resources get included in the dataset." A client-supplied dst/det narrows the
+        // fragment-generation window; only fall back to the source's own full range when the
+        // client did not supply one. (Previously srcDst/srcDet were used unconditionally here --
+        // the client-supplied prim_res.dst/det were stored on the <mlDatasetPolicy> resource
+        // itself, visible on RETRIEVE, but never reached create_historical_dataset_fragments,
+        // so a narrower dst/det had no effect on which source instances were included.)
+        const dst = prim_res.dst || srcDst;
+        const det = prim_res.det || srcDet;
 
         // create <dataset> resource for historical data and resolve hdi (historicalDatasetId
         // for dataset creation, set 'cr' as From param of the 'dsp' resource
