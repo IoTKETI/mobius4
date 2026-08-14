@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "probed_at": "2026-08-14",
   "probed_against": {
-    "commit": "000ac3b",
+    "commit": "e453f90",
     "version": "4.14.0"
   },
   "entries": [
@@ -342,7 +342,16 @@
       "short_name": "dsf",
       "long_name": "datasetFragment",
       "source": "TR-0071",
-      "operations": {}
+      "operations": {
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
     }
   ],
   "procedures": [

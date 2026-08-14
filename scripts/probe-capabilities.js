@@ -28,7 +28,7 @@ const config = require("config");
 
 const { startServer } = require("../test/helpers/server");
 const { startSink } = require("../test/helpers/noti-sink");
-const { request, discover, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
+const { request, discover, urils, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
 const { support, hasDrifted, summarize } = require("./lib/capabilities");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -216,12 +216,12 @@ async function probeResourceTypes(base) {
     // The dataset side is deliberately probed through the policy: TR-0071 clause 7.2.3.2 says
     // <dataset> is created by the hosting CSE, not by a client request, so asking for a direct
     // CREATE would record a fact about an operation the specification does not define. Clause
-    // 7.2.3.3 says the same for <datasetFragment> and adds that it is immutable. This probe does
-    // not reach a <datasetFragment> at all: <dataset> does expose /la and /ol (cse/reqPrim.js,
-    // parent_ty === 106) the same way <container> does, but landing on one deterministically
-    // needs two <contentInstance> a full second apart (ct has second, not millisecond,
-    // precision — cse/validation/res_schema.js) and that is more fixture machinery than is
-    // justified for what this file is answering.
+    // 7.2.3.3 says the same for <datasetFragment>, and adds that it is immutable — "the Create
+    // procedure is not specified as an API [...] this resource is immutable so Update procedure
+    // is not specified. No change from the Retrieve and Delete procedures in clause 10.1." So
+    // <datasetFragment> is asked about below, but only for retrieve/delete — asking about
+    // create/update would record a fact about operations the specification does not define,
+    // same principle as <dataset> just above.
     //
     // cse/hostingCSE.js also has a client-facing CREATE case for ty 106/107 ("not called by
     // client, temporary for testing"). That is an implementation artifact, not a specified
@@ -290,12 +290,28 @@ async function probeResourceTypes(base) {
       // get_dataset_info (cse/datasetManager.js) resolves datasetStartTime/datasetEndTime from
       // the source container's oldest/latest <contentInstance>; without one it returns null and
       // create_a_dsp throws before answering. The <contentInstance> probed above under this same
-      // container was already deleted, so a fixture is created here — this is not itself a
+      // container was already deleted, so fixtures are created here — this is not itself a
       // probe question, ty 4 already has one above.
-      await post(cntSid, 4, { "m2m:cin": { rn: "probe_cin_ds", cnf: "text/plain:0", con: "x" } });
+      //
+      // Two instances, not one: create_historical_dataset_fragments (cse/datasetManager.js)
+      // only walks its `while (current_tcst < det)` loop when dst < det. dst/det come from the
+      // source container's oldest/latest <contentInstance> `ct` (get_dataset_info); with a
+      // single instance dst === det and the loop body — the only place a <datasetFragment> gets
+      // created — never runs, so a probe with one fixture can never reach ty 107 at all. `ct`
+      // has second, not millisecond, precision (config/default.json "timestamp_format"), so the
+      // two creates need a real wait apart, not just two sequential calls — the same 1.1s wait
+      // test/ai-dataset-management.test.js's makeSource() uses for the same reason.
+      await post(cntSid, 4, { "m2m:cin": { rn: "probe_cin_ds_1", cnf: "text/plain:0", con: "x" } });
+      await new Promise((r) => setTimeout(r, 1100));
+      await post(cntSid, 4, { "m2m:cin": { rn: "probe_cin_ds_2", cnf: "text/plain:0", con: "y" } });
 
+      // nrhd (numberOfRowsForHistoricalDataset) large enough that both rows land in one
+      // fragment — test/ai-dataset-management.test.js's makeDatasetWithFragment() uses the same
+      // value for the same reason: a single, predictable <datasetFragment> to probe, rather than
+      // however many create_dataset_fragments (cse/datasetManager.js) would slice a small nrhd
+      // into.
       const dsp = await post(CSE_BASE, 105, {
-        "m2m:dsp": { rn: "probe_dsp", sri: [cntSid], dsfm: 1, nrhd: 1 },
+        "m2m:dsp": { rn: "probe_dsp", sri: [cntSid], dsfm: 1, nrhd: 100 },
       });
       set(105, "create", dsp);
       const dspSid = `${CSE_BASE}/probe_dsp`;
@@ -309,6 +325,21 @@ async function probeResourceTypes(base) {
         const dtsSid = dspBody.hdi || dspBody.ldi;
         if (dtsSid) {
           set(106, "retrieve", await get(dtsSid));
+
+          // <datasetFragment> (ty 107) has no client-facing CREATE to learn its CSE-generated
+          // `rn` from, so discovery is how a client would actually find one — the same approach
+          // test/ai-dataset-management.test.js's makeDatasetWithFragment() uses. <dataset>'s
+          // /la virtual resource (cse/resources/dts.js retrieve_la) would also resolve one, but
+          // discovery is the generic procedure clause 7.2.3.3 points at ("No change from the
+          // Retrieve [...] procedures in clause 10.1"), so it is used here instead of the
+          // <container>-style virtual-resource shortcut.
+          const frags = await discover(base, dtsSid, { ty: "107" });
+          const dsfSid = urils(frags)[0];
+          if (dsfSid) {
+            set(107, "retrieve", await get(dsfSid));
+            set(107, "delete", await del(dsfSid));
+          }
+
           set(106, "delete", await del(dtsSid));
         }
         set(105, "delete", await del(dspSid));
