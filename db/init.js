@@ -306,7 +306,11 @@ async function create_tables(client) {
         await client.query(`
             CREATE TABLE IF NOT EXISTS mmd (
               ri VARCHAR(${len.ri_max}) PRIMARY KEY,
-              ty INTEGER NOT NULL DEFAULT 107,
+              -- BACKLOG-096: was 107 (<datasetFragment>'s number), disagreeing with
+              -- config/enums.js's ty_str table (102, <mlModel>). Latent -- create_an_mmd always
+              -- sets ty explicitly -- found while fixing the same disagreement in
+              -- models/mmd-model.js's Sequelize defaultValue.
+              ty INTEGER NOT NULL DEFAULT 102,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),

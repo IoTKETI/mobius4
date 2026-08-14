@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../db/sequelize');
+const enums = require('../config/enums');
 
 const DSF = sequelize.define('dsf', {
   ri: {
@@ -10,7 +11,10 @@ const DSF = sequelize.define('dsf', {
   ty: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 105,
+    // BACKLOG-096: was a re-typed literal (105, <mlDatasetPolicy>'s number) that disagreed with
+    // config/enums.js's ty_str table (107, <datasetFragment>). Latent -- cse/resources/dsf.js's
+    // create_a_dsf always sets ty explicitly.
+    defaultValue: enums.ty_num.dsf,
   },
   sid: DataTypes.STRING,
   int_cr: DataTypes.STRING,

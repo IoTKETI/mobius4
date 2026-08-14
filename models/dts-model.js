@@ -1,5 +1,6 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('../db/sequelize');
+const enums = require('../config/enums');
 
 const DTS = sequelize.define('dts', {
   ri: {
@@ -10,7 +11,10 @@ const DTS = sequelize.define('dts', {
   ty: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    defaultValue: 105,
+    // BACKLOG-096: was a re-typed literal (105, <mlDatasetPolicy>'s number) that disagreed with
+    // config/enums.js's ty_str table (106, <dataset>). Latent -- cse/resources/dts.js's
+    // create_a_dts always sets ty explicitly.
+    defaultValue: enums.ty_num.dts,
   },
   sid: DataTypes.STRING,
   int_cr: DataTypes.STRING,
