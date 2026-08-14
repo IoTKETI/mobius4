@@ -35,7 +35,10 @@ const MMD = sequelize.define('mmd', {
   dc: DataTypes.STRING, // description
   ips: DataTypes.STRING, // inputSample
   ous: DataTypes.STRING, // outputSample
-  mmd: DataTypes.TEXT, // mlModel (base64 encoded binary model)
+  // mlModel -- BACKLOG-087: stores the decoded model bytes (BYTEA), not the base64 text a
+  // client sends. cse/resources/mmd.js decodes on CREATE/UPDATE and re-encodes to base64 on
+  // RETRIEVE; mlModelSize (mms below) is this Buffer's own length.
+  mmd: DataTypes.BLOB,
   mms: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

@@ -11,6 +11,29 @@ const logger = require('../../logger').forFile(__filename);
 
 const mmd_parent_res_types = ["mrp"];
 
+// BACKLOG-087: mlModel is stored as the *decoded* bytes, not the base64 text a client sends
+// (models/mmd-model.js's mmd column is BYTEA; db/migrations/v4.15.0.sql). What the CSE
+// guarantees across CREATE/UPDATE -> RETRIEVE is the attribute's *value* -- the bytes -- not its
+// *encoding*: a client that sends non-canonical base64 (missing padding, embedded line breaks)
+// gets back the canonical base64 of the same bytes on RETRIEVE, not its own text verbatim. RFC
+// 4648 base64 is otherwise a bytes<->text bijection, so this loses nothing a client could
+// observably depend on beyond whitespace/padding it did not have to send in the first place.
+//
+// Input that is not valid base64 at all is rejected (BAD_REQUEST) rather than stored:
+// Buffer.from(str, "base64") silently *drops* characters outside the base64 alphabet instead of
+// throwing, so decoding first and trusting the result would let garbage through as whatever
+// bytes happened to survive the drop.
+//
+// Returns the decoded Buffer, or null if `raw` is not valid base64 (after allowing embedded
+// whitespace/newlines and omitted padding).
+function decode_base64_mlmodel(raw) {
+  if (typeof raw !== "string") return null;
+  const stripped = raw.replace(/[\r\n\s]+/g, "");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(stripped)) return null;
+  const unpadded = stripped.replace(/=+$/, "");
+  if (unpadded.length % 4 === 1) return null; // no valid base64 grouping produces this length
+  return Buffer.from(stripped, "base64");
+}
 
 async function create_an_mmd(req_prim, resp_prim) {
   const prim_res = req_prim.pc["m2m:mmd"];
@@ -52,10 +75,18 @@ async function create_an_mmd(req_prim, resp_prim) {
   const now = get_cur_time();
   const et = get_default_et();
 
-  // mlModelSize
-  const { get_mem_size } = require('../hostingCSE');
-  const mms = prim_res.mmd ? get_mem_size(prim_res.mmd) : 0;
-
+  // mlModelSize (BACKLOG-087): the stored buffer's own length, not a byte-length-of-base64-text
+  // calculation -- see decode_base64_mlmodel above.
+  let decoded_mmd = null;
+  if (prim_res.mmd) {
+    decoded_mmd = decode_base64_mlmodel(prim_res.mmd);
+    if (decoded_mmd === null) {
+      resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
+      resp_prim.pc = { "m2m:dbg": "mmd is not valid base64" };
+      return;
+    }
+  }
+  const mms = decoded_mmd ? decoded_mmd.length : 0;
 
   try {
     const mrp_res = await MRP.findByPk(mmd_pi);
@@ -99,7 +130,7 @@ async function create_an_mmd(req_prim, resp_prim) {
       mms,
       ips: prim_res.ips || null,
       ous: prim_res.ous || null,
-      mmd: prim_res.mmd || null,
+      mmd: decoded_mmd,
       mmu: prim_res.mmu || null,
     });
 
@@ -228,7 +259,12 @@ async function retrieve_an_mmd(req_prim, resp_prim) {
     if (db_res.dc) mmd_obj["m2m:mmd"].dc = db_res.dc;
     if (db_res.ips) mmd_obj["m2m:mmd"].ips = db_res.ips;
     if (db_res.ous) mmd_obj["m2m:mmd"].ous = db_res.ous;
-    if (db_res.mmd) mmd_obj["m2m:mmd"].mmd = db_res.mmd;
+    // BACKLOG-087: db_res.mmd is the decoded Buffer (BYTEA column); re-encode to base64 for the
+    // wire, since that is the representation TR-0071:7.1.2.2 describes ("base64 encoded binary
+    // model").
+    if (db_res.mmd) {
+      mmd_obj["m2m:mmd"].mmd = Buffer.isBuffer(db_res.mmd) ? db_res.mmd.toString("base64") : db_res.mmd;
+    }
     if (db_res.mms) mmd_obj["m2m:mmd"].mms = db_res.mms;
     if (db_res.mmu) mmd_obj["m2m:mmd"].mmu = db_res.mmu;
 
@@ -288,9 +324,14 @@ async function update_an_mmd(req_prim, resp_prim) {
     if (prim_res.ips) db_res.ips = prim_res.ips;
     if (prim_res.ous) db_res.ous = prim_res.ous;
     if (prim_res.mmd) {
-      db_res.mmd = prim_res.mmd;
-      const { get_mem_size } = require('../hostingCSE');
-      db_res.mms = get_mem_size(prim_res.mmd);
+      const decoded = decode_base64_mlmodel(prim_res.mmd);
+      if (decoded === null) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = { 'm2m:dbg': 'mmd is not valid base64' };
+        return;
+      }
+      db_res.mmd = decoded;
+      db_res.mms = decoded.length;
     }
     if (prim_res.mmu) db_res.mmu = prim_res.mmu;
 

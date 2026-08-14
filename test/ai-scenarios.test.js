@@ -114,6 +114,12 @@ function modelBody(rn, extra = {}) {
   return { "m2m:mmd": { ...base, ...extra } };
 }
 
+// See test/ai-model-management.test.js's base64Bytes: a base64 string that decodes to exactly
+// `n` bytes, so mlModelSize fixtures state their intended byte count directly.
+function base64Bytes(n) {
+  return Buffer.alloc(n, "m").toString("base64");
+}
+
 async function makeRepo(extra = {}) {
   const rn = uniqueRn("mrp");
   const res = await create(srv.baseUrl, CSE_BASE, TY.MRP, { "m2m:mrp": { rn, ...extra } });
@@ -645,11 +651,13 @@ test("TC_TR0071_SCN_E2E_01: TP/TR-0071/CSE/SCN/E2E/001 — dataset to model to d
     // features/test-purposes/TR-0071.md's note under this TP already says.
     const repo = await makeRepo();
     assert.equal(repo.res.rsc, "2001", `Item 2 (TR-0068:7.8.1): <modelRepo> create failed: ${repo.res.raw.slice(0, 200)}`);
-    const rawModel = "trained-regressor-bytes";
+    // base64Bytes, not a raw string: BACKLOG-087 measures mlModelSize off the decoded buffer, not
+    // the base64 text (models/mmd-model.js's mmd column is BYTEA).
+    const rawModel = base64Bytes(24);
     const model = await makeModel(repo.sid, { mmd: rawModel });
     assert.equal(model.res.rsc, "2001", `Item 2 (TR-0068:7.8.1): <mlModel> registration failed: ${model.res.raw.slice(0, 200)}`);
-    assert.equal(model.body.mms, Buffer.byteLength(rawModel, "utf8"),
-      "Item 2 (TR-0068:7.8.1): mlModelSize should equal the byte length of the mlModel field as stored");
+    assert.equal(model.body.mms, 24,
+      "Item 2 (TR-0068:7.8.1): mlModelSize should equal the decoded byte length of the mlModel field as stored");
 
     // Item 3 (TR-0068:7.8.1): "deploy the models to an IoT device and perform inferencing" --
     // TR-0068:7.8.6's Steps 4-7 (the target-facing half of SCN/MDL/001), reused verbatim.

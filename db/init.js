@@ -324,7 +324,7 @@ async function create_tables(client) {
               dc TEXT,
               ips TEXT,
               ous TEXT,
-              mmd TEXT,
+              mmd BYTEA,
               mms INTEGER DEFAULT 0,
               mmu VARCHAR(${len.url})
             );

@@ -62,6 +62,14 @@ function modelBody(rn, extra = {}) {
   return { "m2m:mmd": { ...base, ...extra } };
 }
 
+// A base64 string that decodes to exactly `n` bytes -- BACKLOG-087 measures mlModelSize off the
+// decoded buffer, not the base64 text, so fixtures that need a model of a known byte size build
+// it this way rather than picking an arbitrary base64-alphabet string and hoping its decoded
+// length lines up.
+function base64Bytes(n) {
+  return Buffer.alloc(n, "m").toString("base64");
+}
+
 async function makeModel(repoSid, extra = {}) {
   const rn = uniqueRn("mmd");
   const res = await create(srv.baseUrl, repoSid, TY.MMD, modelBody(rn, extra));
@@ -138,13 +146,64 @@ test("TC_TR0071_MDL_CRE_004: TP/TR-0071/CSE/MDL/CRE/004 — mlModelSize is the b
   // TR-0071 table 7.1.2.2-2 says only "The byte size of the ML model stored in mlModel" — it
   // does not say whether that is the byte size of the base64 *text* or of the binary it decodes
   // to (features/test-purposes/TR-0071.md TP/TR-0071/CSE/MDL/CRE/004 note: a TR text gap, not
-  // covered by the revision proposal). mobius4 measures the string as stored:
-  // cse/resources/mmd.js:42 `get_mem_size(prim_res.mmd)` -> hostingCSE.js:1461
-  // `Buffer.byteLength(obj, "utf8")` on the base64 string itself, not the decoded buffer.
-  const raw = "a-model-of-known-length"; // no need to be valid base64: mobius4 never decodes it
+  // covered by the revision proposal). Fixed 2026-08-14 (BACKLOG-087): mobius4 now stores the
+  // *decoded* bytes (models/mmd-model.js's mmd column is BYTEA) and measures mms off that buffer
+  // (cse/resources/mmd.js's decode_base64_mlmodel), so this is now literally true of the stored
+  // representation rather than of the base64 text that arrived over the wire.
+  const raw = base64Bytes(24);
   const res = await create(srv.baseUrl, (await makeRepo()).sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: raw }));
-  assert.equal(res.rsc, "2001");
-  assert.equal(res.body["m2m:mmd"].mms, Buffer.byteLength(raw, "utf8"));
+  assert.equal(res.rsc, "2001", `model create failed: ${res.raw.slice(0, 200)}`);
+  assert.equal(res.body["m2m:mmd"].mms, 24);
+});
+
+// Not tied to a TP/TR-0071 identifier -- features/test-purposes/TR-0071.md has none for this; it
+// is a regression guard for the BACKLOG-087 storage change itself (mmd.mmd is now BYTEA, decoded
+// on CREATE/UPDATE and re-encoded to base64 on RETRIEVE), not a TR-derived assertion. The point:
+// a BYTEA column must not silently corrupt bytes the way a TEXT column receiving raw binary
+// would -- 0xFF/0xFE and the lone/paired UTF-16 surrogate byte sequences below are not valid
+// UTF-8, so decoding into a JS string anywhere on this path (rather than staying a Buffer) would
+// corrupt them before they ever reached the database.
+test("BACKLOG-087: mlModel round-trips arbitrary binary through base64, including bytes that are not valid UTF-8", async () => {
+  const raw = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe, 0x80, 0x7f, 0xc3, 0x28, 0xed, 0xa0, 0x80]);
+  const repo = await makeRepo();
+  const res = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: raw.toString("base64") }));
+  assert.equal(res.rsc, "2001", `model create failed: ${res.raw.slice(0, 200)}`);
+  assert.equal(res.body["m2m:mmd"].mms, raw.length, "mlModelSize should be the decoded byte length");
+
+  const got = await retrieve(srv.baseUrl, `${repo.sid}/${res.body["m2m:mmd"].rn}`);
+  assert.equal(got.rsc, "2000");
+  const roundTripped = Buffer.from(got.body["m2m:mmd"].mmd, "base64");
+  assert.ok(roundTripped.equals(raw),
+    `expected the decoded bytes to round-trip unchanged, got ${roundTripped.toString("hex")} vs ${raw.toString("hex")}`);
+});
+
+// BACKLOG-087's canonicalisation decision: what the CSE guarantees across CREATE -> RETRIEVE is
+// the attribute's *value* (the bytes), not its *encoding*. A client that sends non-canonical
+// base64 -- missing padding, or wrapped across lines -- gets back the same bytes, re-encoded
+// canonically; it does not get its own text back verbatim.
+test("BACKLOG-087: non-canonical base64 (missing padding, embedded newlines) is accepted and decodes to the same bytes", async () => {
+  const raw = Buffer.from("hello, mobius4!");
+  const canonical = raw.toString("base64"); // padded, single line
+  const noPadding = canonical.replace(/=+$/, "");
+  const withNewlines = canonical.match(/.{1,4}/g).join("\n"); // wrapped every 4 characters
+  const repo = await makeRepo();
+
+  const res1 = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: noPadding }));
+  assert.equal(res1.rsc, "2001", `missing-padding base64 should be accepted: ${res1.raw.slice(0, 200)}`);
+  assert.ok(Buffer.from(res1.body["m2m:mmd"].mmd, "base64").equals(raw), "missing-padding input should decode to the same bytes");
+
+  const res2 = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: withNewlines }));
+  assert.equal(res2.rsc, "2001", `newline-wrapped base64 should be accepted: ${res2.raw.slice(0, 200)}`);
+  assert.ok(Buffer.from(res2.body["m2m:mmd"].mmd, "base64").equals(raw), "newline-wrapped input should decode to the same bytes");
+});
+
+// BACKLOG-087: input that is not valid base64 at all must be rejected, not stored as whatever
+// bytes Buffer.from(str, "base64") happens to produce after silently dropping the invalid
+// characters.
+test("BACKLOG-087: mmd that is not valid base64 is rejected rather than stored as garbage", async () => {
+  const repo = await makeRepo();
+  const res = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: "not-valid-base64!!" }));
+  assert.equal(res.rsc, "4000", `expected invalid base64 to be rejected, got ${res.rsc}: ${res.raw.slice(0, 200)}`);
 });
 
 test("TC_TR0071_MDL_CRE_005: TP/TR-0071/CSE/MDL/CRE/005 — creating a model increments the parent's currentNumberOfModels", async () => {
@@ -182,10 +241,10 @@ test("TC_TR0071_MDL_CRE_007: TP/TR-0071/CSE/MDL/CRE/007 — exceeding maxByteOfM
   // this as a newly discovered inconsistency between the two proposed behaviours, not something
   // the revision proposal resolves — so this test asserts what mobius4 actually does.
   const repo = await makeRepo({ mbmo: 100 });
-  const first = await makeModel(repo.sid, { mmd: "a".repeat(90) }); // mms = 90
+  const first = await makeModel(repo.sid, { mmd: base64Bytes(90) }); // mms = 90 decoded bytes
   assert.equal(first.body.mms, 90);
 
-  const second = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: "b".repeat(20) })); // would push cbmo to 110 > 100
+  const second = await create(srv.baseUrl, repo.sid, TY.MMD, modelBody(uniqueRn("mmd"), { mmd: base64Bytes(20) })); // would push cbmo to 110 > 100
   assert.equal(second.rsc, "5207", `expected NOT_ACCEPTABLE: ${second.raw.slice(0, 200)}`);
 
   const survivor = await retrieve(srv.baseUrl, first.sid);
@@ -224,7 +283,7 @@ test("TC_TR0071_MDL_RET_001: TP/TR-0071/CSE/MDL/RET/001 — inputSample and outp
 test("TC_TR0071_MDL_UPD_001: TP/TR-0071/CSE/MDL/UPD/001 — mlModelSize is immutable", async () => {
   // TR-0071 table 7.1.2.2-2: mlModelSize is RO.
   const repo = await makeRepo();
-  const model = await makeModel(repo.sid, { mmd: "x".repeat(1234) });
+  const model = await makeModel(repo.sid, { mmd: base64Bytes(1234) });
   const res = await update(srv.baseUrl, model.sid, { "m2m:mmd": { mms: 9999 } });
   assert.equal(res.rsc, "4000", `expected mms update to be rejected: ${res.raw.slice(0, 200)}`);
 });

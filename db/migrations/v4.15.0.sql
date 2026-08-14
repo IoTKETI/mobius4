@@ -56,3 +56,26 @@ ALTER TABLE mrp RENAME COLUMN mid TO mmd_list;
 ALTER TABLE mrp DROP COLUMN IF EXISTS mmd_list;
 ALTER TABLE mdp DROP COLUMN IF EXISTS dpm_list;
 ALTER TABLE dts DROP COLUMN IF EXISTS dsf_list;
+
+-- Third change in this release
+-- ------------------------------
+-- Description: mmd.mmd becomes BYTEA (store decoded model bytes, not base64 text) -- BACKLOG-087
+--
+-- <mlModel>'s mlModelSize (mms) used to be measured off the base64 *text* stored in mmd.mmd
+-- (a TEXT column) -- cse/resources/mmd.js reused hostingCSE.js's generic get_mem_size, which for
+-- a string just returns Buffer.byteLength(str, "utf8"). Base64 inflates by 4/3, so mms -- and the
+-- currentByteOfModels/maxByteOfModels budget it feeds -- was consistently about a third larger
+-- than the model actually is. The project decision is to store the decoded bytes directly and
+-- re-encode to base64 only at RETRIEVE (cse/resources/mmd.js), so mms falls out as the stored
+-- buffer's own length rather than a separate calculation.
+--
+-- USING decode(mmd, 'base64') converts every existing row's base64 text to the bytes it encodes.
+-- mmd.js has only ever written what a client sent as the mmd attribute, and TR-0071:7.1.2.2
+-- already describes mlModel as "e.g. base64 encoded binary model" -- so existing rows are expected
+-- to already be base64. A row whose stored text is not valid base64 (never enforced before this
+-- release: CREATE/UPDATE previously stored whatever text arrived, see cse/resources/mmd.js's new
+-- decode_base64_mlmodel) fails this ALTER outright rather than silently decoding to garbage --
+-- there is deliberately no per-row skip, so an operator upgrading a deployment with such a row
+-- finds out at migration time, not weeks later reading corrupted model bytes back.
+
+ALTER TABLE mmd ALTER COLUMN mmd TYPE BYTEA USING decode(mmd, 'base64');
