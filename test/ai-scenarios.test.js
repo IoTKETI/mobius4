@@ -103,9 +103,15 @@ async function makeDeploymentList(parentSid, originator) {
   return { rn, sid: `${parentSid}/${rn}` };
 }
 
-// TR-0071 table 7.1.2.2-2: version/platform/mlType are multiplicity 1.
+// TR-0071 table 7.1.2.2-2: version/platform/mlType are multiplicity 1. mmd/mmu are mutually
+// exclusive and exactly one is required (BACKLOG-086) -- see the identical helper in
+// test/ai-model-management.test.js for why the default mmu below is conditional.
 function modelBody(rn, extra = {}) {
-  return { "m2m:mmd": { rn, vr: "1.0.0", plf: "scikit-learn", mlt: "regression", ...extra } };
+  const base = { rn, vr: "1.0.0", plf: "scikit-learn", mlt: "regression" };
+  if (extra.mmd === undefined && extra.mmu === undefined) {
+    base.mmu = "https://example.invalid/default-model.tflite";
+  }
+  return { "m2m:mmd": { ...base, ...extra } };
 }
 
 async function makeRepo(extra = {}) {

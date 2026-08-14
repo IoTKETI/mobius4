@@ -33,6 +33,21 @@ async function create_an_mmd(req_prim, resp_prim) {
     return;
   }
 
+  // BACKLOG-086: TR-0071:7.1.2.2 says of mlModel: "This cannot be present with mlModelURL." The
+  // project's revision proposal (docs/tr-0071-revision-proposal.md item B-4) goes further --
+  // exactly one of the two must be present, since a resource with neither is a model resource
+  // that holds no model at all.
+  if (prim_res.mmd && prim_res.mmu) {
+    resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
+    resp_prim.pc = { "m2m:dbg": "mmd and mmu are mutually exclusive" };
+    return;
+  }
+  if (!prim_res.mmd && !prim_res.mmu) {
+    resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
+    resp_prim.pc = { "m2m:dbg": "exactly one of mmd or mmu is required" };
+    return;
+  }
+
   const ri = generate_ri();
   const now = get_cur_time();
   const et = get_default_et();

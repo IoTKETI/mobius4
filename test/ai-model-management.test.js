@@ -50,8 +50,16 @@ async function makeRepo(extra = {}) {
 }
 
 function modelBody(rn, extra = {}) {
-  // TR-0071 table 7.1.2.2-2: version/platform/mlType are multiplicity 1.
-  return { "m2m:mmd": { rn, vr: "1.0.0", plf: "tensorFlow", mlt: "regression", ...extra } };
+  // TR-0071 table 7.1.2.2-2: version/platform/mlType are multiplicity 1. mmd/mmu are mutually
+  // exclusive and exactly one is required (BACKLOG-086) -- a caller that does not care which one
+  // gets a default mmu, so fixtures that only care about vr/plf/mlt (or another attribute) do not
+  // each have to think about it. A caller supplying either explicitly (mmd included) is left
+  // alone rather than getting a second, conflicting default.
+  const base = { rn, vr: "1.0.0", plf: "tensorFlow", mlt: "regression" };
+  if (extra.mmd === undefined && extra.mmu === undefined) {
+    base.mmu = "https://example.invalid/default-model.tflite";
+  }
+  return { "m2m:mmd": { ...base, ...extra } };
 }
 
 async function makeModel(repoSid, extra = {}) {
@@ -116,15 +124,10 @@ test("TC_TR0071_MDL_CRE_002: TP/TR-0071/CSE/MDL/CRE/002 — vr, plf and mlt are 
   }
 });
 
-// FAILS 2026-08-13: mobius4 stores both mmd and mmu instead of rejecting the request.
-// TR-0071:7.1.2.2 says of mlModel: "This cannot be present with mlModelURL." mobius4's
-// create_an_mmd (cse/resources/mmd.js:15-117) checks vr/plf/mlt and the byte budget only — there
-// is no mutual-exclusion check between mmd and mmu at CREATE. (update_an_mmd has a *different*,
-// partial check at line 235: it only rejects clearing mmd to null while mmu is set.) Flagged as
-// an implementation gap in features/test-purposes/TR-0071.md TP/TR-0071/CSE/MDL/CRE/003; not
-// covered by the revision proposal (docs/tr-0071-revision-proposal.md), since that document
-// treats the TR text itself as unambiguous here.
-test("TC_TR0071_MDL_CRE_003: TP/TR-0071/CSE/MDL/CRE/003 — mlModel and mlModelURL are mutually exclusive", { todo: true }, async () => {
+// Fixed 2026-08-14 (BACKLOG-086). create_an_mmd (cse/resources/mmd.js) now rejects a CREATE that
+// carries both mmd and mmu, and one that carries neither (the revision proposal's stricter
+// "exactly one" reading, item B-4).
+test("TC_TR0071_MDL_CRE_003: TP/TR-0071/CSE/MDL/CRE/003 — mlModel and mlModelURL are mutually exclusive", async () => {
   const repo = await makeRepo();
   const res = await create(srv.baseUrl, repo.sid, TY.MMD,
     modelBody(uniqueRn("mmd"), { mmd: Buffer.from("fake-model").toString("base64"), mmu: "https://example.invalid/m.tflite" }));
