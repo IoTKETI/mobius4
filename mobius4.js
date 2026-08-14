@@ -57,8 +57,15 @@ async function main() {
         // true statement about it. Deliberately not awaited: readiness must not wait on a sweep
         // whose size is a property of the data, and the first sweep after an upgrade from a
         // version that never swept can be large.
-        expired_resource_cleanup().catch((err) =>
-            logger.error({ err }, 'startup expired resource cleanup failed'));
+        //
+        // BACKLOG-098: 'startup-sweep-done' is sent once this (unawaited) sweep finishes, purely
+        // so test/expiry.test.js can wait for it before creating fixtures that must survive
+        // "until the sweep runs" — otherwise that test races this same sweep and fails roughly
+        // one run in three (measured). This does not change when 'ready' fires above; production
+        // startup is unaffected.
+        expired_resource_cleanup()
+            .catch((err) => logger.error({ err }, 'startup expired resource cleanup failed'))
+            .finally(() => { if (process.send) process.send('startup-sweep-done'); });
     } else {
         logger.info({ instance: process.env.NODE_APP_INSTANCE }, 'expired resource cleanup runs on instance 0; skipped here');
     }

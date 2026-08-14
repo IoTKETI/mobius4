@@ -107,6 +107,17 @@ async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse
   child.stdout.on("data", appendDiag);
   child.stderr.on("data", appendDiag);
 
+  // Resolves once the child's one-time startup expired-resource sweep has finished
+  // (mobius4.js sends 'startup-sweep-done' after it — deliberately not blocking 'ready' on it,
+  // see the comment there). Attached here, immediately at spawn, rather than after the 'ready'
+  // wait below: a sweep that finishes fast could otherwise fire the message before anything is
+  // listening for it, since child.on("message", ...) does not buffer past events. Only
+  // test/expiry.test.js consumes this (BACKLOG-098) — it needs a fixture that must survive
+  // "until the sweep runs" to not race that same sweep.
+  const startupSweepDone = new Promise((resolve) => {
+    child.on("message", (m) => { if (m === "startup-sweep-done") resolve(); });
+  });
+
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
@@ -139,7 +150,7 @@ async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse
   });
 
   const baseUrl = `http://127.0.0.1:${port}`;
-  return { child, port, baseUrl, diagnostics: () => diag, stop: () => stopServer(child) };
+  return { child, port, baseUrl, diagnostics: () => diag, stop: () => stopServer(child), startupSweepDone };
 }
 
 function stopServer(child) {

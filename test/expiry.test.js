@@ -49,6 +49,17 @@ const fx = {};
 
 before(async () => {
   srv = await startServer();
+  // BACKLOG-098: wait for the server's own one-time startup sweep (mobius4.js) to finish before
+  // creating any fixture below. Without this, "an expired <subscription> is still retrievable
+  // and discoverable" (further down) raced that sweep -- it needs fx.subDying to survive *until
+  // a sweep runs*, but the sweep starts concurrently with this hook and is not awaited by
+  // 'ready' (deliberately, so production startup does not block on it). If the sweep happened to
+  // still be running once fx.subDying had expired but before that test read it, the sweep would
+  // delete it out from under the assertion -- measured failing roughly one run in three. Waiting
+  // here instead of hoping a fixed sleep is long enough guarantees the *only* sweep that could
+  // still fire during this file's run is the periodic one, a day away by default
+  // (config.cse.expired_resource_cleanup_interval_days) -- not a race, structurally out of reach.
+  await srv.startupSweepDone;
   sink = await startSink();
   root = await createRoot(srv.baseUrl, "expiry");
 
