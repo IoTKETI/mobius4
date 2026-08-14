@@ -196,6 +196,16 @@ async function update_a_dpm(req_prim, resp_prim) {
 
     // below are resource specific attributes
     if (prim_res.mcmd !== undefined) {
+      // BACKLOG-091: TR-0071:7.1.3.4 (project decision B-6: numeric 0/1) only defines "stop"
+      // (0) and "run" (1) -- any other value used to fall through every transition `if` below
+      // untouched (so no counters changed and modelStatus stayed put) and still land in
+      // `db_res.mcmd = prim_res.mcmd` a few lines down, which ran unconditionally. That stored
+      // the out-of-range value and returned 2004 UPDATED instead of rejecting the request.
+      if (prim_res.mcmd !== 0 && prim_res.mcmd !== 1) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = { 'm2m:dbg': 'modelCommand must be 0 (stop) or 1 (run)' };
+        return;
+      }
       // deployed status + run command -> running status
       if (db_res.mds === 0 && prim_res.mcmd === 1) { 
         await update_parent_mdp({

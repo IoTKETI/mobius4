@@ -402,15 +402,10 @@ test("TC_TR0071_DPL_UPD_005: TP/TR-0071/CSE/DPL/UPD/005 — modelStatus cannot b
   assert.equal(res.rsc, "4000", `expected direct mds update to be rejected: ${res.raw.slice(0, 200)}`);
 });
 
-// FAILS 2026-08-13: mobius4 accepts and silently stores an out-of-range modelCommand instead of
-// rejecting it. TR-0071:7.1.3.4 only defines "run" and "stop" (project decision B-6: 1 and 0).
-// cse/resources/dpm.js:198-229 has three `if` blocks, one per defined (mds, mcmd) transition; a
-// value like mcmd=9 matches none of them, so no counters change and modelStatus stays put -- but
-// line 229 (`db_res.mcmd = prim_res.mcmd`) runs unconditionally whenever mcmd is present, so 9 is
-// saved anyway and the response is 2004 UPDATED, not a rejection. Flagged in
-// features/test-purposes/TR-0071.md TP/TR-0071/CSE/DPL/UPD/006; neither the TR nor the revision
-// proposal addresses out-of-range modelCommand values.
-test("TC_TR0071_DPL_UPD_006: TP/TR-0071/CSE/DPL/UPD/006 — an out-of-range modelCommand is rejected", { todo: true }, async () => {
+// Fixed 2026-08-14 (BACKLOG-091). update_a_dpm (cse/resources/dpm.js) now rejects any mcmd
+// outside {0, 1} up front, before the per-transition `if` blocks and the unconditional
+// `db_res.mcmd = prim_res.mcmd` that used to store it regardless of whether any transition fired.
+test("TC_TR0071_DPL_UPD_006: TP/TR-0071/CSE/DPL/UPD/006 — an out-of-range modelCommand is rejected", async () => {
   const dep = await makeDeployedModel();
   const res = await update(srv.baseUrl, dep.sid, { "m2m:dpm": { mcmd: 9 } });
   assert.equal(res.rsc, "4000", `expected an out-of-range modelCommand to be rejected: got ${res.rsc}`);
