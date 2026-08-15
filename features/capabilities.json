@@ -1,9 +1,9 @@
 {
   "formatVersion": 1,
-  "probed_at": "2026-08-11",
+  "probed_at": "2026-08-14",
   "probed_against": {
-    "commit": "3642759",
-    "version": "4.14.0"
+    "commit": "f0c452d",
+    "version": "4.15.0"
   },
   "entries": [
     {
@@ -194,6 +194,158 @@
         "update": {
           "supported": true,
           "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 101,
+      "short_name": "mrp",
+      "long_name": "modelRepo",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 102,
+      "short_name": "mmd",
+      "long_name": "mlModel",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 103,
+      "short_name": "mdp",
+      "long_name": "modelDeploymentList",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 104,
+      "short_name": "dpm",
+      "long_name": "modelDeployment",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 105,
+      "short_name": "dsp",
+      "long_name": "mlDatasetPolicy",
+      "source": "TR-0071",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 106,
+      "short_name": "dts",
+      "long_name": "dataset",
+      "source": "TR-0071",
+      "operations": {
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 107,
+      "short_name": "dsf",
+      "long_name": "datasetFragment",
+      "source": "TR-0071",
+      "operations": {
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
         },
         "delete": {
           "supported": true,

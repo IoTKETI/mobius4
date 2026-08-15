@@ -11,7 +11,16 @@ const Lookup = require('../../models/lookup-model');
 
 const logger = require('../../logger').forFile(__filename);
 
-const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm"];
+// BACKLOG-094: TR-0071's per-type child-resource tables list <subscription> at multiplicity
+// 0..n for every AI/ML resource type except <datasetFragment> ("dsf", ty 107) -- confirmed by
+// reading TR-0071:7.1.2.1 (mrp), 7.1.2.2 (mmd), 7.1.2.3 (mdp), 7.1.2.4 (dpm), 7.2.2.1 (dsp) and
+// 7.2.2.2 (dts). "dsp" and "dts" were missing here even though mrp/mmd/mdp/dpm were already
+// present, which blocked subscribing to a <dataset> for its live-collection notifications
+// (TR-0071:7.2.2.1: "Newly created inference input data can be retrieved or notified with
+// subscription..."). <datasetFragment> (7.2.2.3) has no child-resource table at all -- no
+// <subscription> child is defined for it, consistent with it being immutable -- so "dsf" is
+// deliberately left out, not an oversight.
+const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm", "dsp", "dts"];
 
 
 // TS-0004:7.4.8.2.1 (Recv-6.5, step 2): "If the notificationURI is not the Originator, the Hosting

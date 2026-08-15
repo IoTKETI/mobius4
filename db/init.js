@@ -298,8 +298,7 @@ async function create_tables(client) {
               cnmo INTEGER DEFAULT 0,
               cbmo INTEGER DEFAULT 0,
               mnmo INTEGER,
-              mbmo INTEGER,
-              mid VARCHAR(${len.structured_res_id})[]
+              mbmo INTEGER
             );
         `);
 
@@ -307,7 +306,11 @@ async function create_tables(client) {
         await client.query(`
             CREATE TABLE IF NOT EXISTS mmd (
               ri VARCHAR(${len.ri_max}) PRIMARY KEY,
-              ty INTEGER NOT NULL DEFAULT 107,
+              -- BACKLOG-096: was 107 (<datasetFragment>'s number), disagreeing with
+              -- config/enums.js's ty_str table (102, <mlModel>). Latent -- create_an_mmd always
+              -- sets ty explicitly -- found while fixing the same disagreement in
+              -- models/mmd-model.js's Sequelize defaultValue.
+              ty INTEGER NOT NULL DEFAULT 102,
               sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
               cr VARCHAR(${len.str_token}),
               int_cr VARCHAR(${len.str_token}),
@@ -325,9 +328,21 @@ async function create_tables(client) {
               dc TEXT,
               ips TEXT,
               ous TEXT,
-              mmd TEXT,
+              mmd BYTEA,
               mms INTEGER DEFAULT 0,
-              mmu VARCHAR(${len.url})
+              mmu VARCHAR(${len.url}),
+              -- trainingDatasetID/inputDescriptor/outputDescriptor/preprocessingRef/
+              -- modelSignatureRef: NOT part of any oneM2M TS or of TR-0071 itself. This
+              -- project's own proposal (docs/tr-0071-revision-proposal.md section F in
+              -- mobius4-dev-tool) for an input/output schema on <mlModel>, built here to
+              -- measure whether a CSE-side compatibility check is possible and useful
+              -- (see cse/resources/dpm.js's create_a_dpm). short names tdi/ipd/oud/ppr/msr
+              -- are provisional (corpus/symbols/tr-0071.yaml), not TS-0004-registered.
+              tdi VARCHAR(${len.structured_res_id}), -- trainingDatasetID: WO, the <dataset> this model was trained on (self-reported, not verifiable by the CSE)
+              ipd JSONB, -- inputDescriptor: list of { name, dataType, unit, optional }
+              oud JSONB, -- outputDescriptor: same shape as ipd, for inference output
+              ppr VARCHAR(${len.url}), -- preprocessingRef: URI to a preprocessing definition; the CSE does not interpret this value
+              msr VARCHAR(${len.url}) -- modelSignatureRef: URI to an external schema (e.g. ONNX); the CSE does not interpret this value
             );
         `);
 
@@ -348,8 +363,7 @@ async function create_tables(client) {
               cr VARCHAR(255),
               ndm INTEGER DEFAULT 0,
               nrm INTEGER DEFAULT 0,
-              nsm INTEGER DEFAULT 0,
-              dpm_list VARCHAR(255)[]
+              nsm INTEGER DEFAULT 0
             );
         `);
 
@@ -421,8 +435,7 @@ async function create_tables(client) {
               acpi VARCHAR(${len.structured_res_id})[],
               lbl VARCHAR(${len.str_token})[],
               dspi VARCHAR(${len.structured_res_id}),
-              lof VARCHAR(${len.str_token})[],
-              dsf_list VARCHAR(${len.structured_res_id})[]
+              lof VARCHAR(${len.str_token})[]
             );
         `);
 

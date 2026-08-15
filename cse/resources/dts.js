@@ -98,6 +98,10 @@ async function retrieve_a_dts(req_prim, resp_prim) {
             return;
         }
 
+        // provide int_cr if required by internal API call
+        if (req_prim && req_prim.int_cr_req === true)
+            dts_obj["m2m:dts"].int_cr = db_res.int_cr;
+
         // copy mandatory attributes
         dts_obj["m2m:dts"].ty = db_res.ty;
         dts_obj["m2m:dts"].et = db_res.et;
@@ -126,60 +130,40 @@ async function retrieve_a_dts(req_prim, resp_prim) {
     return;
 }
 
+// <ol> ("oldest") resolves to the oldest non-obsolete <datasetFragment> under this <dataset>,
+// found the same way <container>'s <ol> finds its oldest <contentInstance> (find_edge_cin in
+// cse/resources/cnt.js) -- a query ordered by creationTime that excludes expired children,
+// rather than array position in a list. See dsf.js's find_edge_dsf for why the ordering uses
+// 'ct'+'ri' where <container> uses 'st'+'ct'+'ri' (<datasetFragment> has no stateTag).
 async function retrieve_ol(req_prim, resp_prim) {
-    const dts_res = await DTS.findOne({
-        where: { ri: req_prim.parent_ri },
-        attributes: ['dsf_list']
-    });
-
-    if (!dts_res) {
+    const oldest = await dsf.find_edge_dsf(req_prim.parent_ri, 'ASC');
+    if (!oldest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<dts> resource which is the parent of <ol> not found' };
+        resp_prim.pc = { 'm2m:dbg': 'there is no dsf resource' };
         return;
     }
 
-    const dsf_list = dts_res.dsf_list;
-    if (dsf_list.length > 0) {
-        const dsf_ri = dsf_list[0];
-        const tmp_req = { ri: dsf_ri }, tmp_resp = {};
-        await dsf.retrieve_a_dsf(tmp_req, tmp_resp);
+    const tmp_req = { ri: oldest.ri }, tmp_resp = {};
+    await dsf.retrieve_a_dsf(tmp_req, tmp_resp);
 
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["OK"];
-        resp_prim.pc = tmp_resp.pc;
-    } else {
-        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': 'there is no dsf resource' };
-    }
+    resp_prim.rsc = enums.rsc_str["OK"];
+    resp_prim.pc = tmp_resp.pc;
     return;
 }
 
 async function retrieve_la(req_prim, resp_prim) {
-    const dts_res = await DTS.findOne({
-        where: { ri: req_prim.parent_ri },
-        attributes: ['dsf_list']
-    });
-
-    if (!dts_res) {
+    const latest = await dsf.find_edge_dsf(req_prim.parent_ri, 'DESC');
+    if (!latest) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-        resp_prim.pc = { 'm2m:dbg': '<dts> resource which is the parent of <la> not found' };
+        resp_prim.pc = { 'm2m:dbg': 'there is no <dsf> resource' };
         return;
     }
 
-    const dsf_list = dts_res.dsf_list;
-    if (dsf_list.length > 0) {
-        const dsf_ri = dsf_list[0];
-        const tmp_req = { ri: dsf_ri }, tmp_resp = {};
+    const tmp_req = { ri: latest.ri }, tmp_resp = {};
+    await dsf.retrieve_a_dsf(tmp_req, tmp_resp);
 
-        await dsf.retrieve_a_dsf(tmp_req, tmp_resp);
-
-        // set successful RCS in case of virtual resource
-        resp_prim.rsc = enums.rsc_str["OK"];
-        resp_prim.pc = tmp_resp.pc;
-    }
-
-    resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
-    resp_prim.pc = { 'm2m:dbg': 'there is no <dsf> resource' };
+    resp_prim.rsc = enums.rsc_str["OK"];
+    resp_prim.pc = tmp_resp.pc;
     return;
 }
 

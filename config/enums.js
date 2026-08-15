@@ -46,5 +46,13 @@ const ty_str = {
   107: "dsf", // <datasetFragment>
 };
 
+// Reverse of ty_str -- the resource type number for a given short name. BACKLOG-096: without
+// this, each model file re-typed its own `ty` column defaultValue as a literal number, and three
+// of them (mmd, dts, dsf) disagreed with the table above (107, 105, 105 instead of 102, 106,
+// 107). Code that needs a ty number for a short name (model column defaults, primarily) should
+// derive it from here rather than retype the literal, so the two tables cannot drift again.
+const ty_num = Object.fromEntries(Object.entries(ty_str).map(([num, str]) => [str, Number(num)]));
+
 module.exports.rsc_str = rsc_str;
 module.exports.ty_str = ty_str;
+module.exports.ty_num = ty_num;

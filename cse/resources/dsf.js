@@ -1,7 +1,7 @@
 const enums = require('../../config/enums');
 const { classify_create_error } = require('../create-error');
 
-const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, not_obsolete_where } = require('../utils');
 
 const Lookup = require('../../models/lookup-model');
 const DTS = require('../../models/dts-model');
@@ -48,6 +48,7 @@ async function create_a_dsf(req_prim, resp_prim) {
             rn: prim_res.rn,
             pi: dsf_pi,
             sid: dsf_sid,
+            int_cr: req_prim.fr,
             et: prim_res.et || et,
             ct: now,
             lt: now,
@@ -63,15 +64,6 @@ async function create_a_dsf(req_prim, resp_prim) {
             dsfm: prim_res.dsfm,
         });
 
-        let fragment_size = 0;
-        if (typeof prim_res.dsfr == 'object') {
-            fragment_size = JSON.stringify(prim_res.dsfr).length;
-        } else if (typeof prim_res.dsfr == 'string') {
-            fragment_size = prim_res.dsfr.length;
-        }
-
-        await update_parent_dts(dts_res, ri, fragment_size);
-
         await Lookup.create({
             ri,
             ty: 107,
@@ -80,6 +72,7 @@ async function create_a_dsf(req_prim, resp_prim) {
             lvl: dsf_sid.split("/").length,
             pi: dsf_pi,
             cr: prim_res.cr === null ? req_prim.fr : prim_res.cr,
+            int_cr: req_prim.fr,
         });
 
         const tmp_req = { ri }, tmp_resp = {};
@@ -108,6 +101,10 @@ async function retrieve_a_dsf(req_prim, resp_prim) {
             resp_prim.pc = { 'm2m:dbg': '<dsf> resource not found' };
             return;
         }
+
+        // provide int_cr if required by internal API call
+        if (req_prim && req_prim.int_cr_req === true)
+            dsf_obj["m2m:dsf"].int_cr = db_res.int_cr;
 
         // copy mandatory attributes
         dsf_obj["m2m:dsf"].ty = db_res.ty;
@@ -140,15 +137,21 @@ async function retrieve_a_dsf(req_prim, resp_prim) {
     return;
 }
 
-async function update_parent_dts(dts_res, dsf_ri, fragment_size) {
-    if (!dts_res.dsf_list) {
-        dts_res.dsf_list = [];
-    }   
-    dts_res.dsf_list.push(dsf_ri);
-    await DTS.update({ dsf_list: dts_res.dsf_list }, { where: { ri: dts_res.ri } });
+// The newest ('DESC') or oldest ('ASC') <datasetFragment> under a <dataset> that is not
+// obsolete. Mirrors find_edge_cin in cse/resources/cnt.js -- <datasetFragment> has no
+// stateTag, so creationTime is the ordering basis, with 'ri' as a deterministic tiebreaker
+// (this codebase's 'ct' has only second granularity, so two fragments created in the same
+// second would otherwise tie).
+async function find_edge_dsf(parent_ri, order) {
+    return DSF.findOne({
+        where: { pi: parent_ri, ...not_obsolete_where() },
+        order: [['ct', order], ['ri', order]],
+        attributes: ['ri'],
+    });
 }
 
 module.exports = {
     create_a_dsf,
     retrieve_a_dsf,
+    find_edge_dsf,
 };

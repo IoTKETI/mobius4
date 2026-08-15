@@ -1,14 +1,28 @@
 const enums = require("../../config/enums");
 const { classify_create_error } = require("../create-error");
-const { generate_ri, get_cur_time, get_default_et } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, not_obsolete_where } = require('../utils');
 
 const Lookup = require('../../models/lookup-model');
 const MDP = require('../../models/mdp-model');
 const DPM = require('../../models/dpm-model');
+// <mlModel>/<dataset> -- only needed for the compatibility check below (project proposal,
+// docs/tr-0071-revision-proposal.md section F), not for any TR-0071 attribute of <modelDeployment>.
+const MMD = require('../../models/mmd-model');
+const DTS = require('../../models/dts-model');
 
 const logger = require('../../logger').forFile(__filename);
 
 const mmd_parent_res_types = ["mdp"];
+
+// Resolves inputResource (inr) -- a structured sid (e.g. "Mobius/poc-device-.../in-a-...") or
+// unstructured ri -- to its ri, or null if it does not resolve to anything. Duplicated from the
+// same logic in cse/resources/mmd.js (resolve_resource_by_id) rather than shared, matching this
+// codebase's per-resource-file style (e.g. each resource file has its own find_edge_* helper).
+async function resolve_unstructured_ri(id) {
+  if (!id) return null;
+  const { get_unstructuredID } = require('../hostingCSE');
+  return get_unstructuredID(id);
+}
 
 async function create_a_dpm(req_prim, resp_prim) {
   const prim_res = req_prim.pc["m2m:dpm"];
@@ -31,6 +45,40 @@ async function create_a_dpm(req_prim, resp_prim) {
   try {
     const mdp_res = await MDP.findByPk(dpm_pi);
 
+    // Compatibility check -- project proposal (docs/tr-0071-revision-proposal.md section F in
+    // mobius4-dev-tool), NOT part of TR-0071. TR-0071:7.1.2.4 lets inputResource (inr) point to
+    // any data-sharing resource; only <dataset> declares a feature list at all
+    // (listOfFeatures/lof, TR-0071:7.2.2.2, multiplicity 1 RO -- cse/datasetManager.js's
+    // get_feature_list). So this check only runs when BOTH hold:
+    //   (a) the model being deployed (moid) has an inputDescriptor (ipd), and
+    //   (b) inputResource (inr) resolves to a <dataset>.
+    // If either is missing there is nothing to compare against, and the deployment passes
+    // through unchecked -- a deliberate limit of this design, not an oversight: a <container>
+    // target (the common case today) never declares its features, so requiring the check to
+    // always run would either reject every existing deployment or force every <container> to
+    // start declaring a schema it was never asked to have.
+    if (prim_res.moid && prim_res.inr) {
+      const model_res = await MMD.findByPk(prim_res.moid);
+      if (model_res && Array.isArray(model_res.ipd) && model_res.ipd.length > 0) {
+        const input_ri = await resolve_unstructured_ri(prim_res.inr);
+        const dataset_res = input_ri ? await DTS.findByPk(input_ri) : null;
+        if (dataset_res) {
+          const supplied = new Set(dataset_res.lof || []);
+          const missing = model_res.ipd.filter((f) => f && f.optional !== true && !supplied.has(f.name));
+          if (missing.length > 0) {
+            resp_prim.rsc = enums.rsc_str["NOT_ACCEPTABLE"];
+            resp_prim.pc = {
+              "m2m:dbg": `inputResource's <dataset> does not supply required feature(s) the model's inputDescriptor requires: ${missing.map((f) => f.name).join(", ")}`,
+            };
+            return;
+          }
+        }
+        // dataset_res === null: inr is not a <dataset> (e.g. a plain <container>, which does
+        // not declare listOfFeatures) -- nothing to compare against, so this deployment is not
+        // checked. See the comment above.
+      }
+    }
+
     // create DPM resource
     const db_res = await DPM.create({
       ri,
@@ -38,6 +86,7 @@ async function create_a_dpm(req_prim, resp_prim) {
       rn: prim_res.rn,
       pi: dpm_pi,
       sid: dpm_sid,
+      int_cr: req_prim.fr,
       et: prim_res.et || et,
       ct: now,
       lt: now,
@@ -54,7 +103,6 @@ async function create_a_dpm(req_prim, resp_prim) {
     // update meta info of its parent (last three arguments order: ndm, nrm, nsm)
     await update_parent_mdp({
       mdp_res,
-      dpm_id: db_res.ri,
       ndm_delta: 1,
       nrm_delta: 0,
       nsm_delta: 0
@@ -89,15 +137,11 @@ async function create_a_dpm(req_prim, resp_prim) {
 
 async function update_parent_mdp({
   mdp_res,
-  dpm_id,
   ndm_delta,
   nrm_delta,
   nsm_delta
 }) {
-  let { ri: mdp_ri, ndm, nrm, nsm, dpm_list } = mdp_res;
-
-  // add this dpm_id into the dpm_list of the parent
-  if (dpm_id) dpm_list.push(dpm_id);
+  let { ri: mdp_ri, ndm, nrm, nsm } = mdp_res;
 
   ndm += ndm_delta;
   nrm += nrm_delta;
@@ -105,7 +149,6 @@ async function update_parent_mdp({
 
   // finally update the above parent attributes
   await MDP.update({
-    dpm_list,
     ndm,
     nrm,
     nsm,
@@ -114,6 +157,19 @@ async function update_parent_mdp({
   });
 
   return;
+}
+
+// The newest ('DESC') or oldest ('ASC') <deployment> under a <modelDeploymentList> that is not
+// obsolete. Mirrors find_edge_cin in cse/resources/cnt.js -- <deployment> has no stateTag, so
+// creationTime is the ordering basis, with 'ri' as a deterministic tiebreaker (this codebase's
+// 'ct' has only second granularity, so two deployments created in the same second would
+// otherwise tie).
+async function find_edge_dpm(parent_ri, order) {
+  return DPM.findOne({
+    where: { pi: parent_ri, ...not_obsolete_where() },
+    order: [['ct', order], ['ri', order]],
+    attributes: ['ri'],
+  });
 }
 
 async function retrieve_a_dpm(req_prim, resp_prim) {
@@ -128,6 +184,10 @@ async function retrieve_a_dpm(req_prim, resp_prim) {
       resp_prim.pc = { 'm2m:dbg': 'DPM resource not found' };
       return;
     }
+
+    // provide int_cr if required by internal API call
+    if (req_prim && req_prim.int_cr_req === true)
+      dpm_obj["m2m:dpm"].int_cr = db_res.int_cr;
 
     // copy attributes that shall be stored in the db
     dpm_obj["m2m:dpm"].ty = db_res.ty;
@@ -184,11 +244,20 @@ async function update_a_dpm(req_prim, resp_prim) {
 
     // below are resource specific attributes
     if (prim_res.mcmd !== undefined) {
+      // BACKLOG-091: TR-0071:7.1.3.4 (project decision B-6: numeric 0/1) only defines "stop"
+      // (0) and "run" (1) -- any other value used to fall through every transition `if` below
+      // untouched (so no counters changed and modelStatus stayed put) and still land in
+      // `db_res.mcmd = prim_res.mcmd` a few lines down, which ran unconditionally. That stored
+      // the out-of-range value and returned 2004 UPDATED instead of rejecting the request.
+      if (prim_res.mcmd !== 0 && prim_res.mcmd !== 1) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = { 'm2m:dbg': 'modelCommand must be 0 (stop) or 1 (run)' };
+        return;
+      }
       // deployed status + run command -> running status
       if (db_res.mds === 0 && prim_res.mcmd === 1) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: -1,
           nrm_delta: 1,
           nsm_delta: 0
@@ -199,7 +268,6 @@ async function update_a_dpm(req_prim, resp_prim) {
       if (db_res.mds === 1 && prim_res.mcmd === 0) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: 0,
           nrm_delta: -1,
           nsm_delta: 1
@@ -210,7 +278,6 @@ async function update_a_dpm(req_prim, resp_prim) {
       if (db_res.mds === 2 && prim_res.mcmd === 1) { 
         await update_parent_mdp({
           mdp_res,
-          dpm_id: null,
           ndm_delta: 0,
           nrm_delta: 1,
           nsm_delta: -1
@@ -245,5 +312,6 @@ async function update_a_dpm(req_prim, resp_prim) {
 module.exports = {
   create_a_dpm,
   retrieve_a_dpm,
-  update_a_dpm
+  update_a_dpm,
+  find_edge_dpm,
 };

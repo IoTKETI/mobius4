@@ -156,56 +156,40 @@ async function update_an_mdp(req_prim, resp_prim) {
   return;
 }
 
+// <ol> ("oldest") resolves to the oldest non-obsolete <deployment> under this
+// <modelDeploymentList>, found the same way <container>'s <ol> finds its oldest
+// <contentInstance> (find_edge_cin in cse/resources/cnt.js) -- a query ordered by creationTime
+// that excludes expired children, rather than array position in a list. See dpm.js's
+// find_edge_dpm for why the ordering uses 'ct'+'ri' where <container> uses 'st'+'ct'+'ri'
+// (<deployment> has no stateTag).
 async function retrieve_ol (req_prim, resp_prim) {
-  const mdp_res = await MDP.findOne({
-    where: { ri: req_prim.parent_ri },
-    attributes: ['dpm_list']
-  });
-  
-  if (!mdp_res) {
+  const oldest = await dpm.find_edge_dpm(req_prim.parent_ri, 'ASC');
+  if (!oldest) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "<mdp> resource which is the parent of <ol> not found" };
+    resp_prim.pc = { "m2m:dbg": "there is no <deployment> resource" };
     return;
   }
 
-  const dpm_list = mdp_res.dpm_list || [];
-  if (dpm_list.length > 0) {
-    const dpm_ri = dpm_list[0];
-    const tmp_resp = {};
-    await dpm.retrieve_an_dpm(dpm_ri, req_prim, tmp_resp);
-    resp_prim.pc = tmp_resp.pc;
-  } else {
-    resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "there is no <deployment> resource" };
-  }
+  const tmp_req = { ri: oldest.ri }, tmp_resp = {};
+  await dpm.retrieve_a_dpm(tmp_req, tmp_resp);
+  resp_prim.rsc = enums.rsc_str["OK"];
+  resp_prim.pc = tmp_resp.pc;
   return;
 };
 
 // if we want to apply 'attrl' filter here, then we can use "retrieve_a_res" function, rather than "retrieve_a_cin"
 async function retrieve_la (req_prim, resp_prim) {
-  const mdp_res = await MDP.findOne({
-    where: { ri: req_prim.parent_ri },
-    attributes: ['dpm_list']
-  });
-  
-  if (!mdp_res) {
+  const latest = await dpm.find_edge_dpm(req_prim.parent_ri, 'DESC');
+  if (!latest) {
     resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "<mdp> resource which is the parent of <la> not found" };
+    resp_prim.pc = { "m2m:dbg": "there is no <deployment> resource" };
     return;
   }
 
-  const dpm_list = mdp_res.dpm_list || [];
-
-  if (dpm_list.length > 0) {
-    const dpm_ri = dpm_list[dpm_list.length - 1];
-
-    const tmp_resp = {};
-    await dpm.retrieve_a_dpm(dpm_ri, req_prim, tmp_resp);
-    resp_prim.pc = tmp_resp.pc;
-  } else {
-    resp_prim.rsc = enums.rsc_str["NOT_FOUND"];
-    resp_prim.pc = { "m2m:dbg": "there is no <deployment> resource" };
-  }
+  const tmp_req = { ri: latest.ri }, tmp_resp = {};
+  await dpm.retrieve_a_dpm(tmp_req, tmp_resp);
+  resp_prim.rsc = enums.rsc_str["OK"];
+  resp_prim.pc = tmp_resp.pc;
   return;
 };
 

@@ -8,7 +8,6 @@ const moment = require('moment');
 
 const cb = require('./resources/cb');
 const dts = require('./resources/dts');
-const dsf = require('./resources/dsf');
 
 const CNT = require('../models/cnt-model');
 const CIN = require('../models/cin-model');
@@ -19,6 +18,17 @@ const IntervalManager = require('./intervalManager');
 const interval_manager = new IntervalManager();
 
 const batch_data = {};
+
+// Per-mlDatasetPolicy state for the live path's nullValuePolicy forward-fill (BACKLOG-101).
+// Keyed by dsp_ri, same as batch_data. In-memory only -- module state, not persisted to the DB --
+// so a CSE restart clears both maps exactly the way it already clears batch_data (an unflushed
+// live-dataset batch has always been lost on restart; this adds no new volatility, it just makes
+// the existing volatility apply to forward-fill too). Concretely: after a restart, the live path
+// resumes with no known features and no last-known values, so the first row of each
+// previously-known feature reads as "never seen" (empty string, nvp=0 or nvp=1 alike) until that
+// feature's source reports again post-restart.
+const live_last_known_values = {}; // dsp_ri -> { feature: value } (nvp=1 fill-forward state)
+const live_known_features = {};    // dsp_ri -> Set of feature paths observed so far for that policy
 
 async function create_a_historical_dataset(dsp_res, dst, det, lof) {
     if (dst === null || det === null) {
@@ -196,10 +206,20 @@ async function create_historical_dataset_fragments(dts_ri, sri, dst, det, tcst, 
     while (current_tcst < det) {
         const timestamp_format = config.get('cse.timestamp_format');
         const current_tcd_end = moment(current_tcst, timestamp_format).add(tcd, 'seconds').format(timestamp_format);
-        
-        // filter data instances for the current time window
-        const timeWindowData = timeSortedData.filter(data => 
-            data.ct >= current_tcst && data.ct < current_tcd_end
+
+        // filter data instances for the current time window. `data.ct <= det` is BACKLOG-093's
+        // upper bound: without it, a window whose tcd-sized end extends past det (the common
+        // case -- tcd defaults to 60s, but a source's own instances are usually much closer
+        // together) would include instances after the caller's requested end time, decided by
+        // window size rather than by det itself. Both bounds are inclusive -- TR-0071:7.2.2.1
+        // calls dst/det "the timestamp filter as the start/end time", without stating open vs.
+        // closed, and a source instance timestamped exactly at dst or det reads more naturally as
+        // being "at" the filtered range than excluded from it. mobius4's `ct` has only
+        // second-granularity precision (config/default.json "timestamp_format"), so this decision
+        // is the difference between a source instance created in the same second as dst/det being
+        // in or out.
+        const timeWindowData = timeSortedData.filter(data =>
+            data.ct >= current_tcst && data.ct < current_tcd_end && data.ct <= det
         );
 
         if (timeWindowData.length > 0) {
@@ -248,9 +268,21 @@ function merge_data_for_timewindow(timeWindowData, allFeatures, nvp, lastKnownVa
 
 // get value from nested object by dot separated path
 function get_nested_value(obj, path) {
+    // The live path (create_a_live_dsf below) feeds this function flat_data objects built by
+    // cse/noti.js's get_flat_data, which key themselves by the *whole* dotted feature path (e.g.
+    // "room1.temperature" as one literal key) rather than nesting -- unlike a historical
+    // <contentInstance>.con, which is genuinely nested JSON. Trying a literal-key lookup first
+    // makes this function work for both shapes, which is what lets create_a_live_dsf reuse
+    // merge_data_for_timewindow instead of a second nullValuePolicy implementation (BACKLOG-101).
+    // This is a pure superset for the historical path: nested JSON from real sensor payloads does
+    // not normally carry a top-level property whose name is itself a dotted path.
+    if (obj && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, path)) {
+        return obj[path];
+    }
+
     const keys = path.split('.');
     let current = obj;
-    
+
     for (const key of keys) {
         if (current && typeof current === 'object' && key in current) {
             current = current[key];
@@ -258,7 +290,7 @@ function get_nested_value(obj, path) {
             return undefined;
         }
     }
-    
+
     return current;
 }
 
@@ -281,13 +313,13 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
             formatted_fragment = convert_to_JSON(fragmentRows);
               
         // create <dsf> resources
-        const { get_structuredID, get_a_new_rn } = require('./hostingCSE');
+        const { get_structuredID, get_a_new_rn, create_a_res } = require('./hostingCSE');
         const dts_sid = await get_structuredID(dts_ri);
         const dsf_rn = await get_a_new_rn(107);
 
         const dsf_res = {
             rn: dsf_rn,
-            dsfr: formatted_fragment, 
+            dsfr: formatted_fragment,
             dsfm: dsfm, // dataset format
             nrf: fragmentRows.length, // numberOfRowsInFragment
             dfst: fragmentRows[0].time, // datasetFragmentStartTime
@@ -298,13 +330,31 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
             pc: { "m2m:dsf": dsf_res },
             ri: dts_ri,
             sid: dts_sid,
+            ty: 107, // dsf resource type -- selects hostingCSE.create_a_res's dispatch case.
+                     // Distinct from 'to_ty' below (the *parent's* type, which dsf.create_a_dsf
+                     // still reads for its own parent-type check).
             to_ty: 106, // dts resource type
             fr: admin_id
         };
         const tmp_resp = {};
-        
+
         try {
-            await dsf.create_a_dsf(tmp_req, tmp_resp);
+            // Routed through create_a_res rather than calling dsf.create_a_dsf directly, so this
+            // CSE-initiated create fires the same noti.check_and_send_noti(..., "create") a
+            // client-issued CREATE gets (hostingCSE.js, right after its dispatch switch).
+            // TR-0071:7.2.2.1 requires newly created inference input data to be notifiable to
+            // subscribers on <dataset>, and TS-0018/DEC-history aside, dsf.create_a_dsf itself has
+            // no notification call of its own -- create_a_res's post-dispatch block is the only
+            // place that fires one. hostingCSE.js's own `case 107` comment ("not called by
+            // client, temporary for testing") already marks this as the intended entry point.
+            // create_a_res's other additions are no-ops here: 'rn' is already generated and
+            // unique (the duplicate-name recheck it does is an extra but harmless query), no 'et'
+            // is set, and 'rcn' is left undefined so the full representation still comes back
+            // unchanged. Unlike a client CREATE this never goes through reqPrim.js, so
+            // access_decision (which lives outside create_a_res) never runs for it -- correctly:
+            // there is no external originator to check privileges for, the CSE is creating this
+            // on its own authority.
+            await create_a_res(tmp_req, tmp_resp);
 
             if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
                 logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'dsf fragment creation failed');
@@ -319,6 +369,11 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
 }
 
 async function create_a_live_dataset(dsp_res, dst, det, lof) {
+    // resolve nullValuePolicy (nvp) -- same resolution as create_a_historical_dataset above, so
+    // both paths treat an absent nvp identically (BACKLOG-101: this used to be resolved only on
+    // the historical path; the live path never read it at all).
+    const nvp = (dsp_res.nvp) ? dsp_res.nvp : dsp_default.nvp; // 0: leave as null, 1: fill with last known value
+
     // subscribe to the data sources (eventType = 'create')
     const sub_res = {
         rn: 'sub-live-dataset-' + dsp_res.ri,
@@ -326,7 +381,14 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
         	net : [3],
             chty: [4]
         },
-        nu : ['mqtt://localhost:1883/self/datasetManager/' + dsp_res.sid],
+        // Read from config.mqtt rather than hard-coded, so this matches whatever broker the
+        // running CSE is actually connected to. Under config/default.json both are
+        // ("localhost", 1883) so this was invisible in normal operation, but the test harness
+        // (test/helpers/broker.js) starts a private broker on a random free port per DEC-037 --
+        // against the old hard-coded URL, bindings/mqtt-outbound.js's is_own_broker() check never
+        // matched, the "self" delivery shortcut never fired, and batch_data (this module's
+        // per-policy row buffer) never got populated for the live-dataset path.
+        nu : [`mqtt://${config.mqtt.ip}:${config.mqtt.port}/self/datasetManager/${dsp_res.sid}`],
         nct: 1
     };
 
@@ -392,58 +454,102 @@ async function create_a_live_dataset(dsp_res, dst, det, lof) {
 
     const duration = (dsp_res.tcd) ? dsp_res.tcd : 10; // temporal default duration is 10 seconds
 
-    interval_managers[dsp_res.ri] = interval_manager.createInterval(async (intervalId, dsp_ri, dts_ri, dts_sid, duration) => {
+    interval_managers[dsp_res.ri] = interval_manager.createInterval(async (intervalId, dsp_ri, dts_ri, dts_sid, duration, nvp) => {
         // start creating <dsf> resources for live dataset
-        await create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration);
-    }, duration * 1000, { 
-        id: `interval-${dsp_ri}`,
-        params: [dsp_res.ri, dts_ri, dts_sid, duration] 
+        await create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration, nvp);
+    }, duration * 1000, {
+        // BACKLOG-092: `dsp_ri` is a callback parameter (bound at call time via `params` below),
+        // not a binding in this enclosing scope. The id must use the same value the enclosing
+        // scope already has: `dsp_res.ri`.
+        id: `interval-${dsp_res.ri}`,
+        params: [dsp_res.ri, dts_ri, dts_sid, duration, nvp]
     });
 
     return ldi;
 }
 
-async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
+async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration, nvp) {
     logger.debug({ dsp_ri, durationSec: duration }, 'creating live dsf resources');
 
     const end_time = moment.utc().format(config.get('cse.timestamp_format'));
     const start_time = moment.utc(end_time).subtract(duration, 'seconds').format(config.get('cse.timestamp_format'));
 
-    const dsf_data = [];
-
-    // check if batch_data[dsp_ri] is available and an object
+    // Pull this window's notifications out of batch_data, time-sorted -- same source data as
+    // before, just kept in the { time, con } shape merge_data_for_timewindow expects instead of
+    // being pushed straight into dsf_data. Sorting matters here (it did not before): nvp=1's
+    // forward-fill in merge_data_for_timewindow depends on walking rows in chronological order.
+    const windowEntries = [];
     if (batch_data[dsp_ri] && typeof batch_data[dsp_ri] === 'object') {
-        for (const [time, data] of Object.entries(batch_data[dsp_ri])) {
-            if (time >= start_time && time <= end_time) {
-                // add data to dsf_data
-                dsf_data.push({ ...data });
-
-                // remove data from batch_data
-                delete batch_data[dsp_ri][time];
-            }
+        const times = Object.keys(batch_data[dsp_ri])
+            .filter(time => time >= start_time && time <= end_time)
+            .sort();
+        for (const time of times) {
+            windowEntries.push({ time, con: batch_data[dsp_ri][time] });
+            // remove data from batch_data
+            delete batch_data[dsp_ri][time];
         }
     } else {
         logger.warn({ dsp_ri }, 'batch_data not available, initializing empty object');
         batch_data[dsp_ri] = {};
     }
 
-    if (dsf_data.length === 0) {
+    if (windowEntries.length === 0) {
         return;
     }
+
+    // BACKLOG-101: reuse the historical path's forward-fill (merge_data_for_timewindow) instead
+    // of a second nullValuePolicy implementation. Each batch_data entry is one notification --
+    // i.e. one source (cse/noti.js's get_flat_data/batch_noti_data) -- so without this merge every
+    // row would carry only the feature(s) of whichever single source produced it, exactly the
+    // defect BACKLOG-101 describes. allFeatures/lastKnownValues are kept per dsp_ri at module
+    // scope (live_known_features/live_last_known_values, declared near batch_data above) so
+    // forward-fill carries across separate create_a_live_dsf invocations, the live path's
+    // equivalent of the historical path's per-call lastKnownValues/allFeatures -- historical has a
+    // single call over a closed [dst,det] range so it can compute allFeatures upfront (with
+    // look-ahead over the whole range); the live path is incremental and unbounded, so its
+    // allFeatures can only grow from what has actually been observed up to now, never from the
+    // future. A feature not yet observed anywhere is simply not a known feature yet, matching the
+    // historical path's answer for the same question: not a row key at all until first observed,
+    // and '' (not nvp=1-filled) on the first row that introduces it, since there is no prior value
+    // to fill with (see merge_data_for_timewindow's else-branch).
+    const timeWindowData = windowEntries.map(entry => ({
+        ct: entry.time,
+        con: entry.con,
+        features: Object.keys(entry.con).filter(key => key !== 'time'),
+    }));
+
+    if (!live_known_features[dsp_ri]) live_known_features[dsp_ri] = new Set();
+    if (!live_last_known_values[dsp_ri]) live_last_known_values[dsp_ri] = {};
+    const allFeatures = live_known_features[dsp_ri];
+    for (const data of timeWindowData) {
+        for (const feature of data.features) allFeatures.add(feature);
+    }
+
+    const mergedRows = merge_data_for_timewindow(timeWindowData, allFeatures, nvp, live_last_known_values[dsp_ri]);
+    // Flatten { time, values: {...} } back to { time, ...values } -- the wire shape this path has
+    // always produced (dsfm=0's dsfr here is the flat row array itself, not CSV/JSON via
+    // convert_to_CSV/convert_to_JSON as create_dataset_fragments uses for the historical path).
+    const dsf_data = mergedRows.map(row => ({ time: row.time, ...row.values }));
 
     logger.debug({ dsp_ri, rowCount: dsf_data.length }, 'dsf_data ready');
     // console.log('batch_data: ', batch_data);
 
-    const { get_a_new_rn } = require('./hostingCSE');
+    const { get_a_new_rn, create_a_res } = require('./hostingCSE');
     const dsf_rn = get_a_new_rn(107);
-    const timestamps = Object.keys(dsf_data);
-    
+
     // create a <dsf> resource
+    //
+    // dfst/dfet used to be read off `Object.keys(dsf_data)` -- but dsf_data was (and still is) an
+    // array, so Object.keys returned index strings ("0", "1", ...), not timestamps. Found and
+    // fixed incidentally while rewriting this block for BACKLOG-101 (mergedRows is already
+    // time-sorted, same ordering guarantee the historical path relies on in
+    // create_dataset_fragments' `fragmentRows[0].time` / `fragmentRows[...].time`), not something
+    // this BACKLOG set out to fix -- called out here and in the report rather than left silent.
     const dsf_res = {
         rn: dsf_rn,
-        dfst: timestamps[0],
-        dfet: timestamps[timestamps.length - 1],
-        nrf: timestamps.length,
+        dfst: dsf_data[0].time,
+        dfet: dsf_data[dsf_data.length - 1].time,
+        nrf: dsf_data.length,
         dsfr: dsf_data,
         dsfm: 0,
     };
@@ -451,11 +557,13 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration) {
         pc: { "m2m:dsf": dsf_res },
         ri: dts_ri,
         sid: dts_sid,
+        ty: 107, // dsf resource type -- see create_dataset_fragments() above for why this goes
+                 // through create_a_res (notification) rather than dsf.create_a_dsf directly.
         to_ty: 106, // dts resource type
         fr: admin_id
     };
     const tmp_resp = {};
-    await dsf.create_a_dsf(tmp_req, tmp_resp);
+    await create_a_res(tmp_req, tmp_resp);
     if (tmp_resp.rsc === enums.rsc_str["BAD_REQUEST"]) {
         logger.error({ sid: tmp_req.sid, dbg: tmp_resp.pc?.["m2m:dbg"] }, 'live dsf resource creation failed');
         return;

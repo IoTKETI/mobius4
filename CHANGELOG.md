@@ -21,9 +21,22 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## [Unreleased]
+## v4.15.0 (2026-08-15)
 
-### The administrator bypasses access control again
+Two unrelated bodies of work land together here, because the administrator change below was
+already on `master` unreleased when the AI/ML work was cut.
+
+oneM2M's TR-0071 (Technical Report on AI/ML enablement) describes seven candidate resource
+types — `<modelRepo>`, `<mlModel>`, `<modelDeploymentList>`, `<modelDeployment>`,
+`<mlDatasetPolicy>`, `<dataset>`, `<datasetFragment>` — and this CSE has carried code for all
+seven since its first commit, unreleased-note and untested. This release is the first time
+they were put in front of a capability probe, a conformance test suite derived from TR-0071
+itself, and a client that actually trains and serves a model through them end to end. All
+three surfaced real defects; most of what follows is fixing what they found.
+
+### ⚠️ The administrator bypasses access control again
+
+_This section landed on `master` as #41 before the AI/ML work merged; it is released here._
 
 v4.6.0 removed the short-circuit in `cse/hostingCSE.js` that granted `cse.admin` every
 operation before any `<accessControlPolicy>` was read, and replaced it with an admin policy
@@ -66,6 +79,140 @@ Pinned by `test/access-control.test.js` — "the administrator gets through a po
 it nothing", "the administrator gets through the creator fallback of a resource it did not
 create", and "the creator fallback still governs everyone else", the last of which is what
 would notice if the restoration had widened access for anybody but the administrator.
+
+### ⚠️ Breaking, but only where the two new descriptor attributes below are actually used: `<modelDeployment>` CREATE can now reject an incompatible deployment
+
+If a `<mlModel>`'s `inputDescriptor` (`ipd`, new in this release — see below) names a required
+input feature that the deployment's `inputResource` — when it resolves to a `<dataset>` — does
+not supply, `<modelDeployment>` CREATE is now rejected with `5207 NOT_ACCEPTABLE`
+(`cse/resources/dpm.js`, `create_a_dpm`). Before this release there was no such check at all.
+
+This cannot affect anything already running. `inputDescriptor` did not exist before this
+release, so no existing `<mlModel>` has one populated, and the check runs only when it is
+present — an omitted `inputDescriptor` (every deployment created before upgrading, and any
+created after upgrading that doesn't set one) skips the check exactly as before. The check is
+also narrower than "every deployment": it only fires when `inputResource` resolves to a
+`<dataset>`, since that is the only resource type in this interface that declares a feature
+list (`listOfFeatures`, `TR-0071:7.2.2.2`) to compare against — a plain `<container>` target,
+which is most deployments today, is never checked.
+
+### Fixed: five of the seven AI/ML resource types were unusable past CREATE
+
+`features/capabilities.json` — this CSE's own probed record of what it answers, not a claim —
+shows the before/after directly. Before this release: `<modelRepo>` CREATE always failed
+(`db/init.js` created its table with a column named `mid`, copied from `<group>`, while the
+Sequelize model in `models/mrp-model.js` had always called the same column `mmd_list` — every
+INSERT referenced a column that did not exist), which also made `<mlModel>` unobservable since
+it had no parent to attach to. `<modelDeployment>` and `<mlDatasetPolicy>` supported CREATE
+only. `<dataset>` and `<datasetFragment>` were unobservable outright. Two defects caused this:
+
+1. **The `<modelRepo>` schema mismatch above** — fixed in `db/init.js` for new installs;
+   `db/migrations/v4.15.0.sql` renames the column for existing ones.
+2. **Five retrieve handlers refused the resource's own creator.** `<mlModel>`,
+   `<modelDeployment>`, `<mlDatasetPolicy>`, `<dataset>` and `<datasetFragment>` were, alone
+   among this CSE's resource types, missing the branch that tells `access_decision` who
+   created a resource when it has no explicit `acpi` — which is true of every AI/ML resource
+   created through the normal flow. The result was `RSC 4103`: a client could create its own
+   `<mlModel>` and then be refused permission to read it back. Fixed by adding the same
+   `int_cr_req` branch every sibling handler (`<modelRepo>`, `<modelDeploymentList>`) already
+   had.
+
+After both fixes, `features/capabilities.json` shows full CRUD on `<modelRepo>` through
+`<mlDatasetPolicy>`, and RETRIEVE/DELETE on `<dataset>`/`<datasetFragment>` — their CREATE
+stays CSE-internal only, per `TR-0071:7.2.3.2`/`7.2.3.3`, unchanged from before.
+
+### Migration required: `<mlModel>`'s stored bytes, not its base64 text
+
+`mlModelSize` (`mms`) used to measure the base64 *text* stored in `mmd.mmd` — base64 inflates
+by 4/3, so `mms`, and the `currentByteOfModels`/`maxByteOfModels` budget it feeds, was
+consistently about a third larger than the model actually is. `mmd.mmd` is now `BYTEA`:
+`cse/resources/mmd.js` decodes on CREATE/UPDATE and re-encodes to base64 on RETRIEVE, so `mms`
+falls out as the stored buffer's own length. `db/migrations/v4.15.0.sql` converts every
+existing row's base64 text to the bytes it encodes (`decode(mmd, 'base64')`); a row whose
+stored text is not valid base64 — never enforced before this release — fails the migration
+outright rather than being silently decoded to garbage.
+
+### Added, not part of any oneM2M specification: five `<mlModel>` attributes
+
+`trainingDatasetID` (`tdi`, write-once), `inputDescriptor` (`ipd`), `outputDescriptor` (`oud`),
+`preprocessingRef` (`ppr`) and `modelSignatureRef` (`msr`). **These are not in TR-0071 or any
+oneM2M TS** — they are this project's own proposal, written up for standards contribution in
+the development repository at `docs/tr-0071-revision-proposal.md` (section F). The short names
+are provisional and not registered in `TS-0004`. All five are optional (0..1); an `<mlModel>`
+that sets none of them behaves exactly as before, including the deployment check above, which
+only runs when `inputDescriptor` is present.
+
+### Fixed: nine further implementation defects found while writing TR-0071 conformance tests and a proof-of-concept client
+
+Building the first tests and the first real client for these resource types (a working linear
+regression trained on synthetic sensor data, deployed, and run end to end — see
+`docs/tr-0071-poc-report.md` in the development repository) is what found the following, none
+of which were caught by any existing test because none existed for this interface before this
+release.
+
+**Guards `<mlModel>`/`<modelDeployment>` CREATE and UPDATE should have had and didn't:**
+- `<mlModel>` CREATE accepted both `mmd` and `mmu` together, or neither, though
+  `TR-0071:7.1.2.2` says they are mutually exclusive. CREATE now rejects unless exactly one is
+  present. (BACKLOG-086)
+- `<modelDeployment>` UPDATE stored an out-of-range `modelCommand` (anything outside 0/stop or
+  1/run) silently and answered `2004 UPDATED` instead of rejecting it. (BACKLOG-091)
+
+**Parent bookkeeping that never ran for these resource types:**
+- Deleting an `<mlModel>` directly did not decrement its parent `<modelRepo>`'s
+  `currentNumberOfModels`/`currentByteOfModels` — only the eviction path did, so the counters
+  could drift upward and mis-trigger eviction later. (BACKLOG-088)
+- `mmd`/`dts`/`dsf`'s Sequelize `ty` column defaults disagreed with `config/enums.js`'s type
+  table (e.g. `mmd`'s default was 107, the number for `<datasetFragment>`, not 102). Every
+  CREATE path sets `ty` explicitly, so this was latent, not user-visible — but a landmine for
+  any future path that trusts the model default instead. `config/enums.js` now derives one
+  table from the other so they cannot drift again. (BACKLOG-096)
+
+**The live-dataset pipeline, which the proof-of-concept found was the least finished part of
+this interface:**
+- A single undefined variable (`dsp_ri` referenced outside the callback scope that defines it)
+  meant `<mlDatasetPolicy>` CREATE for a **live** dataset always threw and was reported as a
+  generic `4000` — the entire live-inference path that `TR-0068`'s use case #7 depends on was
+  unreachable, not merely buggy. (BACKLOG-092)
+- A policy's own `datasetStartTime`/`datasetEndTime` were stored and echoed back on RETRIEVE
+  but never consulted when building `<datasetFragment>`s — the CSE always used the full
+  auto-detected source range instead, so narrowing the window had no effect. (BACKLOG-093)
+- `<dataset>` (`ty=106`) was missing from the set of resource types a `<subscription>` can
+  target, so the notification path `TR-0071:7.2.2.1` describes ("newly created inference input
+  data can be ... notified with subscription") could not be used at all. (BACKLOG-094)
+- Internally created `<datasetFragment>`s (live or historical) never triggered a CREATE
+  notification, because the code that creates them calls the resource layer directly instead
+  of going through the function that fires notifications. Found and fixed in the same pass as
+  the two defects above; the same gap on `<dataset>` itself is still open (BACKLOG-097).
+- The live dataset path never applied `nullValuePolicy`: each `<datasetFragment>` row came from
+  a single MQTT notification (one source's attribute), so a live policy merging more than one
+  source could never produce a row with more than one source's feature filled in — found by
+  running the proof-of-concept's live loop against real sensor data. Live fragments now share
+  the same forward-fill the historical path already had. (BACKLOG-101)
+
+Known gaps this release does **not** close — deferred to spec discussion rather than fixed
+outright, and each tracked in the development repository's `.claude/workspace/todo.md`:
+`<dataset>` still does not inherit `custodian` from its `<mlDatasetPolicy>` (BACKLOG-089,
+requires a schema change to a common attribute — out of AI/ML's own scope); direct client
+CREATE of `<dataset>`/`<datasetFragment>` is still open, guarded only by a source comment
+saying "temporary for testing" (BACKLOG-090); `<mlModel>` eviction's same-second tie-break is
+effectively random (BACKLOG-095); and `<dataset>` creation itself (as opposed to the fragments
+inside it) still bypasses CREATE notifications (BACKLOG-097).
+
+**Why MINOR** — the table above lists "backward-compatible DB migration" on its own as a MINOR
+trigger, and `db/migrations/v4.15.0.sql` is exactly that: every statement in it either affects
+columns no release has ever stored live data in (the `mrp`/`mdp`/`dts` list columns, and the
+`<modelRepo>` CREATE that was broken until this same release) or converts existing rows in
+place. Separately, the five `<mlModel>` attributes above are a genuine schema addition, even
+though they are not a oneM2M-standard capability. Everything else in this entry — the
+`5207` compatibility check and the defect fixes — would be PATCH on its own (bug fixes adding
+no new capability), but they ship in the same commit as the migration and the schema addition,
+so the release as a whole is MINOR.
+
+The administrator change is the one that looks like it should force MAJOR and does not. The
+table reserves MAJOR for a "compatibility break requiring manual intervention", and this
+requires none: no migration, no configuration change, and a deployment that worked around the
+v4.6.0 behaviour keeps working untouched. It widens what one already-privileged identity can
+do; it takes nothing away. That is why it sits here rather than in a 5.0.0.
 
 ## v4.14.0 (2026-08-11)
 

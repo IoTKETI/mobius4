@@ -28,7 +28,7 @@ const config = require("config");
 
 const { startServer } = require("../test/helpers/server");
 const { startSink } = require("../test/helpers/noti-sink");
-const { request, discover, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
+const { request, discover, urils, CSE_BASE, ADMIN } = require("../test/helpers/onem2m");
 const { support, hasDrifted, summarize } = require("./lib/capabilities");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -52,6 +52,17 @@ const RESOURCE_TYPES = [
   { ty: 16, short_name: "csr", long_name: "remoteCSE" },
   { ty: 23, short_name: "sub", long_name: "subscription" },
   { ty: 28, short_name: "flx", long_name: "flexContainer" },
+
+  // TR-0071 (Technical Report) candidate solution types. Not in the resourceType enumeration of
+  // TS-0004 — these numbers are Mobius4's own allocation (config/enums.js) and may change if
+  // oneM2M standardises them. long_name comes from TR-0071 clauses 7.1.2 and 7.2.2.
+  { ty: 101, short_name: "mrp", long_name: "modelRepo", source: "TR-0071" },
+  { ty: 102, short_name: "mmd", long_name: "mlModel", source: "TR-0071" },
+  { ty: 103, short_name: "mdp", long_name: "modelDeploymentList", source: "TR-0071" },
+  { ty: 104, short_name: "dpm", long_name: "modelDeployment", source: "TR-0071" },
+  { ty: 105, short_name: "dsp", long_name: "mlDatasetPolicy", source: "TR-0071" },
+  { ty: 106, short_name: "dts", long_name: "dataset", source: "TR-0071" },
+  { ty: 107, short_name: "dsf", long_name: "datasetFragment", source: "TR-0071" },
 ];
 
 // A <flexContainer> needs a registered specialization; an unregistered cnd is refused 4125.
@@ -192,6 +203,146 @@ async function probeResourceTypes(base) {
         set(28, "retrieve", await get(flxSid));
         set(28, "update", await put(flxSid, { [FLX_KEY]: { lbl: ["probe"] } }));
         set(28, "delete", await del(flxSid));
+      }
+    }
+
+    // ── TR-0071 AI/ML types ─────────────────────────────────────────────────────────────────
+    //
+    // Placed here, not after this if(created(ae)) block, because <modelDeploymentList> needs a
+    // live aeSid and <mlDatasetPolicy> needs a live cntSid — both are deleted a few lines below.
+    // Order follows the tree: repository -> model, deployment list -> deployment,
+    // policy -> (CSE-made) dataset.
+    //
+    // The dataset side is deliberately probed through the policy: TR-0071 clause 7.2.3.2 says
+    // <dataset> is created by the hosting CSE, not by a client request, so asking for a direct
+    // CREATE would record a fact about an operation the specification does not define. Clause
+    // 7.2.3.3 says the same for <datasetFragment>, and adds that it is immutable — "the Create
+    // procedure is not specified as an API [...] this resource is immutable so Update procedure
+    // is not specified. No change from the Retrieve and Delete procedures in clause 10.1." So
+    // <datasetFragment> is asked about below, but only for retrieve/delete — asking about
+    // create/update would record a fact about operations the specification does not define,
+    // same principle as <dataset> just above.
+    //
+    // cse/hostingCSE.js also has a client-facing CREATE case for ty 106/107 ("not called by
+    // client, temporary for testing"). That is an implementation artifact, not a specified
+    // operation, so it is not probed — probing it would put an unspecified capability in a file
+    // whose whole point is to describe what the specification-facing surface does.
+    const mrp = await post(CSE_BASE, 101, { "m2m:mrp": { rn: "probe_mrp" } });
+    set(101, "create", mrp);
+    const mrpSid = `${CSE_BASE}/probe_mrp`;
+    // Captured for <modelDeployment>'s moid below, before this <mlModel> is deleted.
+    let mmdRi = null;
+    if (created(mrp)) {
+      set(101, "retrieve", await get(mrpSid));
+      set(101, "update", await put(mrpSid, { "m2m:mrp": { lbl: ["probe"] } }));
+
+      const mmd = await post(mrpSid, 102, {
+        "m2m:mmd": {
+          rn: "probe_mmd", vr: "1.0.0", plf: "tensorFlow", mlt: "regression",
+          mmu: "https://example.invalid/m.tflite",
+        },
+      });
+      set(102, "create", mmd);
+      const mmdSid = `${mrpSid}/probe_mmd`;
+      if (created(mmd)) {
+        set(102, "retrieve", await get(mmdSid));
+        set(102, "update", await put(mmdSid, { "m2m:mmd": { lbl: ["probe"] } }));
+        mmdRi = mmd.body?.["m2m:mmd"]?.ri ?? null;
+        set(102, "delete", await del(mmdSid));
+      }
+      set(101, "delete", await del(mrpSid));
+    }
+
+    if (created(ae)) {
+      const mdp = await post(aeSid, 103, { "m2m:mdp": { rn: "probe_mdp" } });
+      set(103, "create", mdp);
+      const mdpSid = `${aeSid}/probe_mdp`;
+      if (created(mdp)) {
+        set(103, "retrieve", await get(mdpSid));
+        set(103, "update", await put(mdpSid, { "m2m:mdp": { lbl: ["probe"] } }));
+
+        // moid (modelID, TR-0071 table 7.1.2.4-2) wants the resource ID of the <mlModel>, not
+        // its name — the brief this was drafted from used the rn "probe_mmd" instead. TR-0071
+        // marks it 1(L) (a list), but models/dpm-model.js stores it as a plain STRING(255), not
+        // an array column, so a single value is what this implementation actually accepts.
+        // inputResource/outputResource (inr/our) want "the resource ID of" a resource-sharing
+        // resource; a structured ID resolves the same as a resource ID everywhere else this
+        // codebase addresses a resource (cse/hostingCSE.js get_unstructuredID), so cntSid is
+        // used the same way <group>'s mid is probed above.
+        const dpm = await post(mdpSid, 104, {
+          "m2m:dpm": { rn: "probe_dpm", moid: mmdRi || undefined, inr: cntSid, our: cntSid },
+        });
+        set(104, "create", dpm);
+        const dpmSid = `${mdpSid}/probe_dpm`;
+        if (created(dpm)) {
+          set(104, "retrieve", await get(dpmSid));
+          // modelCommand (mcmd) is an integer here (0: stop, 1: run) — cse/resources/dpm.js
+          // update_a_dpm — not the "run"/"stop" strings TR-0071 defines. Sending the strings
+          // would not be observing this implementation's real accepted shape.
+          set(104, "update", await put(dpmSid, { "m2m:dpm": { mcmd: 1 } }));
+          set(104, "delete", await del(dpmSid));
+        }
+        set(103, "delete", await del(mdpSid));
+      }
+    }
+
+    if (cntSid) {
+      // get_dataset_info (cse/datasetManager.js) resolves datasetStartTime/datasetEndTime from
+      // the source container's oldest/latest <contentInstance>; without one it returns null and
+      // create_a_dsp throws before answering. The <contentInstance> probed above under this same
+      // container was already deleted, so fixtures are created here — this is not itself a
+      // probe question, ty 4 already has one above.
+      //
+      // Two instances, not one: create_historical_dataset_fragments (cse/datasetManager.js)
+      // only walks its `while (current_tcst < det)` loop when dst < det. dst/det come from the
+      // source container's oldest/latest <contentInstance> `ct` (get_dataset_info); with a
+      // single instance dst === det and the loop body — the only place a <datasetFragment> gets
+      // created — never runs, so a probe with one fixture can never reach ty 107 at all. `ct`
+      // has second, not millisecond, precision (config/default.json "timestamp_format"), so the
+      // two creates need a real wait apart, not just two sequential calls — the same 1.1s wait
+      // test/ai-dataset-management.test.js's makeSource() uses for the same reason.
+      await post(cntSid, 4, { "m2m:cin": { rn: "probe_cin_ds_1", cnf: "text/plain:0", con: "x" } });
+      await new Promise((r) => setTimeout(r, 1100));
+      await post(cntSid, 4, { "m2m:cin": { rn: "probe_cin_ds_2", cnf: "text/plain:0", con: "y" } });
+
+      // nrhd (numberOfRowsForHistoricalDataset) large enough that both rows land in one
+      // fragment — test/ai-dataset-management.test.js's makeDatasetWithFragment() uses the same
+      // value for the same reason: a single, predictable <datasetFragment> to probe, rather than
+      // however many create_dataset_fragments (cse/datasetManager.js) would slice a small nrhd
+      // into.
+      const dsp = await post(CSE_BASE, 105, {
+        "m2m:dsp": { rn: "probe_dsp", sri: [cntSid], dsfm: 1, nrhd: 100 },
+      });
+      set(105, "create", dsp);
+      const dspSid = `${CSE_BASE}/probe_dsp`;
+      if (created(dsp)) {
+        set(105, "retrieve", await get(dspSid));
+        set(105, "update", await put(dspSid, { "m2m:dsp": { lbl: ["probe"] } }));
+
+        // <dataset>/<datasetFragment> are created by the CSE. Follow the link the policy hands
+        // back rather than guessing a path.
+        const dspBody = (await get(dspSid)).body?.["m2m:dsp"] ?? {};
+        const dtsSid = dspBody.hdi || dspBody.ldi;
+        if (dtsSid) {
+          set(106, "retrieve", await get(dtsSid));
+
+          // <datasetFragment> (ty 107) has no client-facing CREATE to learn its CSE-generated
+          // `rn` from, so discovery is how a client would actually find one — the same approach
+          // test/ai-dataset-management.test.js's makeDatasetWithFragment() uses. <dataset>'s
+          // /la virtual resource (cse/resources/dts.js retrieve_la) would also resolve one, but
+          // discovery is the generic procedure clause 7.2.3.3 points at ("No change from the
+          // Retrieve [...] procedures in clause 10.1"), so it is used here instead of the
+          // <container>-style virtual-resource shortcut.
+          const frags = await discover(base, dtsSid, { ty: "107" });
+          const dsfSid = urils(frags)[0];
+          if (dsfSid) {
+            set(107, "retrieve", await get(dsfSid));
+            set(107, "delete", await del(dsfSid));
+          }
+
+          set(106, "delete", await del(dtsSid));
+        }
+        set(105, "delete", await del(dspSid));
       }
     }
 
