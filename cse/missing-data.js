@@ -133,27 +133,33 @@ async function sweep_missing_data(opts = {}) {
     let updated = 0;
 
     for (const row of candidates) {
-        const children = await TSI.findAll({
-            where: { pi: row.ri },
-            attributes: ['dgt'],
-        });
-        if (children.length === 0) continue;
-
-        const dgts = children.map((c) => c.dgt);
-
-        // The anchor is "the dataGenerationTime of the first received <timeSeriesInstance>".
-        // It is recorded on the first sweep that sees a child and then held, so that later
-        // arrivals — or evictions of the earliest instance — cannot move the origin of the
-        // expected-time series underneath the entries already recorded.
-        let anchor = row.md_anchor_dgt;
-        if (!anchor) {
-            anchor = dgts.reduce((a, b) => (to_epoch_seconds(b) < to_epoch_seconds(a) ? b : a));
-            row.md_anchor_dgt = anchor;
-        }
-
-        let result;
+        // The whole body is one try/catch, not just detect_missing: anchor establishment
+        // (to_epoch_seconds inside the reduce below) and row.save() can both throw too, and a
+        // throw that escapes this loop aborts sweep_missing_data() entirely — leaving every
+        // remaining candidate in this tick's array unprocessed, and recurring on every
+        // subsequent tick because it happens before the anchor is persisted. Catching per
+        // iteration is what makes "a single unparseable timestamp must not stop the sweep for
+        // every other resource" true rather than aspirational.
         try {
-            result = detect_missing({
+            const children = await TSI.findAll({
+                where: { pi: row.ri },
+                attributes: ['dgt'],
+            });
+            if (children.length === 0) continue;
+
+            const dgts = children.map((c) => c.dgt);
+
+            // The anchor is "the dataGenerationTime of the first received <timeSeriesInstance>".
+            // It is recorded on the first sweep that sees a child and then held, so that later
+            // arrivals — or evictions of the earliest instance — cannot move the origin of the
+            // expected-time series underneath the entries already recorded.
+            let anchor = row.md_anchor_dgt;
+            if (!anchor) {
+                anchor = dgts.reduce((a, b) => (to_epoch_seconds(b) < to_epoch_seconds(a) ? b : a));
+                row.md_anchor_dgt = anchor;
+            }
+
+            const result = detect_missing({
                 anchor,
                 pei: row.pei,
                 peid: row.peid,
@@ -162,21 +168,20 @@ async function sweep_missing_data(opts = {}) {
                 now,
                 from_n: row.md_watermark_n,
             });
+
+            const changed_anchor = row.changed('md_anchor_dgt');
+            if (result.missing.length === 0 && result.watermark === row.md_watermark_n && !changed_anchor) continue;
+
+            const folded = apply_missing(row.mdlt || [], row.mdc || 0, result.missing, row.mdn);
+            row.mdlt = folded.mdlt;
+            row.mdc = folded.mdc;
+            row.md_watermark_n = result.watermark;
+            await row.save();
+            updated++;
         } catch (err) {
             // A single unparseable timestamp must not stop the sweep for every other resource.
             logger.warn({ err, ri: row.ri }, 'missing-data sweep skipped one <ts>');
-            continue;
         }
-
-        const changed_anchor = row.changed('md_anchor_dgt');
-        if (result.missing.length === 0 && result.watermark === row.md_watermark_n && !changed_anchor) continue;
-
-        const folded = apply_missing(row.mdlt || [], row.mdc || 0, result.missing, row.mdn);
-        row.mdlt = folded.mdlt;
-        row.mdc = folded.mdc;
-        row.md_watermark_n = result.watermark;
-        await row.save();
-        updated++;
     }
 
     return { scanned: candidates.length, updated };

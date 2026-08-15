@@ -135,10 +135,21 @@ test("TS-0001:10.2.4.21 — detection runs only when pei is set and mdd is true"
   const noMdd = (await create(base, root.sid, 29, {
     "m2m:ts": { rn: uniqueRn("ts"), pei: 2, peid: 0, mdt: 1 },
   })).body["m2m:ts"].ri;
+  // A correctly-configured control, given the same data as the two above. Without it, this test
+  // proves nothing about the filter: it would pass identically if the sweep did not exist at
+  // all, which is exactly what happened when the implementer ran it in the RED state before
+  // sweep_missing_data() was written. The control makes "the two misconfigured ones stayed at
+  // zero" mean something, by also proving a correctly-configured sibling did not.
+  const control = await makeSeries();
 
-  for (const sid of [noPei, noMdd]) {
+  for (const sid of [noPei, noMdd, control]) {
     await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
   }
+
+  // Prove the sweep is actually live — bounded poll, not part of the timing margin below.
+  const controlBody = await pollTs(control, (b) => b.mdc > 0);
+  assert.ok(controlBody.mdlt.length > 0, "the correctly-configured control must accrue a missing point");
+
   await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 3000));
 
   for (const sid of [noPei, noMdd]) {
@@ -146,4 +157,37 @@ test("TS-0001:10.2.4.21 — detection runs only when pei is set and mdd is true"
     assert.equal(body.mdc, 0);
     assert.equal(body.mdlt, undefined);
   }
+});
+
+test("TS-0001:10.2.4.29 — a malformed dgt on one <ts> must not starve the sweep for the rest", async () => {
+  // The plan's original try/catch wrapped only detect_missing. Anchor establishment (the
+  // to_epoch_seconds calls inside sweep_missing_data's reduce) and row.save() sat outside it, so
+  // a throw from either escaped sweep_missing_data() entirely: every candidate after the bad one
+  // in that tick's query result was skipped, and — because the throw fires before md_anchor_dgt
+  // is persisted — it recurred on every subsequent tick, permanently starving whatever sorted
+  // after the bad resource in the query result.
+  //
+  // dgt has no format validation on the create path (tsi_create_schema only requires it be a
+  // string; TS-0001:9.6.37 does not constrain its form further), so a malformed value reaches
+  // the table through the ordinary HTTP CREATE — no direct database write needed here.
+  //
+  // The bad <ts> needs at least two children, not one: Array.prototype.reduce with no initial
+  // value on a single-element array returns that element without ever calling the reducer, so
+  // to_epoch_seconds is never invoked there and the throw would happen inside detect_missing
+  // instead — the one call the original try/catch already covered, proving nothing about this
+  // fix. With two children the reducer runs and throws while comparing them, before the try.
+  const bad = await makeSeries();
+  await create(base, bad, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(20), con: "1" } });
+  await create(base, bad, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "not-a-timestamp", con: "x" } });
+
+  const good = await makeSeries();
+  await create(base, good, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+
+  const goodBody = await pollTs(good, (b) => b.mdc > 0);
+  assert.ok(goodBody.mdlt.length > 0, "the resource after the malformed one must still accrue normally");
+
+  // The malformed resource itself never gets an anchor (the reduce that would set it throws
+  // before the assignment), so it is skipped every tick rather than silently succeeding.
+  const badBody = (await retrieve(base, bad)).body["m2m:ts"];
+  assert.equal(badBody.mdc, 0, "the malformed resource itself is skipped, not silently processed");
 });
