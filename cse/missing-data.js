@@ -43,29 +43,75 @@ function from_epoch_seconds(sec) {
  *                                   such local-policy allowance for this one — but without a
  *                                   value the detection time is undefined, so a deployment
  *                                   default is unavoidable regardless
- * @param {string[]} a.present_dgts  dataGenerationTime of every <timeSeriesInstance> under the parent
+ * @param {string[]} a.present_dgts  dataGenerationTime of every <timeSeriesInstance> the caller
+ *                                   could still usefully check against — the sweep restricts this
+ *                                   to instances new enough to matter (see sweep_missing_data);
+ *                                   it does not need to be every child that has ever existed
+ * @param {string?}  a.oldest_surviving_dgt  dataGenerationTime of the oldest <timeSeriesInstance>
+ *                                   currently under the parent, or null if none remain. Used to
+ *                                   tell a genuine gap apart from an instance that arrived and was
+ *                                   later evicted by retention (TS-0001:10.2.4.25) before this
+ *                                   point was ever examined — see the loop below
  * @param {string}   a.now
  * @param {number?}  a.from_n        highest N already accounted for, or null
+ * @param {number?}  a.max_points    upper bound on how many N this call examines; defaults to
+ *                                   config.default.timeSeries.max_points_per_sweep. The remainder
+ *                                   is left for the next call via the returned watermark
  * @returns {{ missing: string[], watermark: number }} missing newest-first
  */
-function detect_missing({ anchor, pei, peid, mdt, present_dgts, now, from_n }) {
+function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving_dgt, now, from_n, max_points }) {
     const delta = peid ?? config.default.timeSeries.peid_default;
-    const timer = mdt ?? config.default.timeSeries.mdt_default;
+
+    // TS-0001:9.6.36: "If periodicIntervalDelta is present, the value of this attribute [mdt]
+    // shall be greater than periodicIntervalDelta." cse/resources/ts.js enforces that only when
+    // mdt is given explicitly — a client that omits mdt never asserted a value for it, so there
+    // is nothing of theirs to validate. But the deployment default has to satisfy the same
+    // relationship anyway, or an omitted mdt could silently violate it: pei:300/peid:150 is a
+    // legal peid<=pei/2 configuration, yet the flat default of 60 is not greater than 150. Basing
+    // the default on the effective peid keeps "mdt > peid" true whether or not the client ever
+    // mentioned mdt, without rejecting a request that never supplied the attribute being
+    // complained about (the alternative — validating the effective timer at CREATE/UPDATE and
+    // refusing — would do exactly that for a conforming client).
+    const mdt_default = Math.max(config.default.timeSeries.mdt_default, delta + 1);
+    const timer = mdt ?? mdt_default;
+    const max_n = max_points ?? config.default.timeSeries.max_points_per_sweep;
 
     const anchor_s = to_epoch_seconds(anchor);
     const now_s = to_epoch_seconds(now);
     const present = present_dgts.map(to_epoch_seconds).sort((x, y) => x - y);
+    const oldest_s = (oldest_surviving_dgt == null) ? null : to_epoch_seconds(oldest_surviving_dgt);
 
     // The highest N whose detection time has passed:
     //   anchor + N*pei + timer <= now
-    const last_n = Math.floor((now_s - anchor_s - timer) / pei);
+    const last_n_wanted = Math.floor((now_s - anchor_s - timer) / pei);
     const first_n = (from_n === null || from_n === undefined) ? 1 : from_n + 1;
+
+    // A historical backfill (anchor far in the past, small periodicInterval) can put last_n_wanted
+    // in the hundreds of thousands or millions — unbounded, that range would be built into
+    // `missing` synchronously in one call. max_n caps how many N a single call examines; the
+    // watermark returned below reports only as far as this call actually got, so the next call
+    // (from_n = that watermark) picks up where this one left off rather than re-examining or
+    // skipping anything. Correctness is unaffected — every point is still examined eventually —
+    // only the per-call cost is bounded.
+    const last_n = Math.min(last_n_wanted, first_n + max_n - 1);
 
     const missing = [];
     for (let n = first_n; n <= last_n; n++) {
         const expected = anchor_s + n * pei;
         const hit = present.some((p) => Math.abs(p - expected) <= delta);
-        if (!hit) missing.push(from_epoch_seconds(expected));
+        if (hit) continue;
+
+        // Retention (TS-0001:10.2.4.25) evicts the oldest <timeSeriesInstance> first. If the
+        // oldest instance still present arrived strictly after this point's whole window
+        // (expected +/- delta) closed, then whatever might have satisfied this point — if it ever
+        // arrived — is already gone. There is then no way to distinguish a genuine gap from an
+        // instance that arrived and was evicted before any sweep examined it, so this point is
+        // skipped rather than recorded as a false positive. The watermark still advances past it
+        // (below), since "unknowable" is a final answer, not a reason to re-check later — the
+        // evidence only gets older, not newer.
+        if (oldest_s != null && expected + delta < oldest_s) continue;
+
+        missing.push(from_epoch_seconds(expected));
     }
 
     // Newest first — TS-0001:9.6.36 describes missingDataList as being "in descending order by
@@ -93,6 +139,12 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, now, from_n }) {
  * @param {number}   mdc          current count (unused except as a caller convenience; recomputed)
  * @param {string[]} new_entries  newly detected, newest first
  * @param {number?}  mdn          missingDataMaxNr, or null for unbounded
+ *
+ * new_entries is now bounded by detect_missing's max_points (finding 1), so merging first and
+ * slicing to mdn afterward is already bounded work regardless of mdn — not building past mdn in
+ * the first place would save no more than the difference between mdn and max_points, and it
+ * would cost this function a third parameter no other caller of the merge step needs. Left as a
+ * slice rather than restructured into an accumulate-with-early-stop.
  */
 function apply_missing(mdlt, mdc, new_entries, mdn) {
     const merged = [...new_entries, ...mdlt];
@@ -133,21 +185,26 @@ async function sweep_missing_data(opts = {}) {
     let updated = 0;
 
     for (const row of candidates) {
-        // The whole body is one try/catch, not just detect_missing: anchor establishment
-        // (to_epoch_seconds inside the reduce below) and row.save() can both throw too, and a
-        // throw that escapes this loop aborts sweep_missing_data() entirely — leaving every
-        // remaining candidate in this tick's array unprocessed, and recurring on every
-        // subsequent tick because it happens before the anchor is persisted. Catching per
-        // iteration is what makes "a single unparseable timestamp must not stop the sweep for
-        // every other resource" true rather than aspirational.
+        // The whole body is one try/catch, not just detect_missing: to_epoch_seconds calls below
+        // (the anchor, and every present/oldest dgt parsed inside detect_missing) and row.save()
+        // can all throw too, and a throw that escapes this loop aborts sweep_missing_data()
+        // entirely — leaving every remaining candidate in this tick's array unprocessed, and
+        // recurring on every subsequent tick because it happens before the anchor is persisted.
+        // Catching per iteration is what makes "a single unparseable timestamp must not stop the
+        // sweep for every other resource" true rather than aspirational.
         try {
-            const children = await TSI.findAll({
+            // A single indexed lookup (uq_tsi_pi_dgt in db/migrations/v4.16.0.sql) for the oldest
+            // surviving child, used two ways below: to bootstrap the anchor on the first sweep
+            // that sees this <ts>, and on every sweep to tell a genuine gap apart from an instance
+            // that arrived and was later evicted by retention (TS-0001:10.2.4.25) before any
+            // sweep got to look at it — see detect_missing's oldest_surviving_dgt. Replaces the
+            // former "fetch every child" query for this purpose; that query still ran, unbounded,
+            // every tick even though only the single oldest row was ever used for the anchor.
+            const oldest = await TSI.findOne({
                 where: { pi: row.ri },
                 attributes: ['dgt'],
+                order: [['dgt', 'ASC']],
             });
-            if (children.length === 0) continue;
-
-            const dgts = children.map((c) => c.dgt);
 
             // The anchor is "the dataGenerationTime of the first received <timeSeriesInstance>".
             // It is recorded on the first sweep that sees a child and then held, so that later
@@ -155,9 +212,28 @@ async function sweep_missing_data(opts = {}) {
             // expected-time series underneath the entries already recorded.
             let anchor = row.md_anchor_dgt;
             if (!anchor) {
-                anchor = dgts.reduce((a, b) => (to_epoch_seconds(b) < to_epoch_seconds(a) ? b : a));
+                if (!oldest) continue; // nothing has arrived since detection started
+                anchor = oldest.dgt;
                 row.md_anchor_dgt = anchor;
             }
+
+            const anchor_s = to_epoch_seconds(anchor);
+            const delta = row.peid ?? config.default.timeSeries.peid_default;
+            const watermark = row.md_watermark_n ?? 0;
+
+            // Only fetch children new enough to still matter. TS-0001:10.2.4.29's window is
+            // expected +/- periodicIntervalDelta, and the next unexamined point's expected time is
+            // anchor + (watermark+1)*pei, so nothing older than anchor + watermark*pei - delta can
+            // match it or any later N (one full periodicInterval of margin below the exact
+            // window-lower-bound, kept simple rather than tight). Before this, the query above
+            // fetched every child under the parent regardless of age — up to maxNrOfInstances rows
+            // — on every tick.
+            const boundary = from_epoch_seconds(anchor_s + watermark * row.pei - delta);
+            const children = await TSI.findAll({
+                where: { pi: row.ri, dgt: { [Op.gte]: boundary } },
+                attributes: ['dgt'],
+            });
+            const dgts = children.map((c) => c.dgt);
 
             const result = detect_missing({
                 anchor,
@@ -165,8 +241,10 @@ async function sweep_missing_data(opts = {}) {
                 peid: row.peid,
                 mdt: row.mdt,
                 present_dgts: dgts,
+                oldest_surviving_dgt: oldest ? oldest.dgt : null,
                 now,
                 from_n: row.md_watermark_n,
+                max_points: config.default.timeSeries.max_points_per_sweep,
             });
 
             const changed_anchor = row.changed('md_anchor_dgt');

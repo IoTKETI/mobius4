@@ -244,8 +244,88 @@ test("TS-0001:10.2.4.29 — a malformed dgt on one <ts> must not starve the swee
   const goodBody = await pollTs(good, (b) => b.mdc > 0);
   assert.ok(goodBody.mdlt.length > 0, "the resource after the malformed one must still accrue normally");
 
-  // The malformed resource itself never gets an anchor (the reduce that would set it throws
-  // before the assignment), so it is skipped every tick rather than silently succeeding.
+  // The malformed resource itself never gets an anchor (the row that would set it is never
+  // persisted, since the throw happens before row.save()), so it is skipped every tick rather
+  // than silently succeeding.
   const badBody = (await retrieve(base, bad)).body["m2m:ts"];
   assert.equal(badBody.mdc, 0, "the malformed resource itself is skipped, not silently processed");
+});
+
+test("TS-0001:9.6.36 — an omitted mdt with a peid larger than the flat deployment default is accepted, and does not fabricate a missing point (finding 2)", async () => {
+  // pei:140/peid:70 is a legal configuration (peid <= pei/2, at the boundary) but peid is larger
+  // than the deployment's flat default.timeSeries.mdt_default (60). Two real-time submissions,
+  // deliberately spaced apart, are what make this differ from just checking detect_missing's
+  // arithmetic directly: under the old flat default, N=1's detection time is only 6s after this
+  // test starts -- before the late arrival below is even sent -- so the sweep would already have
+  // recorded it missing and, since the watermark only looks forward, never revisit it once the
+  // arrival lands. The derived default (periodicIntervalDelta+1 = 71) does not fire until 17s in,
+  // by which point the arrival has been sitting there for 6s already.
+  //
+  // CREATE must accept the configuration regardless of which default applies: the client never
+  // supplied mdt, so there is nothing of theirs to validate against peid (see the reasoning on
+  // detect_missing in cse/missing-data.js).
+  const res = await create(base, root.sid, 29, {
+    "m2m:ts": { rn: uniqueRn("ts"), pei: 140, peid: 70, mdd: true },
+  });
+  assert.equal(res.status, 201, `omitted mdt with peid=70 must be accepted: ${res.raw?.slice(0, 200)}`);
+  const sid = res.body["m2m:ts"].ri;
+
+  const setup = Math.floor(Date.now() / 1000);
+  const t0 = setup - 194; // expected(N=1) = t0 + 140 = setup - 54
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
+
+  // Land at setup+11: after the old flat default's detection time for N=1 (setup+6) but well
+  // before the derived default's (setup+17).
+  await new Promise((r) => setTimeout(r, 11000));
+  await create(base, sid, 30, {
+    // expected(N=1) + 50 -- inside the +/-70 window.
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0 + 190), con: "2" },
+  });
+
+  // Past setup+17 (the derived detection time) with margin for sweep-tick granularity.
+  await new Promise((r) => setTimeout(r, 11000));
+  const body = (await retrieve(base, sid)).body["m2m:ts"];
+  assert.equal(body.mdc, 0, "the in-window late arrival must not be recorded missing");
+});
+
+test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are not reported missing, but a genuine gap in what survives still is (finding 3)", async () => {
+  // Simulates the deployment shape cse/singleton-role.js exists for: the sweeper falls behind
+  // (down, failing over) for longer than mni*pei while retention keeps evicting and new data
+  // keeps arriving. By the time the sweeper looks at the early, unexamined points, whatever might
+  // have satisfied them is already gone -- there is no way to tell a genuine gap from an evicted
+  // arrival apart from a genuine one. Fixture rows are written directly with the pg client
+  // (test/container-retention.test.js's pattern) rather than posting the ~90 instances a faithful
+  // eviction sequence would need.
+  const sid = await makeSeries(); // pei:2, peid:0, mdt:1, mdd:true
+
+  const t0 = Math.floor(Date.now() / 1000) - 200; // detection "started" 200s ago
+  const PEI = 2;
+
+  // Install detection state directly, as if this <ts> had been detecting since t0 but the
+  // sweeper never got past N=0 before retention moved on -- bypasses ts.js's
+  // clear_detection_state, which any path through the app would apply on an mdd transition.
+  await db.query(
+    `UPDATE ts SET md_anchor_dgt = $1, md_watermark_n = 0 WHERE ri = $2`,
+    [from_epoch_seconds(t0), sid]
+  );
+
+  // Only N=90..150 survive (dgt = t0 + N*PEI), as if retention had already evicted N=1..89 by
+  // the time the sweeper looks -- gapless except N=95, a genuine gap left in on purpose so this
+  // test cannot pass by the fix simply suppressing everything. The range runs 100s past "now" so
+  // ordinary test timing jitter cannot push the sweep into examining a point this fixture does
+  // not cover.
+  for (let n = 90; n <= 150; n++) {
+    if (n === 95) continue;
+    await insertRawTsi(sid, from_epoch_seconds(t0 + n * PEI));
+  }
+
+  // One tick is enough: with the anchor and watermark already installed, and the whole
+  // examinable range (roughly N=1..100, depending on real elapsed time) well under
+  // default.timeSeries.max_points_per_sweep, the first sweep that reaches this <ts> processes it
+  // in full.
+  await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 2500));
+
+  const body = (await retrieve(base, sid)).body["m2m:ts"];
+  assert.equal(body.mdc, 1, `expected exactly the one genuine gap (N=95), got ${JSON.stringify(body.mdlt)}`);
+  assert.deepEqual(body.mdlt, [from_epoch_seconds(t0 + 95 * PEI)]);
 });

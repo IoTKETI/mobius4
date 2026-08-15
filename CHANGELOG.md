@@ -59,7 +59,17 @@ What a client can do with this release:
   also clears the list, per the same clause's addition to `10.2.4.23`'s "Processing at
   Receiver" row — and `10.2.4.23`'s **Exceptions** row requires an error instead of a clear when
   detection is running, which this release now returns (`BAD_REQUEST`) rather than clearing and
-  continuing.
+  continuing. The sweep bounds how many expected points it examines per `<timeSeries>` per tick
+  (`default.timeSeries.max_points_per_sweep`, resuming from where it left off on the next tick)
+  rather than building the whole range at once — an old `<timeSeriesInstance>` backfilled at a
+  small `periodicInterval` could otherwise imply hundreds of thousands of points computed
+  synchronously in one pass. An omitted `missingDataDetectTimer` now derives its default from
+  `periodicIntervalDelta` when one is present, rather than a flat 60s, so a legal
+  `peid > 60` configuration cannot make the CSE detect a point as missing before the delta
+  window it declared could close. And the sweep tells a genuine gap apart from an instance that
+  arrived and was later evicted by retention (`10.2.4.25`) before any sweep looked at it —
+  restricting its query to instances new enough to matter and skipping (without recording) any
+  expected point whose whole window predates the oldest surviving instance.
 
 What it cannot do yet: **nothing subscribes to it.** `10.2.4.29` also defines a
 `<subscription>`-side reporting path — a `missingData` condition in
