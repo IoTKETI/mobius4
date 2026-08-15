@@ -257,3 +257,70 @@ test("no TP in TS-0018 — content larger than the parent's maxByteSize is refus
   assert.equal(afterFit.body["m2m:ts"].cni, 1);
   assert.equal(afterFit.body["m2m:ts"].cbs, 2);
 });
+
+test("TS-0001:9.6.36 — <latest> and <oldest> under a <timeSeries> (no TP in TS-0018)", async () => {
+  // Both are multiplicity 1 in the child-resource table, so they are not optional.
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T150000", con: "first" } });
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T150100", con: "last" } });
+
+  const la = await retrieve(base, `${parent}/la`);
+  assert.equal(la.status, 200);
+  assert.equal(la.body["m2m:tsi"].con, "last");
+
+  const ol = await retrieve(base, `${parent}/ol`);
+  assert.equal(ol.status, 200);
+  assert.equal(ol.body["m2m:tsi"].con, "first");
+});
+
+test("<latest> on an empty <timeSeries> is 4004 (no TP in TS-0018)", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const res = await retrieve(base, `${ts.body["m2m:ts"].ri}/la`);
+  assert.equal(res.status, 404);
+});
+
+test("<latest>/<oldest> order by dataGenerationTime, not arrival order (no TP in TS-0018)", async () => {
+  // <timeSeries>/<timeSeriesInstance> have no stateTag (TS-0001:9.6.36/9.6.37 give them none),
+  // unlike <container>/<contentInstance>. find_edge_tsi orders by dgt, so posting an older dgt
+  // last must still surface as <oldest>, not as <latest> because it arrived most recently.
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T160000", con: "middle" } });
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T170000", con: "greatest-dgt" } });
+  // Arrives last but carries the smallest dgt of the three.
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T150000", con: "smallest-dgt-arrived-last" } });
+
+  const la = await retrieve(base, `${parent}/la`);
+  assert.equal(la.status, 200);
+  assert.equal(la.body["m2m:tsi"].con, "greatest-dgt");
+
+  const ol = await retrieve(base, `${parent}/ol`);
+  assert.equal(ol.status, 200);
+  assert.equal(ol.body["m2m:tsi"].con, "smallest-dgt-arrived-last");
+});
+
+test("DELETE <latest> removes the newest <tsi> and shrinks the parent's cni/cbs (no TP in TS-0018)", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T180000", con: "ab" } });
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T180100", con: "cde" } });
+
+  const before = await retrieve(base, parent);
+  assert.equal(before.body["m2m:ts"].cni, 2);
+  assert.equal(before.body["m2m:ts"].cbs, 5);
+
+  const del = await remove(base, `${parent}/la`);
+  assert.equal(del.status, 200);
+
+  const after = await retrieve(base, parent);
+  assert.equal(after.body["m2m:ts"].cni, 1, "deleting <latest> must decrement the parent's cni");
+  assert.equal(after.body["m2m:ts"].cbs, 2, "deleting <latest> must shrink the parent's cbs by the removed instance's cs");
+
+  // The remaining instance is now both <latest> and <oldest>.
+  const la = await retrieve(base, `${parent}/la`);
+  assert.equal(la.body["m2m:tsi"].con, "ab");
+});

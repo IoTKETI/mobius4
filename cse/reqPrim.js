@@ -17,6 +17,7 @@ const pendingCreates = require('./pending-creates');
 
 const hostingCSE = require("./hostingCSE");
 const cnt = require("./resources/cnt");
+const ts = require("./resources/ts");
 const grp = require("./resources/grp");
 // const smd = require("./resources/smd");
 
@@ -188,6 +189,8 @@ async function prim_handling(req_prim) {
       case 2:
         if (req_prim.parent_ty == 3) {
           await cnt.retrieve_la(req_prim, resp_prim);
+        } else if (req_prim.parent_ty == 29) {
+          await ts.retrieve_la(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 101) {
           await mrp.retrieve_la(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 103) {
@@ -199,6 +202,8 @@ async function prim_handling(req_prim) {
       case 4:
         if (req_prim.parent_ty == 3) {
           await cnt.delete_la(req_prim, resp_prim);
+        } else if (req_prim.parent_ty == 29) {
+          await ts.delete_la(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 101) {
           await mrp.delete_la(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 103) {
@@ -215,6 +220,8 @@ async function prim_handling(req_prim) {
       case 2:
         if (req_prim.parent_ty == 3) {
           await cnt.retrieve_ol(req_prim, resp_prim);
+        } else if (req_prim.parent_ty == 29) {
+          await ts.retrieve_ol(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 101) {
           await mrp.retrieve_ol(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 103) {
@@ -226,11 +233,13 @@ async function prim_handling(req_prim) {
       case 4:
         if (req_prim.parent_ty == 3) {
           await cnt.delete_ol(req_prim, resp_prim);
+        } else if (req_prim.parent_ty == 29) {
+          await ts.delete_ol(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 101) {
           await mrp.delete_ol(req_prim, resp_prim);
         } else if (req_prim.parent_ty == 103) {
           await mdp.delete_ol(req_prim, resp_prim);
-        } 
+        }
         break;
       default:
         resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
@@ -497,10 +506,11 @@ async function set_virtual_res_info(req_prim) {
       }
 
       if (vir_res_name == "la" || vir_res_name == "ol") {
-        // <timeSeries> and <flexContainerInstance> also carry <latest>/<oldest>, but neither
-        // resource type exists in mobius4 yet, so there is nothing to add to this list.
+        // <flexContainerInstance> also carries <latest>/<oldest>, but that resource type does
+        // not exist in mobius4 yet, so it is not in this list.
         if (
           enums.ty_str[parent_res.ty] !== "cnt" &&
+          enums.ty_str[parent_res.ty] !== "ts" &&
           enums.ty_str[parent_res.ty] !== "mrp" &&
           enums.ty_str[parent_res.ty] !== "mdp" &&
           enums.ty_str[parent_res.ty] !== "dts"

@@ -8,9 +8,7 @@ const enums = require('../../config/enums');
 const { classify_create_error } = require('../create-error');
 const TS = require('../../models/ts-model');
 const Lookup = require('../../models/lookup-model');
-// NOTE: ./tsi is deliberately NOT required here. Task 3 adds it along with the <latest>/<oldest>
-// handlers that need it. Requiring a module that does not exist yet would stop the server from
-// booting, and every test in this task would fail with MODULE_NOT_FOUND rather than an assertion.
+const tsi = require('./tsi');
 
 const logger = require('../../logger').forFile(__filename);
 
@@ -288,10 +286,78 @@ async function update_a_ts(req_prim, resp_prim) {
     }
 }
 
+// The newest ('DESC') or oldest ('ASC') <timeSeriesInstance> under a <timeSeries>, via
+// tsi.find_edge_tsi. All four virtual-resource handlers below go through it so that <latest>,
+// <oldest> and their DELETE forms cannot disagree about which instance counts.
+//
+// Ordering is by dgt (dataGenerationTime), not stateTag: TS-0001:9.6.36 and 9.6.37 give
+// <timeSeries> and <timeSeriesInstance> no stateTag at all, unlike <container>/<contentInstance>,
+// so cnt.js's find_edge_cin (which orders by st) is not a fit here.
+async function retrieve_ol(req_prim, resp_prim) {
+    const oldest = await tsi.find_edge_tsi(req_prim.parent_ri, 'ASC');
+    if (!oldest) {
+        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+        resp_prim.pc = { 'm2m:dbg': 'there is no <tsi> resource' };
+        return;
+    }
+    const tmp_req = { ri: oldest.ri }, tmp_resp = {};
+    await tsi.retrieve_a_tsi(tmp_req, tmp_resp);
+    resp_prim.rsc = enums.rsc_str['OK'];
+    resp_prim.pc = tmp_resp.pc;
+}
+
+async function retrieve_la(req_prim, resp_prim) {
+    const latest = await tsi.find_edge_tsi(req_prim.parent_ri, 'DESC');
+    if (!latest) {
+        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+        resp_prim.pc = { 'm2m:dbg': 'there is no <tsi> resource' };
+        return;
+    }
+    const tmp_req = { ri: latest.ri }, tmp_resp = {};
+    await tsi.retrieve_a_tsi(tmp_req, tmp_resp);
+    resp_prim.rsc = enums.rsc_str['OK'];
+    resp_prim.pc = tmp_resp.pc;
+}
+
+async function delete_la(req_prim, resp_prim) {
+    const latest = await tsi.find_edge_tsi(req_prim.parent_ri, 'DESC');
+    if (!latest) {
+        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+        resp_prim.pc = { 'm2m:dbg': 'there is no <tsi> resource' };
+        return;
+    }
+    // delete_a_res handles the parent's cni/cbs update internally
+    const tmp_req = { ri: latest.ri, to_ty: enums.ty_num.tsi }, tmp_resp = {};
+    const { delete_a_res } = require('../hostingCSE');
+    await delete_a_res(tmp_req, tmp_resp);
+
+    resp_prim.rsc = enums.rsc_str['DELETED'];
+    resp_prim.pc = tmp_resp.pc || undefined;
+}
+
+async function delete_ol(req_prim, resp_prim) {
+    const oldest = await tsi.find_edge_tsi(req_prim.parent_ri, 'ASC');
+    if (!oldest) {
+        resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+        resp_prim.pc = { 'm2m:dbg': 'there is no <tsi> resource' };
+        return;
+    }
+    const tmp_req = { ri: oldest.ri, to_ty: enums.ty_num.tsi }, tmp_resp = {};
+    const { delete_a_res } = require('../hostingCSE');
+    await delete_a_res(tmp_req, tmp_resp);
+
+    resp_prim.rsc = enums.rsc_str['DELETED'];
+    resp_prim.pc = tmp_resp.pc || undefined;
+}
+
 module.exports = {
     create_a_ts,
     retrieve_a_ts,
     update_a_ts,
     clear_detection_state,
     DETECTION_PARAMS,
+    retrieve_ol,
+    retrieve_la,
+    delete_la,
+    delete_ol,
 };

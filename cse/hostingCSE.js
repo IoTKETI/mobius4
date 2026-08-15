@@ -882,6 +882,22 @@ async function delete_a_res(req_prim, resp_prim) {
 		await cnt_res.save();
 	}
 
+	// Same bookkeeping as the <cin>/<cnt> case above, for <timeSeriesInstance>/<timeSeries>
+	// (TS-0001:9.6.36 gives <timeSeries> the same currentNrOfInstances/currentByteSize pair).
+	// This is what makes DELETE <latest>/<oldest> (cse/resources/ts.js) leave the parent's
+	// counters accurate rather than stuck at the count including the just-deleted instance.
+	if (req_prim.to_ty === 30 && req_prim.int_cr_req !== true) {
+		const parent_ts_ri = tmp_resp.pc['m2m:tsi'].pi;
+		const cs = tmp_resp.pc['m2m:tsi'].cs;
+
+		const ts_res = await TS.findByPk(parent_ts_ri);
+		logger.trace({ ts_res }, 'ts_res');
+		ts_res.cni--;
+		ts_res.cbs = ts_res.cbs - cs;
+
+		await ts_res.save();
+	}
+
 	// BACKLOG-088: deleting an <mlModel> shrinks the parent <modelRepo>'s
 	// currentNumberOfModels/currentByteOfModels the same way deleting a <cin> shrinks its
 	// <container>'s cni/cbs above -- TR-0071:7.1.2.1 calls cnmo/cbmo "current", so a model that no
