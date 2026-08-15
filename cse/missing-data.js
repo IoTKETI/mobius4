@@ -8,6 +8,9 @@
 // Timestamps are the CSE's stored form, YYYYMMDDTHHMMSS, and all durations are whole seconds.
 
 const config = require('config');
+const { Op } = require('sequelize');
+
+const logger = require('../logger').forFile(__filename);
 
 // Parsing is local to this file so the arithmetic below has one representation to worry about.
 // cse/utils.js has no converter for arbitrary YYYYMMDDTHHMMSS strings to/from epoch seconds —
@@ -97,4 +100,86 @@ function apply_missing(mdlt, mdc, new_entries, mdn) {
     return { mdlt: capped, mdc: capped.length };
 }
 
-module.exports = { detect_missing, apply_missing, to_epoch_seconds, from_epoch_seconds };
+/**
+ * One pass over every <timeSeries> that is currently detecting.
+ *
+ * Time-driven rather than request-driven, because a gap is the absence of a request: nothing
+ * arrives to trigger the check. This is the same shape as expired_resource_cleanup in
+ * mobius4.js — a setInterval gated by cse/singleton-role.js so it runs in one process — and it
+ * is deliberately a sweep rather than a timer per resource: timers would have to be rebuilt on
+ * every restart, whereas the sweep reads its own resume point (md_watermark_n) out of the row.
+ *
+ * <timeSeries> DELETE needs no special handling for TS-0001:10.2.4.24's "shall terminate timers
+ * related to the missing data detection process": there are no per-resource timers to terminate,
+ * and a deleted row is simply not returned by the query below.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.now]  override for tests; defaults to the current time
+ */
+async function sweep_missing_data(opts = {}) {
+    const TS = require('../models/ts-model');
+    const TSI = require('../models/tsi-model');
+    const { get_cur_time } = require('./utils');
+
+    const now = opts.now || get_cur_time();
+
+    // TS-0001:10.2.4.21 — the procedure runs only when periodicInterval is set and
+    // missingDataDetect is TRUE.
+    const candidates = await TS.findAll({
+        where: { mdd: true, pei: { [Op.ne]: null } },
+        attributes: ['ri', 'pei', 'peid', 'mdt', 'mdn', 'mdlt', 'mdc', 'md_anchor_dgt', 'md_watermark_n'],
+    });
+
+    let updated = 0;
+
+    for (const row of candidates) {
+        const children = await TSI.findAll({
+            where: { pi: row.ri },
+            attributes: ['dgt'],
+        });
+        if (children.length === 0) continue;
+
+        const dgts = children.map((c) => c.dgt);
+
+        // The anchor is "the dataGenerationTime of the first received <timeSeriesInstance>".
+        // It is recorded on the first sweep that sees a child and then held, so that later
+        // arrivals — or evictions of the earliest instance — cannot move the origin of the
+        // expected-time series underneath the entries already recorded.
+        let anchor = row.md_anchor_dgt;
+        if (!anchor) {
+            anchor = dgts.reduce((a, b) => (to_epoch_seconds(b) < to_epoch_seconds(a) ? b : a));
+            row.md_anchor_dgt = anchor;
+        }
+
+        let result;
+        try {
+            result = detect_missing({
+                anchor,
+                pei: row.pei,
+                peid: row.peid,
+                mdt: row.mdt,
+                present_dgts: dgts,
+                now,
+                from_n: row.md_watermark_n,
+            });
+        } catch (err) {
+            // A single unparseable timestamp must not stop the sweep for every other resource.
+            logger.warn({ err, ri: row.ri }, 'missing-data sweep skipped one <ts>');
+            continue;
+        }
+
+        const changed_anchor = row.changed('md_anchor_dgt');
+        if (result.missing.length === 0 && result.watermark === row.md_watermark_n && !changed_anchor) continue;
+
+        const folded = apply_missing(row.mdlt || [], row.mdc || 0, result.missing, row.mdn);
+        row.mdlt = folded.mdlt;
+        row.mdc = folded.mdc;
+        row.md_watermark_n = result.watermark;
+        await row.save();
+        updated++;
+    }
+
+    return { scanned: candidates.length, updated };
+}
+
+module.exports = { detect_missing, apply_missing, sweep_missing_data, to_epoch_seconds, from_epoch_seconds };

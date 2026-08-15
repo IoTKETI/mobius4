@@ -1,0 +1,149 @@
+"use strict";
+// The missing-data sweep end to end: a <timeSeries> with detection on, gaps in its
+// <timeSeriesInstance> series, and the sweep that records them (TS-0001:10.2.4.29).
+//
+// The sweep is driven by the server's own interval, shortened to one second here, rather than by
+// calling sweep_missing_data() from this process: startServer spawns the CSE as a child with the
+// test database injected through NODE_CONFIG, so a call made here would run against a different
+// database entirely. Driving it through the server also covers the wiring in mobius4.js, which a
+// direct call would skip.
+//
+// The arithmetic itself is covered exhaustively and deterministically in test/missing-data.test.js;
+// what is asserted here is that the wiring delivers it.
+
+const { test, before, after } = require("node:test");
+const assert = require("node:assert/strict");
+const { create, retrieve, update, createRoot, uniqueRn } = require("./helpers/onem2m");
+const { startServer } = require("./helpers/server");
+const { from_epoch_seconds } = require("../cse/missing-data");
+
+const SWEEP_SECONDS = 1;
+let srv, base, root;
+
+before(async () => {
+  srv = await startServer({ cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS } });
+  base = srv.baseUrl;
+  root = await createRoot(base, "mds");
+});
+after(async () => { if (srv) await srv.stop(); });
+
+// Timestamps are relative to the real clock because the sweep uses the real clock. Anchoring ten
+// seconds back means several detection times have already passed by the first sweep.
+function ago(seconds) {
+  return from_epoch_seconds(Math.floor(Date.now() / 1000) - seconds);
+}
+
+async function pollTs(sid, predicate, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = (await retrieve(base, sid)).body["m2m:ts"];
+    if (predicate(last)) return last;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`timed out waiting for <ts> ${sid}; last seen ${JSON.stringify(last)}`);
+}
+
+// pei 2 / peid 0 / mdt 1 makes a gap detectable about three seconds after its expected time,
+// which the ten-second anchor offset guarantees has already elapsed.
+const DETECTING = { pei: 2, peid: 0, mdt: 1, mdd: true };
+
+async function makeSeries(extra = {}) {
+  const res = await create(base, root.sid, 29, {
+    "m2m:ts": { rn: uniqueRn("ts"), ...DETECTING, ...extra },
+  });
+  assert.equal(res.status, 201, `failed to create <ts>: ${res.raw?.slice(0, 200)}`);
+  return res.body["m2m:ts"].ri;
+}
+
+test("TP/oneM2M/CSE/TS/001 — a detected gap lands in missingDataList and raises missingDataCurrentNr", async () => {
+  // "Check that the IUT inserts the dataGenerationTime information of a missing data point and
+  // increases the missingDataCurrentNr attribute when a missing data point is detected"
+  const sid = await makeSeries();
+  const t0 = Math.floor(Date.now() / 1000) - 10;
+
+  // anchor at t0, then skip t0+2 and send t0+4
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0 + 4), con: "3" } });
+
+  const body = await pollTs(sid, (b) => b.mdc > 0);
+  assert.ok(
+    body.mdlt.includes(from_epoch_seconds(t0 + 2)),
+    `expected the skipped point ${from_epoch_seconds(t0 + 2)} in ${JSON.stringify(body.mdlt)}`
+  );
+  assert.equal(body.mdc, body.mdlt.length);
+});
+
+test("TP/oneM2M/CSE/TS/002 — missingDataList is capped at missingDataMaxNr, dropping the oldest", async () => {
+  // "Check that the IUT removes the oldest element in MissingDataList when MissingDataCurrentNr
+  // reaches MissingDataMaxNr to enable insertion of a new missing data point"
+  const sid = await makeSeries({ mdn: 2 });
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+
+  const atCap = await pollTs(sid, (b) => b.mdc === 2);
+  const firstEntry = atCap.mdlt[0];
+
+  // Gaps keep accruing every pei seconds, so the newest entry changes while the length holds.
+  const rotated = await pollTs(sid, (b) => b.mdlt[0] !== firstEntry);
+  assert.equal(rotated.mdc, 2, "missingDataCurrentNr must not grow past missingDataMaxNr");
+  assert.equal(rotated.mdlt.length, 2);
+});
+
+test("TS-0001:10.2.4.23 — pausing keeps the recorded state, restarting clears it", async () => {
+  const sid = await makeSeries();
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+  const recorded = await pollTs(sid, (b) => b.mdc > 0);
+
+  // "If missingDataDetect is modified to false the Hosting CSE will pause the missing data
+  // detection process" — and keeps missingDataList and missingDataCurrentNr.
+  const paused = await update(base, sid, { "m2m:ts": { mdd: false } });
+  assert.equal(paused.body["m2m:ts"].mdd, false);
+  assert.equal(paused.body["m2m:ts"].mdc, recorded.mdc);
+
+  // Two sweeps' worth of quiet: a paused resource must not accrue anything.
+  await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 2500));
+  assert.equal((await retrieve(base, sid)).body["m2m:ts"].mdc, recorded.mdc);
+
+  // "When the missingDataDetect is updated from false to true the Hosting CSE will clear the
+  // missingDataList and missingDataCurrentNr." Asserted on the update response rather than a
+  // later retrieve, because detection resumes immediately and will record again.
+  const restarted = await update(base, sid, { "m2m:ts": { mdd: true } });
+  assert.equal(restarted.body["m2m:ts"].mdc, 0);
+  assert.equal(restarted.body["m2m:ts"].mdlt, undefined, "0..1 (L): an empty list is not sent");
+});
+
+test("DEC-116 — editing a detection parameter clears the state even while detection is running", async () => {
+  // TS-0001:10.2.4.29 and 10.2.4.23 only specify the paused case (UP-004). We clear regardless:
+  // expected dataGenerationTime is the anchor plus N periods, so once periodicInterval changes
+  // the recorded entries no longer mean what they meant.
+  const sid = await makeSeries();
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+  await pollTs(sid, (b) => b.mdc > 0);
+
+  const edited = await update(base, sid, { "m2m:ts": { pei: 300 } });
+  assert.equal(edited.body["m2m:ts"].mdc, 0);
+  assert.equal(edited.body["m2m:ts"].mdd, true, "detection keeps running; only the state resets");
+  assert.equal(edited.body["m2m:ts"].pei, 300);
+});
+
+test("TS-0001:10.2.4.21 — detection runs only when pei is set and mdd is true", async () => {
+  // "If the periodicInterval attribute is set and the missingDataDetect attribute is TRUE, the
+  // Hosting CSE shall begin the procedure defined in clause 10.2.4.29."
+  const noPei = (await create(base, root.sid, 29, {
+    "m2m:ts": { rn: uniqueRn("ts"), mdd: true },
+  })).body["m2m:ts"].ri;
+  const noMdd = (await create(base, root.sid, 29, {
+    "m2m:ts": { rn: uniqueRn("ts"), pei: 2, peid: 0, mdt: 1 },
+  })).body["m2m:ts"].ri;
+
+  for (const sid of [noPei, noMdd]) {
+    await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+  }
+  await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 3000));
+
+  for (const sid of [noPei, noMdd]) {
+    const body = (await retrieve(base, sid)).body["m2m:ts"];
+    assert.equal(body.mdc, 0);
+    assert.equal(body.mdlt, undefined);
+  }
+});

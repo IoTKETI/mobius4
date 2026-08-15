@@ -46,6 +46,7 @@
     "timestamp_format": "YYYYMMDDTHHmmss",
     "allowed_ri_characters": "0123456789abcdefghijklmnopqrstuvwxyz",
     "expired_resource_cleanup_interval_days": 1,
+    "missing_data_sweep_interval_seconds": 30,
     "discovery_limit": 200,
     "allow_discovery_for_any": false,
     "keep_alive_timeout": 60
