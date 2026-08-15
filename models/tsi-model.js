@@ -20,9 +20,10 @@ const TSI = sequelize.define('tsi', {
   et: DataTypes.STRING(20),
   ct: DataTypes.STRING(20),
   lt: DataTypes.STRING(20),
-  acpi: DataTypes.ARRAY(DataTypes.STRING),
+  // TS-0001:9.6.37: "<timeSeriesInstance> ... does not have its own accessControlPolicyIDs
+  // attribute" — it inherits the parent <timeSeries>'s. No acpi column.
   lbl: DataTypes.ARRAY(DataTypes.STRING),
-  st: DataTypes.INTEGER,
+  // stateTag is not in TS-0001:9.6.37's attribute table for <timeSeriesInstance> either.
   cr: DataTypes.STRING,
   dgt: { type: DataTypes.STRING(20), allowNull: false },
   cs: DataTypes.INTEGER,

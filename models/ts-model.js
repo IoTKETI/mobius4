@@ -23,7 +23,7 @@ const TS = sequelize.define('ts', {
   lt: DataTypes.STRING(20),
   acpi: DataTypes.ARRAY(DataTypes.STRING),
   lbl: DataTypes.ARRAY(DataTypes.STRING),
-  st: { type: DataTypes.INTEGER, defaultValue: 0 },
+  // stateTag is not in TS-0001:9.6.36's attribute table for <timeSeries> — see res_schema.js.
   cr: DataTypes.STRING,
   cni: { type: DataTypes.INTEGER, defaultValue: 0 },
   cbs: { type: DataTypes.INTEGER, defaultValue: 0 },

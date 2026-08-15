@@ -1,7 +1,7 @@
 const config = require('config');
 const { ts_create_schema, ts_update_schema } = require('../validation/res_schema');
 
-const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute, not_obsolete_where } = require('../utils');
+const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 const sequelize = require('../../db/sequelize');
 
 const enums = require('../../config/enums');
@@ -91,9 +91,12 @@ async function create_a_ts(req_prim, resp_prim) {
                 cr: prim_res.cr === null ? req_prim.fr : null,
                 acpi: prim_res.acpi || null,
                 lbl: prim_res.lbl || null,
-                mni: prim_res.mni || config.default.timeSeries.mni,
-                mbs: prim_res.mbs || config.default.timeSeries.mbs,
-                mia: prim_res.mia || config.default.timeSeries.mia,
+                // ??, not ||: an explicitly requested 0 (Joi allows .min(0)) must survive, not
+                // be silently replaced by the deployment default. Same reasoning as pei/peid/
+                // mdn/mdt below.
+                mni: prim_res.mni ?? config.default.timeSeries.mni,
+                mbs: prim_res.mbs ?? config.default.timeSeries.mbs,
+                mia: prim_res.mia ?? config.default.timeSeries.mia,
                 pei: prim_res.pei ?? null,
                 peid: prim_res.peid ?? null,
                 // TS-0001:9.6.36 gives missingDataDetect multiplicity 1 with "The default value
@@ -159,7 +162,6 @@ async function retrieve_a_ts(req_prim, resp_prim) {
         ts_obj['m2m:ts'].ri = db_res.ri;
         ts_obj['m2m:ts'].rn = db_res.rn;
         ts_obj['m2m:ts'].pi = db_res.pi;
-        ts_obj['m2m:ts'].st = db_res.st;
         ts_obj['m2m:ts'].cni = db_res.cni;
         ts_obj['m2m:ts'].cbs = db_res.cbs;
         ts_obj['m2m:ts'].mdd = db_res.mdd;
@@ -212,7 +214,6 @@ async function update_a_ts(req_prim, resp_prim) {
         }
 
         db_res.lt = get_cur_time();
-        db_res.st++;
 
         if (prim_res.et) db_res.et = prim_res.et;
         if (prim_res.acpi) db_res.acpi = prim_res.acpi;
@@ -223,15 +224,17 @@ async function update_a_ts(req_prim, resp_prim) {
             db_res.loc = prim_res.loc;
         }
 
-        if (prim_res.mni) db_res.mni = prim_res.mni;
-        if (prim_res.mbs) db_res.mbs = prim_res.mbs;
-        if (prim_res.mia) db_res.mia = prim_res.mia;
+        // !== undefined, not truthy: an explicitly requested 0 must be applied, not skipped.
+        if (prim_res.mni !== undefined) db_res.mni = prim_res.mni;
+        if (prim_res.mbs !== undefined) db_res.mbs = prim_res.mbs;
+        if (prim_res.mia !== undefined) db_res.mia = prim_res.mia;
 
         const was_detecting = db_res.mdd;
         for (const k of DETECTION_PARAMS) {
             if (prim_res[k] !== undefined) db_res[k] = prim_res[k];
         }
-        if (prim_res.cnf !== undefined) db_res.cnf = prim_res.cnf;
+        // No cnf handling here: TS-0001:9.6.36 marks contentInfo WO, and ts_update_schema
+        // rejects it outright, so it never reaches this point.
         if (prim_res.or !== undefined) db_res.or = prim_res.or;
 
         // clear on null (universal/common)

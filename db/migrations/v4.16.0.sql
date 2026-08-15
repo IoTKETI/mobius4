@@ -4,6 +4,11 @@
 -- and 9.6.37. The md_anchor_dgt / md_watermark_n columns are internal bookkeeping for the
 -- missing-data sweep (TS-0001:10.2.4.29) and are not oneM2M attributes.
 --
+-- Neither attribute table has a stateTag entry, so "ts" and "tsi" have no "st" column. "tsi"
+-- also has no "acpi" column: TS-0001:9.6.37 says <timeSeriesInstance> "inherits the same
+-- access control policies of the parent <timeSeries> resource, and does not have its own
+-- accessControlPolicyIDs attribute."
+--
 -- Column widths follow config/default.json's "length" block (ri_max=30, structured_res_id=255,
 -- str_token=255, timestamp=20), the same values db/init.js uses via ${len.*} — not the shorter
 -- literals an earlier draft of this migration had, which would have left a fresh deployment and
@@ -22,7 +27,6 @@ CREATE TABLE IF NOT EXISTS ts (
   lt VARCHAR(20) NOT NULL,
   acpi VARCHAR(255)[],
   lbl VARCHAR(255)[],
-  st INTEGER DEFAULT 0,
   cni INTEGER DEFAULT 0,
   cbs INTEGER DEFAULT 0,
   mni INTEGER,
@@ -51,9 +55,7 @@ CREATE TABLE IF NOT EXISTS tsi (
   et VARCHAR(20),
   ct VARCHAR(20),
   lt VARCHAR(20),
-  acpi VARCHAR(255)[],
   lbl VARCHAR(255)[],
-  st INTEGER,
   cr VARCHAR(255),
   int_cr VARCHAR(255),
   loc GEOMETRY(GEOMETRY, 4326),

@@ -227,9 +227,9 @@ const cnt_update_schema = Joi.object().keys({
     mia: Joi.number().integer().min(0)
 });
 
-// <timeSeries> — TS-0001:9.6.36. cni/cbs/mdc/mdlt are RO and st is maintained by the CSE, so
-// they are forbidden in a request rather than merely optional: accepting them silently would
-// let a client set counters the CSE is supposed to compute.
+// <timeSeries> — TS-0001:9.6.36. cni/cbs/mdc/mdlt are RO, so they are forbidden in a request
+// rather than merely optional: accepting them silently would let a client set counters the CSE
+// is supposed to compute. st is forbidden for a different reason — see below.
 const ts_create_schema = Joi.object().keys({
     ...create_universal_attr,
 
@@ -237,7 +237,9 @@ const ts_create_schema = Joi.object().keys({
     acpi: create_common_attr.acpi,
     lbl: create_common_attr.lbl,
     cr: create_common_attr.cr,
-    st: create_common_attr.st,
+    // TS-0001:9.6.36's attribute table has no stateTag entry for <timeSeries> — that attribute
+    // belongs to <container>/<contentInstance> (9.6.6/9.6.7), not this resource type.
+    st: Joi.forbidden(),
     loc: create_common_attr.loc,
 
     // retention
@@ -279,7 +281,9 @@ const ts_update_schema = Joi.object().keys({
     mdn: Joi.number().integer().min(1).allow(null),
     mdt: Joi.number().integer().min(1).allow(null),
 
-    cnf: Joi.string().allow(null).optional(),
+    // TS-0001:9.6.36 marks contentInfo WO (write-once): settable at CREATE, never changed
+    // afterwards.
+    cnf: Joi.forbidden(),
     or: Joi.string().uri({ allowRelative: true }).allow(null).optional(),
 
     cni: Joi.forbidden(),
@@ -295,10 +299,15 @@ const tsi_create_schema = Joi.object().keys({
     ...create_universal_attr,
 
     et: create_common_attr.et,
-    acpi: create_common_attr.acpi,
+    // TS-0001:9.6.37: "<timeSeriesInstance> ... does not have its own accessControlPolicyIDs
+    // attribute" — it inherits the parent <timeSeries>'s. Without this, acpi would pass
+    // validation, be silently dropped (no acpi column on the tsi model/table), and the client
+    // would never know.
+    acpi: Joi.forbidden(),
     lbl: create_common_attr.lbl,
     cr: create_common_attr.cr,
-    st: create_common_attr.st,
+    // TS-0001:9.6.37's attribute table has no stateTag entry for <timeSeriesInstance> either.
+    st: Joi.forbidden(),
     loc: create_common_attr.loc,
 
     dgt: Joi.string().required(),

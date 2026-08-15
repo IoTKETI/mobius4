@@ -7,7 +7,7 @@
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { create, retrieve, update, remove, createRoot, uniqueRn } = require("./helpers/onem2m");
+const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
 const { startServer } = require("./helpers/server");
 
 let srv, base, root;
@@ -19,9 +19,13 @@ before(async () => {
 });
 after(async () => { if (srv) await srv.stop(); });
 
-test("TP/oneM2M/CSE/DMR/CRE/001_TS — create a <timeSeries> under a <container>'s parent and get it back", async () => {
+test("TP/oneM2M/CSE/DMR/CRE/001_TS/CB — create a <timeSeries> under the <CSEBase> and get it back", async () => {
+  // TS-0018's real identifiers are parent-qualified (001_TS/AE, 001_TS/AEA, 001_TS/CB,
+  // 001_TS/CSR) — there is no 001_TS/CNT, because <container> is not a legal parent in the TP
+  // set. So this test targets the <CSEBase> directly rather than the <container> `root` fixture
+  // the other tests in this file use, to match a real test purpose.
   const rn = uniqueRn("ts");
-  const res = await create(base, root.sid, 29, { "m2m:ts": { rn } });
+  const res = await create(base, CSE_BASE, 29, { "m2m:ts": { rn } });
 
   assert.equal(res.status, 201);
   const ts = res.body["m2m:ts"];
@@ -30,7 +34,7 @@ test("TP/oneM2M/CSE/DMR/CRE/001_TS — create a <timeSeries> under a <container>
   assert.ok(ts.ri);
 });
 
-test("a fresh <timeSeries> carries the attributes TS-0001:9.6.36 gives multiplicity 1", async () => {
+test("a fresh <timeSeries> carries the attributes TS-0001:9.6.36 gives multiplicity 1 — no TP in TS-0018", async () => {
   // cni, cbs, mdd and mdc are multiplicity 1 in the clause, so they are present even when the
   // resource uses neither retention limits nor missing-data detection. mdd defaults to false
   // ("The default value is false") and mdc to 0.
@@ -44,7 +48,7 @@ test("a fresh <timeSeries> carries the attributes TS-0001:9.6.36 gives multiplic
   assert.equal(ts.mdc, 0);
 });
 
-test("TP/oneM2M/CSE/DMR/UPD/001_TS — update a <timeSeries> attribute", async () => {
+test("TP/oneM2M/CSE/DMR/UPD/001_TS/LBL — update a <timeSeries> attribute", async () => {
   const rn = uniqueRn("ts");
   const created = await create(base, root.sid, 29, { "m2m:ts": { rn } });
   const sid = created.body["m2m:ts"].ri;
@@ -70,6 +74,6 @@ test("no TP in TS-0018 — a <timeSeries> cannot be created under a <contentInst
   const cin = await create(base, cnt.body["m2m:cnt"].ri, 4, { "m2m:cin": { rn: uniqueRn("i"), con: "x" } });
 
   const res = await create(base, cin.body["m2m:cin"].ri, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
-  assert.equal(res.body["m2m:dbg"] ? 4108 : 4108, 4108);
+  assert.equal(res.rsc, "4108"); // INVALID_CHILD_RESOURCE_TYPE
   assert.equal(res.status, 403);
 });

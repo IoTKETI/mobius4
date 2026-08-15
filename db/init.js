@@ -229,6 +229,7 @@ async function create_tables(client) {
         // "or" (ontologyRef) is quoted because OR is a reserved SQL keyword — same reason as flx.
         // md_anchor_dgt and md_watermark_n are not oneM2M attributes: they are what the
         // missing-data sweep needs to resume where it left off, and they never leave the CSE.
+        // No "st" column: TS-0001:9.6.36's attribute table has no stateTag for <timeSeries>.
         await client.query(`
             CREATE TABLE IF NOT EXISTS ts (
               ri VARCHAR(${len.ri_max}) PRIMARY KEY,
@@ -243,7 +244,6 @@ async function create_tables(client) {
               lt VARCHAR(${len.timestamp}) NOT NULL,
               acpi VARCHAR(${len.structured_res_id})[],
               lbl VARCHAR(${len.str_token})[],
-              st INTEGER DEFAULT 0,
               cni INTEGER DEFAULT 0,
               cbs INTEGER DEFAULT 0,
               mni INTEGER,
@@ -269,6 +269,9 @@ async function create_tables(client) {
         // unique among the child <timeSeriesInstance> resources belonging to the same parent
         // <timeSeries> resource." It is an index rather than an application check because two
         // concurrent creates would both pass a check-then-insert.
+        // No "acpi" column: TS-0001:9.6.37 says <timeSeriesInstance> "inherits the same access
+        // control policies of the parent <timeSeries> resource, and does not have its own
+        // accessControlPolicyIDs attribute." No "st" column either — same absence as <timeSeries>.
         await client.query(`
             CREATE TABLE IF NOT EXISTS tsi (
                 ri VARCHAR(${len.ri_max}) PRIMARY KEY,
@@ -279,9 +282,7 @@ async function create_tables(client) {
                 et VARCHAR(${len.timestamp}),
                 ct VARCHAR(${len.timestamp}),
                 lt VARCHAR(${len.timestamp}),
-                acpi VARCHAR(${len.structured_res_id})[],
                 lbl VARCHAR(${len.str_token})[],
-                st INTEGER,
                 cr VARCHAR(${len.str_token}),
                 int_cr VARCHAR(${len.str_token}),
                 loc GEOMETRY(GEOMETRY, 4326),
