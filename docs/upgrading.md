@@ -49,6 +49,33 @@ as a credential applies with more force.
 
 ---
 
+## v4.15.1
+
+### Required only if your client relies on child resources arriving oldest first
+
+Discovery and `rcn=4`/`rcn=8` now return child resources **newest first**. Nothing in oneM2M ever
+specified an order (`TS-0001:8.1.2` has no sort condition), and the old oldest-first sequence was a
+side effect of a query that had no `ORDER BY` — so a client that depended on it was depending on
+an accident, but it may well have been depending on it.
+
+**Nothing to do if you read `<latest>`, or if you sort the results yourself.**
+
+**If you took the first result as the oldest** — a common way to walk a `<container>` forward in
+time — take the last one instead, or page from the end with `ofst`.
+
+**If you compare timestamps yourself, know where the order stops being about age.**
+`<contentInstance>`s are exact, because `stateTag` separates instances that share a
+`creationTime`. Anything else created inside the same second falls in name order instead, since
+nothing recorded says which of the two is younger. The sequence is stable either way.
+
+**If you paginate with `ofst` and cache pages across requests**, drop the cache once on upgrade.
+The order changed, so a page fetched before the upgrade does not line up with one fetched after.
+
+No migration and no configuration change: the ordering is applied by the query, and existing rows
+already carry every column it sorts on.
+
+---
+
 ## v4.14.0
 
 ### Required only if your client computes `ofst` itself: the offset filter is 1-based

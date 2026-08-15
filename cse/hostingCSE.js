@@ -338,9 +338,50 @@ async function fetch_nodes_by_ri(req_prim, ids_list_per_ty) {
 	return node_by_ri;
 }
 
+// Types whose stateTag orders instances by age. Only <contentInstance> qualifies: cin.st is the
+// *parent container's* stateTag stamped at insertion (WRITE_CIN_SQL in cse/resources/cin.js takes
+// `upd.st` from the same statement that increments it), so it rises with every instance and
+// separates two created inside the same second, which creationTime cannot -- TS-0004:6.3.3 gives
+// timestamps a one-second resolution. It is also the key <latest>/<oldest> (find_edge_cin in
+// cse/resources/cnt.js) and the eviction algorithm already order by, so the three cannot disagree
+// about which instance is the newest.
+//
+// No other type may join this set. For <container> and <flexContainer>, st counts the resource's
+// *own* updates (update_a_cnt does db_res.st++), so a container created last year and updated
+// often outranks one created yesterday -- the opposite of what is wanted here. Those order by
+// creationTime alone.
+const AGE_ORDERED_BY_ST = new Set(['cin']);
+
+// The remaining tie is two resources of a type other than <contentInstance> created inside the
+// same second. Nothing stored says which is younger -- there is no insertion sequence on any
+// table, and creationTime is as fine-grained as this CSE records -- so the tiebreak cannot be
+// about age and should not pretend to be. It has to exist all the same: ofst indexes into this
+// order (TS-0001:8.1.2), so a tie broken differently between two requests would make a resumed
+// page skip a resource or return one twice.
+//
+// sid does the job, ascending. It is unique (lookup.sid carries the UNIQUE constraint), it is
+// already selected, and unlike ri -- which is random (generate_ri in cse/utils.js) -- it is
+// *predictable*: siblings fall in name order, which is what a caller reading the response sees
+// and what the CSE did for rcn=4/8 before ordering existed. Both are equally arbitrary with
+// respect to age; only one of them is guessable.
+function order_newest_first(ty_str) {
+	const by_age = AGE_ORDERED_BY_ST.has(ty_str) ? [['st', 'DESC']] : [];
+	return [...by_age, ['ct', 'DESC'], ['sid', 'ASC']];
+}
+
+// The JS form of the same rule, for lists already fetched. `use_st` mirrors AGE_ORDERED_BY_ST,
+// and `tb` is whatever stands in for sid at that call site -- within one sibling array the
+// resourceName orders identically, since sid is the parent's sid plus that name.
+function compare_newest_first(a, b, use_st) {
+	if (use_st && a.st !== b.st) return (b.st ?? 0) - (a.st ?? 0);
+	if (a.ct !== b.ct) return a.ct < b.ct ? 1 : -1;
+	if (a.tb === b.tb) return 0;
+	return a.tb < b.tb ? -1 : 1;
+}
+
 /**
  * Nests the fetched descendants under their own parents and returns the direct children of the
- * target, in a stable order.
+ * target, newest first.
  *
  * TS-0004:8.4.3 EXAMPLE 3 is the shape being built:
  *     "m2m:cnt":[{"rn":"container1", ...},
@@ -350,9 +391,16 @@ async function fetch_nodes_by_ri(req_prim, ids_list_per_ty) {
  * *global* element reference, so a child carries its own Child Resources block.
  *
  * A node whose pi is not among the fetched nodes is a direct child of the target (the target
- * itself is never in the discovery result). Ordering is by sid so that a resumed request sees
- * the same sequence — JSON member order itself is immaterial (TS-0004:8.4.2), but pagination
- * needs a deterministic sequence to offset into.
+ * itself is never in the discovery result). Ordering is newest first (order_newest_first above),
+ * and it has to be total: JSON member order itself is immaterial (TS-0004:8.4.2), but pagination
+ * offsets into this sequence and a tie broken differently between two requests would make a
+ * resumed page skip a subtree or repeat one.
+ *
+ * The nested arrays are ordered too, not just the direct children. They are filled in Map
+ * iteration order as the loop runs, which follows insertion into node_by_ri -- that is the order
+ * the per-type queries came back in, so a container's own <cin> would be grouped correctly but a
+ * mixed set of grandchildren would not be. Sorting them afterwards costs one pass over nodes that
+ * are already in hand.
  */
 function build_nested(node_by_ri) {
 	const attach = (parent_body, child) => {
@@ -361,13 +409,37 @@ function build_nested(node_by_ri) {
 	};
 
 	const direct_children = [];
+	const parents_with_children = new Set();
 	for (const node of node_by_ri.values()) {
 		const parent = node_by_ri.get(node.pi);
-		if (parent) attach(parent.body, node);
+		if (parent) {
+			attach(parent.body, node);
+			parents_with_children.add(parent.body);
+		}
 		else direct_children.push(node);
 	}
 
-	direct_children.sort((a, b) => (a.sid < b.sid ? -1 : a.sid > b.sid ? 1 : 0));
+	// Every entry of one array is the same resource type, and the key names it -- 'm2m:cin' or,
+	// for a <flexContainer>, the specialization's own qualified name. Only the m2m: form can be
+	// a <contentInstance>, so splitting on the prefix is enough to decide whether st applies.
+	for (const body of parents_with_children) {
+		for (const [key, siblings] of Object.entries(body)) {
+			if (!Array.isArray(siblings) || !key.startsWith('m2m:')) continue;
+			const use_st = AGE_ORDERED_BY_ST.has(key.slice('m2m:'.length));
+			const sortable = s => ({ st: s.st, ct: s.ct, tb: s.rn });
+			siblings.sort((a, b) => compare_newest_first(sortable(a), sortable(b), use_st));
+		}
+	}
+
+	// Unlike the arrays above, the direct children can be of mixed types, and st is only
+	// comparable between two <contentInstance>es -- so it is consulted only when both sides are
+	// one. Everything else falls through to creationTime, which every type carries and which
+	// means the same thing in all of them.
+	direct_children.sort((a, b) => {
+		const both_by_st = [a, b].every(n => AGE_ORDERED_BY_ST.has(n.key.replace(/^m2m:/, '')));
+		const sortable = n => ({ st: n.body.st, ct: n.body.ct, tb: n.sid });
+		return compare_newest_first(sortable(a), sortable(b), both_by_st);
+	});
 	return direct_children;
 }
 
@@ -956,19 +1028,42 @@ async function discovery_core(req_prim, opts = {}) {
 			if (ty === 4 && opts.exclude_obsolete_cin) {
 				ty_where = { [Op.and]: [ty_where, not_obsolete_where()] };
 			}
-			// 'pi' is only needed to key the access-decision memo below, but every one of these
-			// tables is being read anyway, so the extra column is free.
-			return model.findAll({ where: ty_where, attributes: ['sid', 'ri', 'ty', 'pi'], limit: fetch_lim })
+			// 'pi' is only needed to key the access-decision memo below and 'ct' only to merge the
+			// per-type lists afterwards, but every one of these tables is being read anyway, so
+			// the extra columns are free.
+			//
+			// The order is not decoration. Without it this is LIMIT without ORDER BY, which does
+			// not merely return the rows in an arbitrary sequence -- it does not fix *which* rows
+			// come back at all, so a client walking the pages with ofst could skip a resource or
+			// see one twice. The rows it happened to return were the oldest, because an unordered
+			// sequential scan follows physical order; that is not something a caller could rely on
+			// and not what a caller reading a <container> wants.
+			const ty_str = enums.ty_str[ty.toString()];
+			return model.findAll({
+					where: ty_where,
+					attributes: ['sid', 'ri', 'ty', 'pi', 'ct'],
+					order: order_newest_first(ty_str),
+					limit: fetch_lim,
+				})
 				.then(rows => ({ ty, rows }));
 		});
 
 	const results = await Promise.all(query_tasks);
 
 	for (const { ty, rows } of results) {
-		const mapped = rows.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty, pi: row.pi }));
+		const mapped = rows.map(row => ({ sid: row.sid, ri: row.ri, ty: row.ty, pi: row.pi, ct: row.ct }));
 		ids_list = ids_list.concat(mapped);
 		ids_list_per_ty[enums.ty_str[ty.toString()]] = mapped;
 	}
+
+	// The per-type lists are each newest-first already; this merges them without disturbing that.
+	// Sorting on creationTime *alone* is what makes it work: Array.prototype.sort is stable
+	// (ES2019 onwards), so entries the comparator calls equal keep the sequence they were
+	// concatenated in, which for any one type is the order its query returned. That is how the
+	// <contentInstance> ordering by stateTag survives a merge in which st cannot be compared
+	// across types. The concatenation itself is deterministic: Promise.all preserves input order
+	// and the loop above follows it.
+	ids_list.sort((a, b) => (a.ct === b.ct ? 0 : a.ct < b.ct ? 1 : -1));
 
 	if (config.cse.allow_discovery_for_any === false) {
 		// console.log("discovery result without access control: ", ids_list);

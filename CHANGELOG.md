@@ -21,6 +21,40 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.15.1 (2026-08-15)
+
+### Discovery and `rcn=4`/`rcn=8` return child resources newest first — and in a fixed order
+
+Reading a `<container>` used to hand back its **oldest** `<contentInstance>`s, so `lim=20` on a
+sensor with a year of history returned twenty readings from a year ago. Nothing in the spec asked
+for that: `TS-0001:8.1.2` gives *filterCriteria* a `limit`, an `offset` and
+`createdBefore`/`createdAfter` but no sort condition, and neither TS-0001 nor TS-0004 states the
+order of a result at all. It was an accident of the query — the per-type `SELECT` had a `LIMIT`
+and no `ORDER BY`, and an unordered sequential scan follows physical row order.
+
+`ORDER BY` was missing, not merely unsorted, and that is the part worth calling a bug: **a `LIMIT`
+without an `ORDER BY` does not fix which rows come back**, only how many. Two requests with
+different `ofst` could therefore skip a resource or return one twice, even with nothing writing in
+between. Discovery is a snapshot, but it was not even a consistent one.
+
+`<contentInstance>` is ordered by `stateTag` first, then `creationTime` — the key
+`<latest>`/`<oldest>` and the eviction algorithm already use, so the three can no longer disagree
+about which instance is the newest. `stateTag` is what makes the ordering exact: `creationTime`
+has a one-second resolution (`TS-0004:6.3.3`), and a sensor writing at 10 Hz produces ten
+instances that share one.
+
+Every other type orders by `creationTime` alone. `stateTag` deliberately does not apply to them:
+for `<container>` and `<flexContainer>` it counts the resource's *own* updates, so ordering by it
+would put a busy container created last year ahead of one created this morning.
+
+**Two siblings that are not `<contentInstance>`s and were created inside the same second are not
+ordered by age, because nothing recorded says which is younger** — `creationTime` is the finest
+age this CSE keeps and no table carries an insertion sequence. They fall in `sid` order, which is
+name order: arbitrary with respect to age, but predictable, and the same sequence every time. The
+sequence has to be total whatever it is, since `ofst` indexes into it.
+
+**What to do about it:** [docs/upgrading.md](docs/upgrading.md#v4151).
+
 ## v4.15.0 (2026-08-15)
 
 Two unrelated bodies of work land together here, because the administrator change below was
