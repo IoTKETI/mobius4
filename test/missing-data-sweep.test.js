@@ -64,6 +64,23 @@ function ago(seconds) {
   return from_epoch_seconds(Math.floor(Date.now() / 1000) - seconds);
 }
 
+// A maintenance connection to the "postgres" database, for CREATE DATABASE / DROP DATABASE --
+// same pattern as test/db-failure.test.js. Needed by the finding-6 test below: it overrides
+// default.timeSeries.mdn_default, and cse/singleton-role.js elects every plain (non-PM2) process
+// as the singleton sweeper, so a second server sharing the main TEST_DB here would have its own
+// sweep -- running with the *unoverridden* default -- race the main `srv`'s sweep over the same
+// rows. An isolated database keeps the two sweeps from ever seeing the same <ts>.
+async function withAdmin(fn) {
+  const { user, pw, host, port } = config.get("db");
+  const client = new Client({ user, password: pw, host, port, database: "postgres" });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}
+
 async function pollTs(sid, predicate, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   let last;
@@ -160,6 +177,29 @@ test("TS-0001:10.2.4.23 Exceptions — editing a detection parameter while detec
   assert.equal(after.mdd, true, "a refused update must not change mdd");
   assert.equal(after.pei, 2, "a refused update must not change pei");
   assert.equal(after.mdc, before.mdc, "a refused update must not clear the recorded state");
+});
+
+test("TS-0001:10.2.4.23 Exceptions — a no-op resend of an unchanged detection parameter is accepted (finding 4)", async () => {
+  // The Exceptions row refuses attributes "modified" while missingDataDetect is true, not
+  // attributes merely present in the request. Read-modify-write is an ordinary client pattern --
+  // RETRIEVE, change something unrelated like lbl, PUT the whole resource back -- which echoes
+  // pei/peid/mdt unchanged. That echo must not be refused as a modification.
+  const sid = await makeSeries(); // pei:2, peid:0, mdt:1, mdd:true
+  const before = (await retrieve(base, sid)).body["m2m:ts"];
+
+  const resent = await update(base, sid, {
+    "m2m:ts": { lbl: ["updated"], pei: before.pei, peid: before.peid, mdt: before.mdt },
+  });
+  assert.equal(resent.status, 200, `an unchanged resend must not be refused: ${resent.raw?.slice(0, 200)}`);
+  assert.deepEqual(resent.body["m2m:ts"].lbl, ["updated"], "the unrelated attribute must still apply");
+  assert.equal(resent.body["m2m:ts"].pei, before.pei);
+  assert.equal(resent.body["m2m:ts"].mdd, true, "an accepted no-op resend must not be treated as pausing/restarting detection");
+
+  // A genuine change in the same request is still refused -- this fix narrows the check to
+  // per-attribute equality, it does not disable the Exceptions row.
+  const genuinelyChanged = await update(base, sid, { "m2m:ts": { pei: before.pei + 100 } });
+  assert.equal(genuinelyChanged.status, 400);
+  assert.equal(genuinelyChanged.rsc, "4000");
 });
 
 test("TS-0001:10.2.4.23 — editing a detection parameter while paused still clears the recorded state", async () => {
@@ -301,14 +341,14 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
   const t0 = Math.floor(Date.now() / 1000) - 200; // detection "started" 200s ago
   const PEI = 2;
 
-  // Install detection state directly, as if this <ts> had been detecting since t0 but the
-  // sweeper never got past N=0 before retention moved on -- bypasses ts.js's
-  // clear_detection_state, which any path through the app would apply on an mdd transition.
-  await db.query(
-    `UPDATE ts SET md_anchor_dgt = $1, md_watermark_n = 0 WHERE ri = $2`,
-    [from_epoch_seconds(t0), sid]
-  );
-
+  // Fixture rows first, anchor last (finding 3): a sweep tick landing between the two writes
+  // would otherwise see an anchor already installed but zero children under it, conclude nothing
+  // needs skipping, and record ~99 genuine-looking gaps -- advancing the watermark past them
+  // before the fixture rows ever existed from the sweep's point of view. No later tick can undo
+  // an advanced watermark, so that race made the final assertion below fail intermittently. With
+  // the rows in place first, the earliest a sweep can observe this <ts> at all is after both
+  // writes have landed.
+  //
   // Only N=90..150 survive (dgt = t0 + N*PEI), as if retention had already evicted N=1..89 by
   // the time the sweeper looks -- gapless except N=95, a genuine gap left in on purpose so this
   // test cannot pass by the fix simply suppressing everything. The range runs 100s past "now" so
@@ -319,6 +359,14 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
     await insertRawTsi(sid, from_epoch_seconds(t0 + n * PEI));
   }
 
+  // Install detection state directly, as if this <ts> had been detecting since t0 but the
+  // sweeper never got past N=0 before retention moved on -- bypasses ts.js's
+  // clear_detection_state, which any path through the app would apply on an mdd transition.
+  await db.query(
+    `UPDATE ts SET md_anchor_dgt = $1, md_watermark_n = 0 WHERE ri = $2`,
+    [from_epoch_seconds(t0), sid]
+  );
+
   // One tick is enough: with the anchor and watermark already installed, and the whole
   // examinable range (roughly N=1..100, depending on real elapsed time) well under
   // default.timeSeries.max_points_per_sweep, the first sweep that reaches this <ts> processes it
@@ -328,4 +376,66 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
   const body = (await retrieve(base, sid)).body["m2m:ts"];
   assert.equal(body.mdc, 1, `expected exactly the one genuine gap (N=95), got ${JSON.stringify(body.mdlt)}`);
   assert.deepEqual(body.mdlt, [from_epoch_seconds(t0 + 95 * PEI)]);
+});
+
+test("TS-0001:9.6.36 — missingDataList does not grow without bound when missingDataMaxNr is absent (finding 6)", async () => {
+  // apply_missing itself stays faithful to the spec -- an explicit null still means unbounded at
+  // the function level (see test/missing-data.test.js "without mdn the list is unbounded"). The
+  // cap belongs one layer up, at the sweep, as a deployment safeguard against the VARCHAR(20)[]
+  // mdlt column's eventual field-size limit. A dedicated server, on a database of its own (see
+  // withAdmin above), overrides default.timeSeries.mdn_default down to a small number, so the
+  // bound is observable without waiting out the real default of 10000.
+  const MDN_CAP_DB = "mobius4_test_mdn_cap";
+  await withAdmin(async (c) => {
+    await c.query(`DROP DATABASE IF EXISTS ${MDN_CAP_DB}`);
+    await c.query(`CREATE DATABASE ${MDN_CAP_DB}`);
+  });
+  const capSrv = await startServer({
+    dbName: MDN_CAP_DB,
+    cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS },
+    defaults: { timeSeries: { mdn_default: 5 } },
+  });
+  try {
+    const capBase = capSrv.baseUrl;
+    const capRoot = await createRoot(capBase, "mdncap");
+
+    // No mdn in the request -- TS-0001:9.6.36 makes missingDataList unbounded for this resource;
+    // only the deployment-level default caps what the sweep actually accrues.
+    const created = await create(capBase, capRoot.sid, 29, {
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 1, peid: 0, mdt: 1, mdd: true },
+    });
+    assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
+    const sid = created.body["m2m:ts"].ri;
+
+    // One instance, anchored 300s back, establishes the anchor. With nothing else ever arriving,
+    // a single sweep tick's backlog (bounded by max_points_per_sweep, still 10000 here) is
+    // roughly 300 -- comfortably past the overridden mdn_default of 5.
+    const t0 = Math.floor(Date.now() / 1000) - 300;
+    await create(capBase, sid, 30, {
+      "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" },
+    });
+
+    const deadline = Date.now() + 10000;
+    let body;
+    do {
+      body = (await retrieve(capBase, sid)).body["m2m:ts"];
+      if (body.mdc > 0) break;
+      await new Promise((r) => setTimeout(r, 200));
+    } while (Date.now() < deadline);
+
+    assert.equal(body.mdc, 5, `expected the deployment default to cap accrual at 5, got mdc=${body.mdc} mdlt=${JSON.stringify(body.mdlt)}`);
+    assert.equal(body.mdlt.length, 5);
+    assert.equal(body.mdn, undefined, "the fallback must not be written back as the resource's own missingDataMaxNr");
+
+    // pei:1/mdt:1 keeps producing a newly-due expected point roughly every second, so a second
+    // tick has more to fold in -- the cap must hold across repeated ticks, not just stop the
+    // first time it is reached.
+    await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 2000));
+    const later = (await retrieve(capBase, sid)).body["m2m:ts"];
+    assert.equal(later.mdc, 5, "the cap must hold across repeated sweep ticks, not just the first");
+    assert.equal(later.mdlt.length, 5);
+  } finally {
+    await capSrv.stop();
+    await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${MDN_CAP_DB}`));
+  }
 });

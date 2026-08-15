@@ -67,3 +67,22 @@ CREATE TABLE IF NOT EXISTS tsi (
 
 CREATE INDEX IF NOT EXISTS idx_tsi_pi ON tsi (pi);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tsi_pi_dgt ON tsi (pi, dgt);
+
+-- config/default.json's cse.supported_resource_types now lists 29 and 30, and db/init.js writes
+-- that array into a fresh <CSEBase>'s "srt" column (INTEGER[]) at create_cb time. create_cb only
+-- runs when no <cb> row exists yet, so an upgraded deployment's <CSEBase> keeps whatever srt it
+-- already had -- it gains working <timeSeries>/<timeSeriesInstance> support from the tables
+-- above while its own supportedResourceType attribute keeps advertising that neither exists.
+--
+-- Additive, not a replacement: an operator may have customized srt (removed a type this
+-- deployment does not actually expose, added one of its own outside the range db/init.js seeds),
+-- and this must not discard that. Idempotent: re-running after 29/30 are already present (from
+-- this migration, or because the row was seeded fresh by db/init.js after this version shipped)
+-- changes nothing -- the WHERE clause's NOT(... @> ...) is false once both are already there, and
+-- the DISTINCT in the SELECT means even a concurrent partial application (only one of the two
+-- already present) cannot introduce a duplicate.
+UPDATE cb
+   SET srt = (SELECT array_agg(DISTINCT e ORDER BY e)
+                FROM unnest(COALESCE(srt, ARRAY[]::INTEGER[]) || ARRAY[29, 30]::INTEGER[]) AS e)
+ WHERE ty = 5
+   AND NOT (COALESCE(srt, ARRAY[]::INTEGER[]) @> ARRAY[29, 30]::INTEGER[]);

@@ -30,6 +30,21 @@ function from_epoch_seconds(sec) {
            `${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
 }
 
+// Index of the first element >= target in a numeric array sorted ascending (the standard
+// lower-bound binary search). Used below to test window membership in O(log n) instead of
+// scanning every present instance for every expected point — with a retention-sized present set
+// and a per-sweep cap of thousands of expected points, that scan is a large number of comparisons
+// for one resource in one tick, on the singleton sweeper (finding 5).
+function lower_bound(sorted, target) {
+    let lo = 0, hi = sorted.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (sorted[mid] < target) lo = mid + 1;
+        else hi = mid;
+    }
+    return lo;
+}
+
 /**
  * Which expected data points are missing as of `now`.
  *
@@ -98,7 +113,12 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving
     const missing = [];
     for (let n = first_n; n <= last_n; n++) {
         const expected = anchor_s + n * pei;
-        const hit = present.some((p) => Math.abs(p - expected) <= delta);
+        // present is sorted ascending, so the window [expected-delta, expected+delta] is a
+        // contiguous slice: find where it would start and check whether that element still
+        // falls at or before the upper edge. Both edges are inclusive, matching the "+/-
+        // periodicIntervalDelta" boundary tests in test/missing-data.test.js.
+        const idx = lower_bound(present, expected - delta);
+        const hit = idx < present.length && present[idx] <= expected + delta;
         if (hit) continue;
 
         // Retention (TS-0001:10.2.4.25) evicts the oldest <timeSeriesInstance> first. If the
@@ -250,7 +270,21 @@ async function sweep_missing_data(opts = {}) {
             const changed_anchor = row.changed('md_anchor_dgt');
             if (result.missing.length === 0 && result.watermark === row.md_watermark_n && !changed_anchor) continue;
 
-            const folded = apply_missing(row.mdlt || [], row.mdc || 0, result.missing, row.mdn);
+            // TS-0001:9.6.36 leaves missingDataList uncapped when missingDataMaxNr is absent, and
+            // apply_missing (above) stays faithful to that -- an explicit null always means
+            // unbounded at the function level. But an uncapped list is a deployment liability, not
+            // a spec question: mdlt is a VARCHAR(20)[] column, and a <timeSeries> with mdd:true, a
+            // small periodicInterval and one backfilled old instance accrues entries every sweep
+            // tick forever. Around 31 million entries the column exceeds PostgreSQL's 1 GB field
+            // limit, row.save() below throws, and the catch around this loop iteration then
+            // silently stalls detection for that resource on every later tick too (finding 6).
+            // config.default.timeSeries.mdn_default applies here, at the sweep, rather than
+            // changing what the client's own missingDataMaxNr means: a client-supplied value is
+            // always honored as-is however large, and row.mdn itself is never written, so
+            // retrieving the resource still reports no missingDataMaxNr, exactly as the client
+            // left it -- only the accumulation this sweep performs is capped.
+            const mdn = row.mdn ?? config.default.timeSeries.mdn_default;
+            const folded = apply_missing(row.mdlt || [], row.mdc || 0, result.missing, mdn);
             row.mdlt = folded.mdlt;
             row.mdc = folded.mdc;
             row.md_watermark_n = result.watermark;

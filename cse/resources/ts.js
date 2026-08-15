@@ -233,7 +233,13 @@ async function update_a_ts(req_prim, resp_prim) {
         if (prim_res.mia !== undefined) db_res.mia = prim_res.mia;
 
         const was_detecting = db_res.mdd;
-        const params_touched = DETECTION_PARAMS.some((k) => prim_res[k] !== undefined);
+        // Compared against the stored value, not just presence: TS-0001:10.2.4.23's Exceptions
+        // row says "modified", and a read-modify-write client (RETRIEVE, change an unrelated
+        // attribute like lbl, PUT the whole resource back) ordinarily echoes every attribute it
+        // read, pei/peid/mdt/mdn included, with the same values -- that is not a modification of
+        // them. db_res[k] still holds the stored value here; the loop below that copies
+        // prim_res[k] onto it runs after this check (finding 4).
+        const params_touched = DETECTION_PARAMS.some((k) => prim_res[k] !== undefined && prim_res[k] !== db_res[k]);
 
         // TS-0001:10.2.4.23 Exceptions row (see the comment on DETECTION_PARAMS above). This
         // checks was_detecting -- the state the resource was already in when the request

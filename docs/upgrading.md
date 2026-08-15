@@ -53,13 +53,19 @@ as a credential applies with more force.
 
 ### Required: DB migration
 
-`<timeSeries>` (ty=29) and `<timeSeriesInstance>` (ty=30) add two tables. Apply:
+`<timeSeries>` (ty=29) and `<timeSeriesInstance>` (ty=30) add two tables, and the same migration
+also adds 29/30 to your existing `<CSEBase>`'s `supportedResourceType` — `db/init.js` only writes
+that from `config/default.json` when it creates the `<CSEBase>` row for the first time, so an
+upgraded deployment would otherwise gain working `<timeSeries>` support while `supportedResourceType`
+kept reporting that it does not exist. The update is additive (any `srt` values you added yourself
+are kept) and safe to run more than once. Apply:
 
 ```bash
 psql -U <db_user> -d mobius4 -f db/migrations/v4.16.0.sql
 ```
 
-The change is backward compatible — existing resources and tables are untouched.
+The change is backward compatible — existing resources and tables are untouched, aside from the
+`srt` addition above.
 
 Back up first:
 
