@@ -40,10 +40,10 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | area | status | entries implemented | test purposes demonstrated |
 |---|---|---|---|
 | 3GPP interworking (3GPP) | ❌ none | 0 / 1 | — |
-| Announcement (ANNC) | ❌ none | 0 / 19 | — |
+| Announcement (ANNC) | ❌ none | 0 / 23 | — |
 | Device automation (DAU) | ❌ none | 0 / 1 | — |
 | Discovery (DIS) | ⚠️ partial | 0 / 1 | — |
-| Data management and repository (DMR) | ⚠️ partial | 25 / 35 | 4 |
+| Data management and repository (DMR) | ⚠️ partial | 24 / 39 | 4 |
 | flexContainer (FLXC) | ⚠️ partial | 0 / 2 | — |
 | General capability (GEN) | ⚠️ partial | 4 / 8 | — |
 | Group management (GMG) | ⚠️ partial | 3 / 4 | 21 |
@@ -61,10 +61,10 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Software management (SM) | ❌ none | 0 / 1 | — |
 | Semantic mashup (SSM) | ❌ none | 0 / 1 | — |
 | Service subscription (SSUP) | ❌ none | 0 / 1 | — |
-| Subscription and notification (SUB) | ⚠️ partial | 2 / 6 | — |
+| Subscription and notification (SUB) | ⚠️ partial | 2 / 7 | — |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
 | Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
-| **total** | | **39 / 103** | **73** |
+| **total** | | **38 / 112** | **73** |
 
 ## Non-normative entries (candidate solutions and project proposals)
 
@@ -83,6 +83,7 @@ own test purposes (`TP/<source>/...`), not TS-0018's.
 |---|---|---|---|
 | AI/ML (AI/ML) | project | ✅ full | 1 / 1 |
 | AI/ML (AI/ML) | TR-0071 | ⚠️ partial | 3 / 7 |
+| Data management and repository (DMR) | manual | ✅ full | 1 / 1 |
 | flexContainer (FLXC) | manual | ✅ full | 2 / 2 |
 
 Source: `features/inventory.yaml (mobius4-dev-tool)`.
