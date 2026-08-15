@@ -7,7 +7,7 @@
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
-const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
+const { create, retrieve, update, remove, discover, urils, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
 const { startServer } = require("./helpers/server");
 
 let srv, base, root;
@@ -211,4 +211,49 @@ test("TS-0001:9.6.36 — currentNrOfInstances and currentByteSize track the chil
   const after = await retrieve(base, parent);
   assert.equal(after.body["m2m:ts"].cni, 2);
   assert.equal(after.body["m2m:ts"].cbs, 6);
+});
+
+test("no TP in TS-0018 — content larger than the parent's maxByteSize is refused, and neither the parent's counters nor the child move (TS-0001:9.6.36, TS-0004:6.6.3.6)", async () => {
+  // write_a_tsi's WRITE_TSI_SQL was ported from WRITE_CIN_SQL in cse/resources/cin.js and its
+  // $n placeholders were renumbered in the process (<tsi> has no stateTag or
+  // accessControlPolicyIDs, so the argument list is shorter than <cin>'s). The refusal guard --
+  // `WHERE ri = $1 AND (mbs IS NULL OR $2 <= mbs)` -- is exactly where a placeholder landing on
+  // the wrong argument would show up as silently wrong behaviour rather than a thrown error, so
+  // this locks in that $1 and $2 still line up with pi and cs.
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts"), mbs: 5 } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  const before = await retrieve(base, parent);
+  assert.equal(before.body["m2m:ts"].cni, 0);
+  assert.equal(before.body["m2m:ts"].cbs, 0);
+
+  const oversizedRn = uniqueRn("i");
+  const oversized = await create(base, parent, 30, {
+    "m2m:tsi": { rn: oversizedRn, dgt: "20260815T150000", con: "y".repeat(50) },
+  });
+  // Empirically determined, not assumed: create_a_tsi's `!written.stored` branch (cse/resources/
+  // tsi.js) sets rsc to NOT_ACCEPTABLE (5207, config/enums.js), and bindings/http.js's POST
+  // handler maps 5207 to HTTP 406.
+  assert.equal(oversized.status, 406, `expected NOT_ACCEPTABLE: ${oversized.raw.slice(0, 200)}`);
+  assert.equal(oversized.rsc, "5207");
+
+  // The refusal must not leave the parent half-updated -- this is the whole reason
+  // WRITE_TSI_SQL is a single statement rather than an UPDATE followed by an INSERT.
+  const afterRefusal = await retrieve(base, parent);
+  assert.equal(afterRefusal.body["m2m:ts"].cni, 0, "a refused create must not move cni");
+  assert.equal(afterRefusal.body["m2m:ts"].cbs, 0, "a refused create must not move cbs");
+
+  // And the child itself must not exist.
+  const disc = await discover(base, parent, { ty: "30" });
+  assert.deepEqual(urils(disc), [], "a refused <tsi> must not be stored");
+
+  // A <tsi> that fits is still accepted, and the counters move for it.
+  const fitting = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T150100", con: "ok" },
+  });
+  assert.equal(fitting.status, 201, `expected CREATED: ${fitting.raw.slice(0, 200)}`);
+
+  const afterFit = await retrieve(base, parent);
+  assert.equal(afterFit.body["m2m:ts"].cni, 1);
+  assert.equal(afterFit.body["m2m:ts"].cbs, 2);
 });

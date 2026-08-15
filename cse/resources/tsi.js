@@ -1,4 +1,3 @@
-const config = require('config');
 const { tsi_create_schema } = require('../validation/res_schema');
 const enums = require('../../config/enums');
 const { classify_create_error } = require('../create-error');
