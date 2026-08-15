@@ -135,11 +135,15 @@ Tear it down with `docker compose -f docker/compose.two-cse.yml down -v`.
 
 ## The administrator identity
 
-`cse.admin` names the identity the admin `<accessControlPolicy>` grants all six
-operations to. It is a credential: anything sending it as `X-M2M-Origin` gets whatever
-that policy allows, on every resource carrying it, over plain HTTP as much as over
-TLS. Mobius4 refuses to start without one, and refuses `SM` — the value it shipped up
-to v4.5.1, which is in this repository's history.
+`cse.admin` names the identity that bypasses access control. It is a credential:
+anything sending it as `X-M2M-Origin` has full control of the CSE — every operation on
+every resource, regardless of policy or creator, over plain HTTP as much as over TLS.
+Mobius4 refuses to start without one, and refuses `SM` — the value it shipped up to
+v4.5.1, which is in this repository's history.
+
+The admin `<accessControlPolicy>` is still created at startup and still governs anyone
+else it names; it simply no longer bounds what this identity can do. See
+[configuration.md](configuration.md#cse) for why.
 
 There are two ways to have one.
 

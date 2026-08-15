@@ -1548,14 +1548,29 @@ async function access_decision(req_prim, resp_prim) {
 	// follow and put int_cr into a response.
 	req_prim.int_cr_req = false;
 
-	// The administrator used to be granted every operation here, before any policy was read.
-	// oneM2M has no such concept — privileges are expressed as <accessControlPolicy> resources —
-	// so the grant now comes from the admin policy (config.cb.admin_acp, created by db/init.js)
-	// like any other originator's, and this function no longer special-cases an identity.
+	// Cheat-key for system admin.
 	//
-	// One consequence is worth knowing when reading the branches below: the administrator now
-	// reaches a resource only through an <accessControlPolicy> that names it, or through the
-	// creator fallback in Case D when the resource carries no acpi at all.
+	// oneM2M has no such concept — privileges are expressed as <accessControlPolicy> resources —
+	// and v4.6.0 removed this check for that reason, leaving the administrator to reach a
+	// resource only through a policy naming it or through the creator fallback in Case D. That
+	// turned out to be the wrong trade for this deployment: a resource created by an AE with no
+	// acpi (the common shape — see Case D below) became unreachable by the administrator, and
+	// there was no way back, because the acpi_update path in reqPrim.js reads privileges off the
+	// acpi the resource does not have. An operator locked out of a resource had no request that
+	// could fix it.
+	//
+	// So the short-circuit is back, deliberately and non-conformantly. The admin policy
+	// (config.cb.admin_acp, created by db/init.js) is still created and still evaluated for
+	// everyone else; it is simply no longer the only way the administrator gets in.
+	//
+	// The config.cse.admin guard is not decoration. fr is undefined on a request that carries no
+	// X-M2M-Origin, so an unset admin identity would match every anonymous request and hand out
+	// the cheat-key. config/validate.js refuses to start without cse.admin, which makes this
+	// unreachable in a running CSE — it is here because the cost of being wrong is total.
+	if (config.cse.admin && req_prim.fr === config.cse.admin) {
+		logger.debug({ fr: req_prim.fr }, 'access granted as admin');
+		return true;
+	}
 
 	// Case A.
 	// special handling for <ACP> resource as a target 

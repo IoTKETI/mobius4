@@ -21,7 +21,10 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## v4.15.0 (2026-08-14)
+## v4.15.0 (2026-08-15)
+
+Two unrelated bodies of work land together here, because the administrator change below was
+already on `master` unreleased when the AI/ML work was cut.
 
 oneM2M's TR-0071 (Technical Report on AI/ML enablement) describes seven candidate resource
 types — `<modelRepo>`, `<mlModel>`, `<modelDeploymentList>`, `<modelDeployment>`,
@@ -30,6 +33,52 @@ seven since its first commit, unreleased-note and untested. This release is the 
 they were put in front of a capability probe, a conformance test suite derived from TR-0071
 itself, and a client that actually trains and serves a model through them end to end. All
 three surfaced real defects; most of what follows is fixing what they found.
+
+### ⚠️ The administrator bypasses access control again
+
+_This section landed on `master` as #41 before the AI/ML work merged; it is released here._
+
+v4.6.0 removed the short-circuit in `cse/hostingCSE.js` that granted `cse.admin` every
+operation before any `<accessControlPolicy>` was read, and replaced it with an admin policy
+(`cb.admin_acp`) granting `acop` 63. The reasoning still holds — oneM2M has no superuser
+identity, privileges are `<accessControlPolicy>` resources and nothing else — but the
+replacement does not cover the case that matters most in operation.
+
+A resource created with no `accessControlPolicyIDs` is governed by the creator comparison
+(Case D in `access_decision`). The admin policy is never consulted for it, because the
+resource names no policy at all. So an AE that creates a `<flexContainer>` or `<container>`
+without an `acpi` owns it outright, and the administrator gets 4103 on RETRIEVE, UPDATE and
+DELETE alike.
+
+What makes that worse than a bad default is that **there is no request that repairs it**. The
+obvious fix — attach the admin policy to the resource — goes through the `acpi` branch of
+`access_decision`, which decides by reading `selfPrivileges` off the policies the resource
+already names. A resource with an empty `acpi` names none, the loop body never runs, and the
+UPDATE is refused for every originator including the creator. `db/migrations/v4.6.0.sql`
+deliberately leaves such resources alone, so an upgraded deployment keeps producing them.
+Recovery meant writing to the `acpi` column in PostgreSQL by hand.
+
+The short-circuit is therefore restored, at its original position and with one addition: it is
+guarded on `cse.admin` being set. `fr` is `undefined` on a request carrying no `X-M2M-Origin`,
+and an unset admin identity would otherwise match every anonymous request — `config/validate.js`
+already refuses to start without `cse.admin`, so this is unreachable in a running CSE, but the
+cost of being wrong is total.
+
+**This is non-conformant, deliberately.** Everything v4.6.0 said about the value remains true
+and matters more now, not less: whoever sends `cse.admin` as `X-M2M-Origin` has full control of
+the CSE over plain HTTP, on every resource, regardless of policy. It is a credential. The
+startup refusals from v4.6.0 (no default, `SM` rejected, `Superuser` warned) are unchanged, and
+so is the admin `<accessControlPolicy>` — it is still created and still evaluated for anyone
+else named in it; it is simply no longer the only way the administrator gets in.
+
+Nothing is required to upgrade. No DB migration, no configuration change. Deployments that
+worked around the v4.6.0 behaviour by naming `cb_admin_acp` in every resource's `acpi` can stop
+doing so, but nothing breaks if they do not.
+
+Pinned by `test/access-control.test.js` — "the administrator gets through a policy that grants
+it nothing", "the administrator gets through the creator fallback of a resource it did not
+create", and "the creator fallback still governs everyone else", the last of which is what
+would notice if the restoration had widened access for anybody but the administrator.
 
 ### ⚠️ Breaking, but only where the two new descriptor attributes below are actually used: `<modelDeployment>` CREATE can now reject an incompatible deployment
 
@@ -158,6 +207,12 @@ though they are not a oneM2M-standard capability. Everything else in this entry 
 `5207` compatibility check and the defect fixes — would be PATCH on its own (bug fixes adding
 no new capability), but they ship in the same commit as the migration and the schema addition,
 so the release as a whole is MINOR.
+
+The administrator change is the one that looks like it should force MAJOR and does not. The
+table reserves MAJOR for a "compatibility break requiring manual intervention", and this
+requires none: no migration, no configuration change, and a deployment that worked around the
+v4.6.0 behaviour keeps working untouched. It widens what one already-privileged identity can
+do; it takes nothing away. That is why it sits here rather than in a 5.0.0.
 
 ## v4.14.0 (2026-08-11)
 
