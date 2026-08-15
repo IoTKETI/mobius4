@@ -43,7 +43,7 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Announcement (ANNC) | ❌ none | 0 / 19 | — |
 | Device automation (DAU) | ❌ none | 0 / 1 | — |
 | Discovery (DIS) | ⚠️ partial | 0 / 1 | — |
-| Data management and repository (DMR) | ⚠️ partial | 25 / 33 | — |
+| Data management and repository (DMR) | ⚠️ partial | 25 / 35 | 4 |
 | flexContainer (FLXC) | ⚠️ partial | 0 / 2 | — |
 | General capability (GEN) | ⚠️ partial | 4 / 8 | — |
 | Group management (GMG) | ⚠️ partial | 3 / 4 | 21 |
@@ -63,8 +63,8 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Service subscription (SSUP) | ❌ none | 0 / 1 | — |
 | Subscription and notification (SUB) | ⚠️ partial | 2 / 6 | — |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
-| Time series (TS) | ❌ none | 0 / 1 | — |
-| **total** | | **39 / 101** | **67** |
+| Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
+| **total** | | **39 / 103** | **73** |
 
 ## Non-normative entries (candidate solutions and project proposals)
 

@@ -49,6 +49,33 @@ as a credential applies with more force.
 
 ---
 
+## v4.16.0
+
+### Required: DB migration
+
+`<timeSeries>` (ty=29) and `<timeSeriesInstance>` (ty=30) add two tables. Apply:
+
+```bash
+psql -U <db_user> -d mobius4 -f db/migrations/v4.16.0.sql
+```
+
+The change is backward compatible — existing resources and tables are untouched.
+
+Back up first:
+
+```bash
+pg_dump -U <db_user> -d mobius4 -F c -f mobius4_backup_$(date +%Y%m%d).dump
+```
+
+### Known limitation, not an upgrade step
+
+Missing-data detection records into `missingDataList`/`missingDataCurrentNr` but does not
+notify — `notificationEventType=8` and the `missingData` condition on `<subscription>` are not
+built. There is nothing to configure around this; it is a capability gap, not a migration
+concern.
+
+---
+
 ## v4.15.1
 
 ### Required only if your client relies on child resources arriving oldest first

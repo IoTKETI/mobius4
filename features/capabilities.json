@@ -1,9 +1,9 @@
 {
   "formatVersion": 1,
-  "probed_at": "2026-08-14",
+  "probed_at": "2026-08-15",
   "probed_against": {
-    "commit": "f0c452d",
-    "version": "4.15.0"
+    "commit": "6b5c01e",
+    "version": "4.15.1"
   },
   "entries": [
     {
@@ -194,6 +194,48 @@
         "update": {
           "supported": true,
           "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 29,
+      "short_name": "ts",
+      "long_name": "timeSeries",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
+        },
+        "update": {
+          "supported": true,
+          "rsc": 2004
+        },
+        "delete": {
+          "supported": true,
+          "rsc": 2002
+        }
+      }
+    },
+    {
+      "ty": 30,
+      "short_name": "tsi",
+      "long_name": "timeSeriesInstance",
+      "operations": {
+        "create": {
+          "supported": true,
+          "rsc": 2001
+        },
+        "retrieve": {
+          "supported": true,
+          "rsc": 2000
         },
         "delete": {
           "supported": true,
