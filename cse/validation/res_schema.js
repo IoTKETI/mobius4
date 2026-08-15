@@ -227,6 +227,86 @@ const cnt_update_schema = Joi.object().keys({
     mia: Joi.number().integer().min(0)
 });
 
+// <timeSeries> — TS-0001:9.6.36. cni/cbs/mdc/mdlt are RO and st is maintained by the CSE, so
+// they are forbidden in a request rather than merely optional: accepting them silently would
+// let a client set counters the CSE is supposed to compute.
+const ts_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    acpi: create_common_attr.acpi,
+    lbl: create_common_attr.lbl,
+    cr: create_common_attr.cr,
+    st: create_common_attr.st,
+    loc: create_common_attr.loc,
+
+    // retention
+    mni: Joi.number().integer().min(0),
+    mbs: Joi.number().integer().min(0),
+    mia: Joi.number().integer().min(0),
+
+    // missing-data detection
+    pei: Joi.number().integer().min(1),
+    peid: Joi.number().integer().min(0),
+    mdd: Joi.boolean(),
+    mdn: Joi.number().integer().min(1),
+    mdt: Joi.number().integer().min(1),
+
+    cnf: Joi.string().optional(),
+    or: Joi.string().uri({ allowRelative: true }).optional(),
+
+    cni: Joi.forbidden(),
+    cbs: Joi.forbidden(),
+    mdc: Joi.forbidden(),
+    mdlt: Joi.forbidden(),
+});
+
+const ts_update_schema = Joi.object().keys({
+    ...update_universal_attr,
+
+    et: update_common_attr.et,
+    acpi: update_common_attr.acpi,
+    lbl: update_common_attr.lbl,
+    loc: update_common_attr.loc,
+
+    mni: Joi.number().integer().min(0).allow(null),
+    mbs: Joi.number().integer().min(0).allow(null),
+    mia: Joi.number().integer().min(0).allow(null),
+
+    pei: Joi.number().integer().min(1).allow(null),
+    peid: Joi.number().integer().min(0).allow(null),
+    mdd: Joi.boolean(),
+    mdn: Joi.number().integer().min(1).allow(null),
+    mdt: Joi.number().integer().min(1).allow(null),
+
+    cnf: Joi.string().allow(null).optional(),
+    or: Joi.string().uri({ allowRelative: true }).allow(null).optional(),
+
+    cni: Joi.forbidden(),
+    cbs: Joi.forbidden(),
+    mdc: Joi.forbidden(),
+    mdlt: Joi.forbidden(),
+});
+
+// <timeSeriesInstance> — TS-0001:9.6.37. dgt and con are multiplicity 1; cs is RO (the CSE
+// computes it from con). There is no update schema: TS-0001:10.2.4.27 says "The Update
+// operation shall not apply to <timeSeriesInstance> resource."
+const tsi_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    acpi: create_common_attr.acpi,
+    lbl: create_common_attr.lbl,
+    cr: create_common_attr.cr,
+    st: create_common_attr.st,
+    loc: create_common_attr.loc,
+
+    dgt: Joi.string().required(),
+    con: Joi.any().required(),
+    snr: Joi.number().integer().min(0),
+    cs: Joi.forbidden(),
+});
+
 // <flexContainer> carries an open set of [customAttribute] members whose names are defined
 // by the document referenced by cnd (TS-0001:9.6.35), so unknown keys must pass Joi and be
 // checked against the specialization registry instead (cse/specialization.js).
@@ -408,6 +488,8 @@ module.exports = {
     csr_create_schema, csr_update_schema,
     cnt_create_schema, cnt_update_schema,
     cin_create_schema,
+    ts_create_schema, ts_update_schema,
+    tsi_create_schema,
     flx_create_schema, flx_update_schema,
     grp_create_schema, grp_update_schema,
     sub_create_schema, sub_update_schema,

@@ -20,7 +20,7 @@ const logger = require('../../logger').forFile(__filename);
 // subscription..."). <datasetFragment> (7.2.2.3) has no child-resource table at all -- no
 // <subscription> child is defined for it, consistent with it being immutable -- so "dsf" is
 // deliberately left out, not an oversight.
-const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "mrp", "mmd", "mdp", "dpm", "dsp", "dts"];
+const sub_parent_res_types = ["ae", "acp", "cb", "cnt", "csr", "grp", "flx", "ts", "mrp", "mmd", "mdp", "dpm", "dsp", "dts"];
 
 
 // TS-0004:7.4.8.2.1 (Recv-6.5, step 2): "If the notificationURI is not the Originator, the Hosting

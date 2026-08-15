@@ -157,6 +157,13 @@
       "mni": 10000,
       "mia": 31536000
     },
+    "timeSeries": {
+      "mbs": 10000000,
+      "mni": 10000,
+      "mia": 31536000,
+      "peid_default": 0,
+      "mdt_default": 60
+    },
     "datasetPolicy": {
       "tcd": 60,
       "nvp": 0,

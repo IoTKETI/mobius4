@@ -35,6 +35,8 @@ const ty_str = {
   23: "sub",
   24: "smd",
   28: "flx",
+  29: "ts",   // <timeSeries>
+  30: "tsi",  // <timeSeriesInstance>
   34: "dac",
   // below are non-standard resource types that are not in the oneM2M standard yet
   101: "mrp", // <modelRepo>
