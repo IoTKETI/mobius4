@@ -310,7 +310,14 @@ const tsi_create_schema = Joi.object().keys({
     st: Joi.forbidden(),
     loc: create_common_attr.loc,
 
-    dgt: Joi.string().required(),
+    // Same house pattern as et above (create_common_attr.et). TS-0004 types dataGenerationTime
+    // as m2m:absRelTimestamp, a union that also permits fractional seconds and a relative
+    // integer offset — this regex is narrower than that (BACKLOG-108 in mobius4-dev-tool tracks
+    // the gap). Chosen deliberately over no validation at all: an unparseable dgt used to reach
+    // the missing-data sweep's parser and throw, and it sorts arbitrarily in `ORDER BY dgt`
+    // (find_edge_tsi's <latest>/<oldest>, EVICT_TSI_SQL's eviction order), so a malformed value
+    // could pick the wrong eviction victim.
+    dgt: Joi.string().required().regex(/^[0-9]{8}T[0-9]{6}$/),
     con: Joi.any().required(),
     snr: Joi.number().integer().min(0),
     cs: Joi.forbidden(),

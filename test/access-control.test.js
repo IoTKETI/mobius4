@@ -373,3 +373,82 @@ test("discovery lists a <contentInstance> that its parent's policy makes discove
   assert.ok(urils(res).includes(cinSid),
     `the CIN should appear in the discovery result: ${JSON.stringify(urils(res))}`);
 });
+
+// ---------------------------------------------------------------------------
+// A <timeSeriesInstance> is governed by its parent's policy — the same shape as
+// <contentInstance> above, one level down. TS-0001:9.6.37: "The <timeSeriesInstance> resource
+// inherits the same access control policies of the parent <timeSeries> resource, and does not
+// have its own accessControlPolicyIDs attribute."
+//
+// cse/resources/tsi.js already has no acpi column and tsi_create_schema already has
+// acpi: Joi.forbidden() — what was missing was "tsi" in NORM_RES_WITHOUT_ACPI
+// (cse/hostingCSE.js), which is what routes access_decision through Case B (resolve the parent,
+// decide there) instead of falling through to Case D's creator-fallback with an undefined acpi.
+// Without it: an originator the parent's policy grants got 4103 on the child and the child was
+// missing from discovery (under-grant), while whoever created the <tsi> kept access through the
+// creator fallback even after the operator revoked it on the parent (over-grant). These four
+// tests are the <contentInstance> cases above, unchanged in shape, retargeted at <tsi>.
+
+// A <timeSeries> under the test root carrying acpi, plus one <timeSeriesInstance> inside it,
+// both put there by the administrator — mirrors containerWithOneCin above.
+async function seriesWithOneTsi(acpi) {
+  const rn = uniqueRn("ts");
+  const ts = await create(srv.baseUrl, parent, 29, { "m2m:ts": { rn, acpi: [acpi] } });
+  assert.equal(ts.rsc, "2001", `<ts> setup failed: ${ts.raw.slice(0, 200)}`);
+  const tsSid = `${parent}/${rn}`;
+
+  const tsi = await create(srv.baseUrl, tsSid, 30, {
+    "m2m:tsi": { dgt: "20260816T000000", con: "42" },
+  });
+  assert.equal(tsi.rsc, "2001", `<tsi> setup failed: ${tsi.raw.slice(0, 200)}`);
+  return { tsSid, tsiSid: `${tsSid}/${tsi.body["m2m:tsi"].rn}` };
+}
+
+test("a <timeSeriesInstance> is reachable through the policy on its parent <timeSeries>", async () => {
+  const acp = await policyGranting(OTHER_AE, 63);
+  const { tsiSid } = await seriesWithOneTsi(acp);
+
+  const res = await retrieve(srv.baseUrl, tsiSid, { originator: OTHER_AE });
+  assert.equal(res.rsc, "2000",
+    "the parent's policy grants retrieve, and the child inherits it (TS-0001:9.6.37)");
+  assert.equal(res.body["m2m:tsi"].con, "42");
+});
+
+test("the parent's policy decides for a <timeSeriesInstance> child: an originator it does not name is refused", async () => {
+  // The mirror of the test above. Carrying the operation into the parent's decision must not
+  // turn into granting the operation.
+  const acp = await policyGranting(OTHER_AE, 63);
+  const { tsiSid } = await seriesWithOneTsi(acp);
+
+  const res = await retrieve(srv.baseUrl, tsiSid, { originator: THIRD_AE });
+  assert.equal(res.rsc, "4103", "THIRD_AE is named by neither the policy nor the creator");
+});
+
+test("the operation is carried into the parent's decision for a <timeSeriesInstance>, not assumed", async () => {
+  // acop 35 = create(1) + retrieve(2) + discovery(32), no delete bit. If the recursive call
+  // dropped op, both of these would be 4103; if it substituted a permissive one, both would
+  // succeed. Only carrying the real operation gives 2000 then 4103.
+  const acp = await policyGranting(OTHER_AE, 35);
+  const { tsiSid } = await seriesWithOneTsi(acp);
+
+  const read = await retrieve(srv.baseUrl, tsiSid, { originator: OTHER_AE });
+  assert.equal(read.rsc, "2000", "the retrieve bit is set");
+
+  const del = await remove(srv.baseUrl, tsiSid, { originator: OTHER_AE });
+  assert.equal(del.rsc, "4103", "the delete bit is not set, and the child must feel that too");
+});
+
+test("discovery keeps <timeSeriesInstance> decisions apart when their parents' policies differ", async () => {
+  const open = await policyGranting(OTHER_AE, 35);   // OTHER may discover
+  const shut = await policyGranting(THIRD_AE, 35);   // OTHER may not
+  const a = await seriesWithOneTsi(open);
+  const b = await seriesWithOneTsi(shut);
+
+  const res = await discover(srv.baseUrl, parent, {}, { originator: OTHER_AE });
+  assert.equal(res.rsc, "2000");
+  const found = urils(res);
+
+  assert.ok(found.includes(a.tsiSid), `the permitted TSI is missing: ${JSON.stringify(found)}`);
+  assert.ok(!found.includes(b.tsiSid),
+    `a TSI under a policy that does not name this originator leaked in: ${JSON.stringify(found)}`);
+});

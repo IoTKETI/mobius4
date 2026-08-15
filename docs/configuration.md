@@ -78,6 +78,7 @@ cp config/local.json.example config/local.json
 | `cse.aeid_length` | String length of AE ID |
 | `cse.expired_resource_cleanup_interval_days` | Interval for expired resource cleanup in days. A sweep also runs at startup, so the interval is the gap between sweeps of a process that stays up, not the worst case. What an expired resource does before its sweep is documented under [expirationTime](#expirationtime) |
 | `cse.discovery_limit` | Max number of resource IDs in a discovery response |
+| `cse.missing_data_sweep_interval_seconds` | How often the missing-data sweep runs (`cse/missing-data.js`, `TS-0001:10.2.4.29`), gated the same way `cse.expired_resource_cleanup_interval_days` gates the expiry sweep so only one CSE instance runs it. This is the upper bound on missing-data detection latency and the feature's only tuning knob — lowering it detects gaps sooner at the cost of more frequent sweep queries, raising it does the opposite |
 | `cse.allow_discovery_for_any` | If `true`, access control is skipped for discovery (faster responses) |
 | `cse.keep_alive_timeout` | HTTP keep-alive session timeout in seconds |
 
@@ -247,6 +248,11 @@ These settings control internal ID and data size limits. The defaults work for m
 | `default.datasetPolicy.nvp` | Default null value policy for dataset creation |
 | `default.datasetPolicy.nrhd` | Default number of rows in historical dataset |
 | `default.datasetPolicy.nrld` | Default number of rows in live dataset |
+| `default.timeSeries.mbs` | Default maxByteSize of a `<timeSeries>` resource |
+| `default.timeSeries.mni` | Default maxNumberOfInstances of a `<timeSeries>` resource |
+| `default.timeSeries.mia` | Default maxInstanceAge of a `<timeSeries>` resource, in seconds |
+| `default.timeSeries.peid_default` | Fallback `periodicIntervalDelta` used by the missing-data sweep's detection arithmetic (`detect_missing` in `cse/missing-data.js`) when a `<timeSeries>` resource has none set — `TS-0001:9.6.36` explicitly allows a local policy default here |
+| `default.timeSeries.mdt_default` | Fallback `missingDataDetectTimer` used the same way when a `<timeSeries>` resource has none set. `TS-0001:9.6.36` grants no such local-policy allowance for this one, but without a value the detection time is undefined, so a deployment default is unavoidable regardless |
 
 ### flexContainer specializations
 

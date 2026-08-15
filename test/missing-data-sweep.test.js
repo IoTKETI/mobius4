@@ -13,19 +13,50 @@
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
+const { Client } = require("pg");
+const config = require("config");
 const { create, retrieve, update, createRoot, uniqueRn } = require("./helpers/onem2m");
-const { startServer } = require("./helpers/server");
+const { startServer, TEST_DB } = require("./helpers/server");
 const { from_epoch_seconds } = require("../cse/missing-data");
+const { generate_ri, get_cur_time } = require("../cse/utils");
 
 const SWEEP_SECONDS = 1;
-let srv, base, root;
+let srv, base, root, db;
 
 before(async () => {
   srv = await startServer({ cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS } });
   base = srv.baseUrl;
   root = await createRoot(base, "mds");
+
+  // For inserting a <tsi> row that CREATE would now refuse (tsi_create_schema.dgt gained a
+  // format regex — see test/timeseries.test.js "a malformed dataGenerationTime is refused at
+  // CREATE"). The test process and the spawned server both point at the same TEST_DB by name
+  // (test/helpers/server.js), and host/port/user/pw are not part of the overrides the server
+  // gets, so this connects with the same values config/default.json (or config/local.json)
+  // already gives this process — same pattern as test/access-control.test.js and
+  // test/db-failure.test.js.
+  const { user, pw, host, port } = config.get("db");
+  db = new Client({ user, password: pw, host, port, database: TEST_DB });
+  await db.connect();
 });
-after(async () => { if (srv) await srv.stop(); });
+after(async () => {
+  if (srv) await srv.stop();
+  if (db) await db.end();
+});
+
+// Inserts a <timeSeriesInstance> row directly, bypassing tsi_create_schema -- for the one test
+// that needs a malformed dgt already sitting in the database, which the ordinary HTTP CREATE
+// path refuses since res_schema.js gained format validation on dgt.
+async function insertRawTsi(parentRi, dgt) {
+  const ri = generate_ri();
+  const now = get_cur_time();
+  await db.query(
+    `INSERT INTO tsi (ri, ty, rn, pi, sid, et, ct, lt, dgt, cs, con)
+     VALUES ($1, 30, $2, $3, $4, $5, $5, $5, $6, $7, $8)`,
+    [ri, `raw-${ri}`, parentRi, `raw-insert/${ri}`, now, dgt, 1, JSON.stringify("x")]
+  );
+  return ri;
+}
 
 // Timestamps are relative to the real clock because the sweep uses the real clock. Anchoring ten
 // seconds back means several detection times have already passed by the first sweep.
@@ -112,17 +143,41 @@ test("TS-0001:10.2.4.23 — pausing keeps the recorded state, restarting clears 
   assert.equal(restarted.body["m2m:ts"].mdlt, undefined, "0..1 (L): an empty list is not sent");
 });
 
-test("DEC-116 — editing a detection parameter clears the state even while detection is running", async () => {
-  // TS-0001:10.2.4.29 and 10.2.4.23 only specify the paused case (UP-004). We clear regardless:
-  // expected dataGenerationTime is the anchor plus N periods, so once periodicInterval changes
-  // the recorded entries no longer mean what they meant.
+test("TS-0001:10.2.4.23 Exceptions — editing a detection parameter while detection is running is refused", async () => {
+  // The Exceptions row: "An error will be generated if any of the following attributes are
+  // modified while the value of missingDataDetect is true: missingDataDetectTimer,
+  // missingDataMaxNr, periodicIntervalDelta, periodicInterval." makeSeries() creates with
+  // mdd: true (DETECTING), so this <ts> is already running detection when the edit arrives.
+  const sid = await makeSeries();
+  await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
+  const before = await pollTs(sid, (b) => b.mdc > 0);
+
+  const edited = await update(base, sid, { "m2m:ts": { pei: 300 } });
+  assert.equal(edited.status, 400);
+  assert.equal(edited.rsc, "4000"); // BAD_REQUEST
+
+  const after = (await retrieve(base, sid)).body["m2m:ts"];
+  assert.equal(after.mdd, true, "a refused update must not change mdd");
+  assert.equal(after.pei, 2, "a refused update must not change pei");
+  assert.equal(after.mdc, before.mdc, "a refused update must not clear the recorded state");
+});
+
+test("TS-0001:10.2.4.23 — editing a detection parameter while paused still clears the recorded state", async () => {
+  // The neighbouring "Processing at Receiver" addition, distinct from the Exceptions row above:
+  // "If any parameters related to the missing data detection process ... are updated while the
+  // data detection process is paused the Hosting CSE will clear the missingDataList and
+  // missingDataCurrentNr."
   const sid = await makeSeries();
   await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
   await pollTs(sid, (b) => b.mdc > 0);
 
+  const paused = await update(base, sid, { "m2m:ts": { mdd: false } });
+  assert.equal(paused.body["m2m:ts"].mdd, false);
+
   const edited = await update(base, sid, { "m2m:ts": { pei: 300 } });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body["m2m:ts"].mdd, false, "the edit must not itself resume detection");
   assert.equal(edited.body["m2m:ts"].mdc, 0);
-  assert.equal(edited.body["m2m:ts"].mdd, true, "detection keeps running; only the state resets");
   assert.equal(edited.body["m2m:ts"].pei, 300);
 });
 
@@ -167,9 +222,12 @@ test("TS-0001:10.2.4.29 — a malformed dgt on one <ts> must not starve the swee
   // is persisted — it recurred on every subsequent tick, permanently starving whatever sorted
   // after the bad resource in the query result.
   //
-  // dgt has no format validation on the create path (tsi_create_schema only requires it be a
-  // string; TS-0001:9.6.37 does not constrain its form further), so a malformed value reaches
-  // the table through the ordinary HTTP CREATE — no direct database write needed here.
+  // dgt gained format validation on the create path (tsi_create_schema now applies the same
+  // regex create_common_attr.et uses, so the ordinary HTTP CREATE refuses "not-a-timestamp"
+  // with 4000 — see test/timeseries.test.js "a malformed dataGenerationTime is refused at
+  // CREATE"). Rows can still predate that validation, or arrive through any path this CSE does
+  // not control, so the sweep still has to tolerate one — insertRawTsi writes the row directly,
+  // bypassing the schema the way an old row would have gotten in before this fix existed.
   //
   // The bad <ts> needs at least two children, not one: Array.prototype.reduce with no initial
   // value on a single-element array returns that element without ever calling the reducer, so
@@ -178,7 +236,7 @@ test("TS-0001:10.2.4.29 — a malformed dgt on one <ts> must not starve the swee
   // fix. With two children the reducer runs and throws while comparing them, before the try.
   const bad = await makeSeries();
   await create(base, bad, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(20), con: "1" } });
-  await create(base, bad, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "not-a-timestamp", con: "x" } });
+  await insertRawTsi(bad, "not-a-timestamp");
 
   const good = await makeSeries();
   await create(base, good, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });

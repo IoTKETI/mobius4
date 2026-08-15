@@ -14,13 +14,18 @@ const logger = require('../../logger').forFile(__filename);
 
 const ts_parent_res_types = ['ae', 'cnt', 'csr', 'cb', 'flx'];
 
-// TS-0001:10.2.4.29 and 10.2.4.23 both say the detection state is cleared when one of these is
-// updated. Both clauses qualify it with "while the data detection process is paused" and neither
-// says what happens when it is running — see UP-004. DEC-116 resolves that gap by clearing
-// regardless: expected dataGenerationTime is "the dataGenerationTime of the first received
-// <timeSeriesInstance> plus (N * periodicInterval)", so once periodicInterval changes the N in
-// that formula no longer means anything, and entries computed under the old period would sit in
-// missingDataList next to entries computed under the new one with no way to tell them apart.
+// TS-0001:10.2.4.23's Exceptions row: "An error will be generated if any of the following
+// attributes are modified while the value of missingDataDetect is true:
+// missingDataDetectTimer, missingDataMaxNr, periodicIntervalDelta, periodicInterval." update_a_ts
+// refuses the whole request (BAD_REQUEST) when that is the case — see the check below.
+//
+// The same clause's "Processing at Receiver" addition covers the other state: "If any parameters
+// related to the missing data detection process ... are updated while the data detection process
+// is paused the Hosting CSE will clear the missingDataList and missingDataCurrentNr." Expected
+// dataGenerationTime is "the dataGenerationTime of the first received <timeSeriesInstance> plus
+// (N * periodicInterval)" (TS-0001:10.2.4.29), so once periodicInterval changes the N in that
+// formula no longer means anything — entries computed under the old period would otherwise sit
+// in missingDataList next to entries computed under the new one with no way to tell them apart.
 const DETECTION_PARAMS = ['pei', 'peid', 'mdt', 'mdn'];
 
 function clear_detection_state(db_res) {
@@ -228,6 +233,23 @@ async function update_a_ts(req_prim, resp_prim) {
         if (prim_res.mia !== undefined) db_res.mia = prim_res.mia;
 
         const was_detecting = db_res.mdd;
+        const params_touched = DETECTION_PARAMS.some((k) => prim_res[k] !== undefined);
+
+        // TS-0001:10.2.4.23 Exceptions row (see the comment on DETECTION_PARAMS above). This
+        // checks was_detecting -- the state the resource was already in when the request
+        // arrived -- not prim_res.mdd: the exception is about modifying these attributes while
+        // detection is running, not about where mdd ends up after this same request applies. A
+        // request that both edits pei/peid/mdt/mdn and flips mdd to false in one go is still a
+        // modification made while missingDataDetect was true, so it is refused the same way.
+        if (was_detecting && params_touched) {
+            resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+            resp_prim.pc = {
+                'm2m:dbg': 'missingDataDetectTimer, missingDataMaxNr, periodicIntervalDelta and '
+                    + 'periodicInterval cannot be modified while missingDataDetect is true',
+            };
+            return;
+        }
+
         for (const k of DETECTION_PARAMS) {
             if (prim_res[k] !== undefined) db_res[k] = prim_res[k];
         }
@@ -243,10 +265,10 @@ async function update_a_ts(req_prim, resp_prim) {
         if (prim_res.mbs === null) db_res.mbs = config.default.timeSeries.mbs;
         if (prim_res.mia === null) db_res.mia = config.default.timeSeries.mia;
 
-        // TS-0001:10.2.4.23 + DEC-116 — order matters. A request that both flips mdd and edits a
-        // detection parameter must end up cleared either way, so the parameter check runs first
-        // and the mdd transition can only add a clear, never cancel one.
-        const params_touched = DETECTION_PARAMS.some((k) => prim_res[k] !== undefined);
+        // Reaching here with params_touched true means was_detecting was false (paused) --
+        // otherwise the check above already returned. TS-0001:10.2.4.23's "Processing at
+        // Receiver" addition: editing a detection parameter while paused clears the recorded
+        // state instead of erroring.
         if (params_touched) clear_detection_state(db_res);
 
         if (prim_res.mdd !== undefined && prim_res.mdd !== was_detecting) {

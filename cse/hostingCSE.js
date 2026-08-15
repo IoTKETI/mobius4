@@ -1630,6 +1630,13 @@ function get_mem_size(obj) {
 // control policies of the parent <container> resource, and does not have its own
 // accessControlPolicyIDs attribute").
 //
+// <timeSeriesInstance> is the same shape, one level down: TS-0001:9.6.37 says "The
+// <timeSeriesInstance> resource inherits the same access control policies of the parent
+// <timeSeries> resource, and does not have its own accessControlPolicyIDs attribute" — cse/
+// resources/tsi.js already has no acpi column and tsi_create_schema already has
+// acpi: Joi.forbidden(); this list is what makes access_decision actually resolve the parent
+// instead of falling through to Case D's creator comparison with an undefined acpi.
+//
 // <schedule> does not belong here: TS-0001:9.6.9 gives it accessControlPolicyIDs 0..1 RW, and a
 // type that has the definition but no value takes the default access policy (custodian, else the
 // creator) rather than the parent's. Left in place for now because moving it narrows access for
@@ -1640,7 +1647,7 @@ function get_mem_size(obj) {
 //
 // discovery_core memoizes its per-resource decisions by this list, so a type added here also
 // changes which discovered resources share a decision. Both readers must see the same list.
-const NORM_RES_WITHOUT_ACPI = ["cin", "sch"];
+const NORM_RES_WITHOUT_ACPI = ["cin", "sch", "tsi"];
 
 async function access_decision(req_prim, resp_prim) {
 	let access_grant = false;

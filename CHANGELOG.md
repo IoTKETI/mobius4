@@ -53,9 +53,13 @@ What a client can do with this release:
   periodic sweep (gated the same way the existing expired-resource cleanup is, so only one
   CSE instance runs it) computes the detection arithmetic of `TS-0001:10.2.4.29` and records
   missing points into `missingDataList`/`missingDataCurrentNr`, pushing out the oldest entry
-  once `missingDataMaxNr` is reached. Toggling `missingDataDetect` or changing its parameters
-  clears and restarts the list, per our reading of `10.2.4.29`'s pause/resume rule (a case the
-  clause leaves ambiguous while detection is paused — see `revision-proposal.md` UP-004).
+  once `missingDataMaxNr` is reached. Toggling `missingDataDetect` clears and restarts the
+  list, per `10.2.4.29`'s pause/resume rule. Changing `missingDataDetectTimer`,
+  `missingDataMaxNr`, `periodicIntervalDelta` or `periodicInterval` while detection is paused
+  also clears the list, per the same clause's addition to `10.2.4.23`'s "Processing at
+  Receiver" row — and `10.2.4.23`'s **Exceptions** row requires an error instead of a clear when
+  detection is running, which this release now returns (`BAD_REQUEST`) rather than clearing and
+  continuing.
 
 What it cannot do yet: **nothing subscribes to it.** `10.2.4.29` also defines a
 `<subscription>`-side reporting path — a `missingData` condition in

@@ -168,6 +168,20 @@ test("TS-0001:9.6.37 — dataGenerationTime is unique among siblings (no TP in T
   assert.equal(dup.status, 409);
 });
 
+test("no TP in TS-0018 — a malformed dataGenerationTime is refused at CREATE", async () => {
+  // create_common_attr.et in cse/validation/res_schema.js already applies this pattern to the
+  // universal expirationTime attribute; tsi_create_schema.dgt now uses the same one. A value
+  // that does not match must never reach the sweep's parser or the database's ORDER BY dgt.
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  const res = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "not-a-timestamp", con: "1" },
+  });
+  assert.equal(res.status, 400);
+  assert.equal(res.rsc, "4000"); // BAD_REQUEST
+});
+
 test("TS-0001:10.2.4.27 — UPDATE on a <timeSeriesInstance> is refused (no matching TP in TS-0018)", async () => {
   // TS-0001:10.2.4.27 — "The Update operation shall not apply to <timeSeriesInstance> resource."
   const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
@@ -184,21 +198,34 @@ test("TS-0001:10.2.4.27 — UPDATE on a <timeSeriesInstance> is refused (no matc
   assert.equal(res.rsc, "4005");
 });
 
-test("TS-0001:9.6.36 — maxNrOfInstances evicts the oldest <timeSeriesInstance> (no TP in TS-0018)", async () => {
+test("TS-0001:10.2.4.25 — maxNrOfInstances evicts the instance with the oldest dataGenerationTime, not the oldest arrival (no TP in TS-0018)", async () => {
+  // "the <timeSeriesInstance> resource with the oldest dataGenerationTime attribute shall be
+  // removed to enable the creation of the new <timeSeriesInstance> resource." Posting the
+  // smallest dgt *last* is what makes this test able to fail: if eviction picked by arrival
+  // order (FIFO) it would remove the first-posted instance instead, and the previous version of
+  // this test posted dgt in ascending order, so arrival order and dgt order agreed and it could
+  // not have told the two apart.
   const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts"), mni: 2 } });
   const parent = ts.body["m2m:ts"].ri;
 
-  const rns = [];
-  for (let i = 0; i < 3; i++) {
-    const rn = uniqueRn("i");
-    rns.push(rn);
-    await create(base, parent, 30, {
-      "m2m:tsi": { rn, dgt: `20260815T13000${i}`, con: `${i}` },
-    });
-  }
+  const newer1 = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T130001", con: "1" },
+  });
+  const newer2 = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T130002", con: "2" },
+  });
+  const oldestArrivedLast = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T130000", con: "0" },
+  });
 
   const after = await retrieve(base, parent);
   assert.equal(after.body["m2m:ts"].cni, 2);
+
+  assert.equal((await retrieve(base, oldestArrivedLast.body["m2m:tsi"].ri)).status, 404,
+    "the instance with the oldest dataGenerationTime must be evicted even though it arrived last");
+  assert.equal((await retrieve(base, newer1.body["m2m:tsi"].ri)).status, 200,
+    "eviction must not pick by arrival order");
+  assert.equal((await retrieve(base, newer2.body["m2m:tsi"].ri)).status, 200);
 });
 
 test("TS-0001:9.6.36 — currentNrOfInstances and currentByteSize track the children (no TP in TS-0018)", async () => {
