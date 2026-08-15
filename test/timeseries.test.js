@@ -136,3 +136,79 @@ test("no TP in TS-0018 — TS-0001:9.6.36 an explicit 0 for mni/mbs/mia survives
   assert.equal(updated.status, 200);
   assert.equal(updated.body["m2m:ts"].mni, 0);
 });
+
+test("TP/oneM2M/CSE/DMR/CRE/001_TSI/TS — create a <timeSeriesInstance> under a <timeSeries> and get it back", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  const res = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T100000", con: "21.5" },
+  });
+
+  assert.equal(res.status, 201);
+  const tsi = res.body["m2m:tsi"];
+  assert.equal(tsi.ty, 30);
+  assert.equal(tsi.dgt, "20260815T100000");
+  assert.equal(tsi.con, "21.5");
+  assert.equal(tsi.cs, 4);  // "21.5" is four bytes
+});
+
+test("TS-0001:9.6.37 — dataGenerationTime is unique among siblings (no TP in TS-0018)", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  const first = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T110000", con: "1" },
+  });
+  assert.equal(first.status, 201);
+
+  const dup = await create(base, parent, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T110000", con: "2" },
+  });
+  assert.equal(dup.status, 409);
+});
+
+test("TS-0001:10.2.4.27 — UPDATE on a <timeSeriesInstance> is refused (no matching TP in TS-0018)", async () => {
+  // TS-0001:10.2.4.27 — "The Update operation shall not apply to <timeSeriesInstance> resource."
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const created = await create(base, ts.body["m2m:ts"].ri, 30, {
+    "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T120000", con: "1" },
+  });
+
+  const res = await update(base, created.body["m2m:tsi"].ri, { "m2m:tsi": { lbl: ["x"] } });
+  // update_a_res's switch has no case 30, so it falls to the default branch, which answers
+  // OPERATION_NOT_ALLOWED (4005) -- the same rsc other resource-type-forbidden UPDATEs in this
+  // codebase answer (see test/cse-registration.test.js's <CSEBase> UPDATE). bindings/http.js
+  // maps 4005 to HTTP 405, not 403 -- 403 is ACCESS_DENIED, a different rsc.
+  assert.equal(res.status, 405);
+  assert.equal(res.rsc, "4005");
+});
+
+test("TS-0001:9.6.36 — maxNrOfInstances evicts the oldest <timeSeriesInstance> (no TP in TS-0018)", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts"), mni: 2 } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  const rns = [];
+  for (let i = 0; i < 3; i++) {
+    const rn = uniqueRn("i");
+    rns.push(rn);
+    await create(base, parent, 30, {
+      "m2m:tsi": { rn, dgt: `20260815T13000${i}`, con: `${i}` },
+    });
+  }
+
+  const after = await retrieve(base, parent);
+  assert.equal(after.body["m2m:ts"].cni, 2);
+});
+
+test("TS-0001:9.6.36 — currentNrOfInstances and currentByteSize track the children (no TP in TS-0018)", async () => {
+  const ts = await create(base, root.sid, 29, { "m2m:ts": { rn: uniqueRn("ts") } });
+  const parent = ts.body["m2m:ts"].ri;
+
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T140000", con: "abcd" } });
+  await create(base, parent, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: "20260815T140100", con: "ef" } });
+
+  const after = await retrieve(base, parent);
+  assert.equal(after.body["m2m:ts"].cni, 2);
+  assert.equal(after.body["m2m:ts"].cbs, 6);
+});

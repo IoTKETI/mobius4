@@ -21,7 +21,7 @@ const FLX = require('../models/flx-model');
 const GRP = require('../models/grp-model');
 const SUB = require('../models/sub-model');
 const TS = require('../models/ts-model');
-const TSI = require('../models/tsi-model');   // model only; ./resources/tsi lands in Task 2
+const TSI = require('../models/tsi-model');
 
 // non-standard resources yet
 const MRP = require('../models/mrp-model');
@@ -45,6 +45,7 @@ const sub = require("./resources/sub");
 // const smd = require("./resources/smd");
 const flx = require("./resources/flx");
 const ts = require("./resources/ts");
+const tsi = require("./resources/tsi");
 const noti = require("./noti");
 
 // below are not specified in oneM2M yet
@@ -150,6 +151,9 @@ async function create_a_res(req_prim, resp_prim) {
 		case 29:
 			await ts.create_a_ts(req_prim, resp_prim);
 			break;
+		case 30:
+			await tsi.create_a_tsi(req_prim, resp_prim);
+			break;
 		case 9:
 			await grp.create_a_grp(req_prim, resp_prim);
 			break;
@@ -249,6 +253,9 @@ async function retrieve_a_res(req_prim, resp_prim) {
 		case 29:
 			await ts.retrieve_a_ts(req_prim, resp_prim);
 			break;
+		case 30:
+			await tsi.retrieve_a_tsi(req_prim, resp_prim);
+			break;
 		case 5:
 			await cb.retrieve_a_cb(resp_prim);
 			break;
@@ -316,7 +323,7 @@ async function retrieve_a_res(req_prim, resp_prim) {
 
 // Resource types whose representations aggr_reses_per_ty knows how to fetch. Anything else
 // discovery finds is skipped here rather than silently returned half-built.
-const AGGREGATABLE_TYPES = ["acp", "ae", "cnt", "cin", "grp", "sub", "flx", "ts"];
+const AGGREGATABLE_TYPES = ["acp", "ae", "cnt", "cin", "grp", "sub", "flx", "ts", "tsi"];
 
 /**
  * Fetches the representation of every discovered descendant and indexes it by ri, keeping the
@@ -667,6 +674,9 @@ async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 				case "ts":
 					await ts.retrieve_a_ts(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:ts"];
+				case "tsi":
+					await tsi.retrieve_a_tsi(tmp_req_prim, tmp_resp_prim);
+					return tmp_resp_prim.pc["m2m:tsi"];
 				case "grp":
 					await grp.retrieve_a_grp(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:grp"];
