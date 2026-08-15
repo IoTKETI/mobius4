@@ -140,3 +140,85 @@ test("without mdn the list is unbounded", () => {
   const r = apply_missing(["20260815T100100"], 1, ["20260815T100200"], null);
   assert.equal(r.mdc, 2);
 });
+
+// Boundary cases from TS-0001:10.2.4.29. The tests above land strictly inside (4s with peid: 5)
+// or strictly outside (9s) the delta window, and use a `now` comfortably past or short of the
+// detection time. Neither ever lands exactly on a boundary, which is where interval arithmetic
+// like this tends to go wrong.
+
+test("an instance exactly periodicIntervalDelta early counts as present (TS-0001:10.2.4.29)", () => {
+  // 10:00:55 is exactly 5s before the expected 10:01:00, i.e. right at expected - periodicIntervalDelta.
+  // The clause defines the range as "expected +/- periodicIntervalDelta", which reads as inclusive.
+  const r = detect_missing({
+    anchor: "20260815T100000",
+    pei: 60, peid: 5, mdt: 30,
+    present_dgts: ["20260815T100000", "20260815T100055"],
+    now: "20260815T100200",
+    from_n: null,
+  });
+  assert.deepEqual(r.missing, []);
+});
+
+test("an instance exactly periodicIntervalDelta late counts as present (TS-0001:10.2.4.29)", () => {
+  // 10:01:05 is exactly 5s after the expected 10:01:00, i.e. right at expected + periodicIntervalDelta.
+  const r = detect_missing({
+    anchor: "20260815T100000",
+    pei: 60, peid: 5, mdt: 30,
+    present_dgts: ["20260815T100000", "20260815T100105"],
+    now: "20260815T100200",
+    from_n: null,
+  });
+  assert.deepEqual(r.missing, []);
+});
+
+test("a point is evaluated once the detection time exactly equals now (TS-0001:10.2.4.29)", () => {
+  // Detection time for N=1 is 10:01:00 + 30s = 10:01:30, exactly equal to now. No instance is
+  // present near 10:01:00, so the point must show up as missing rather than being skipped.
+  const r = detect_missing({
+    anchor: "20260815T100000",
+    pei: 60, peid: 5, mdt: 30,
+    present_dgts: ["20260815T100000"],
+    now: "20260815T100130",
+    from_n: null,
+  });
+  assert.deepEqual(r.missing, ["20260815T100100"]);
+});
+
+test("a point is not yet evaluated one second before its detection time (TS-0001:10.2.4.29)", () => {
+  // Same setup as above but now is 10:01:29 -- one second short of the 10:01:30 detection time.
+  // Paired with the previous test: either one alone would pass against an off-by-one boundary.
+  const r = detect_missing({
+    anchor: "20260815T100000",
+    pei: 60, peid: 5, mdt: 30,
+    present_dgts: ["20260815T100000"],
+    now: "20260815T100129",
+    from_n: null,
+  });
+  assert.deepEqual(r.missing, []);
+});
+
+test("every expected point is missing when no instance has ever arrived (TS-0001:10.2.4.29)", () => {
+  // present_dgts is empty -- the sensor never sent anything after the anchor. Both N=1 and N=2's
+  // detection times (10:01:30 and 10:02:30) have passed by now (10:03:00).
+  const r = detect_missing({
+    anchor: "20260815T100000",
+    pei: 60, peid: 5, mdt: 30,
+    present_dgts: [],
+    now: "20260815T100300",
+    from_n: null,
+  });
+  assert.deepEqual(r.missing, ["20260815T100200", "20260815T100100"]);
+});
+
+test("an unparseable dataGenerationTime throws, naming the offending value", () => {
+  assert.throws(
+    () => detect_missing({
+      anchor: "20260815T100000",
+      pei: 60, peid: 5, mdt: 30,
+      present_dgts: ["garbage"],
+      now: "20260815T100300",
+      from_n: null,
+    }),
+    (err) => err instanceof Error && err.message.includes("garbage"),
+  );
+});
