@@ -115,10 +115,10 @@ own test purposes (`TP/<source>/...`), not TS-0018's.
 
 | area | source | status | entries implemented |
 |---|---|---|---|
-| AI/ML (AI/ML) | project | ✅ full | 1 / 1 |
-| AI/ML (AI/ML) | TR-0071 | ⚠️ partial | 3 / 7 |
-| Data management and repository (DMR) | manual | ✅ full | 1 / 1 |
-| flexContainer (FLXC) | manual | ✅ full | 2 / 2 |
+| AI/ML | project | ✅ full | 1 / 1 |
+| AI/ML | TR-0071 | ⚠️ partial | 3 / 7 |
+| Data management and repository | manual | ✅ full | 1 / 1 |
+| flexContainer | manual | ✅ full | 2 / 2 |
 
 Source: `features/inventory.yaml (mobius4-dev-tool)`.
 
