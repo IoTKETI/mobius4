@@ -52,6 +52,8 @@ const RESOURCE_TYPES = [
   { ty: 16, short_name: "csr", long_name: "remoteCSE" },
   { ty: 23, short_name: "sub", long_name: "subscription" },
   { ty: 28, short_name: "flx", long_name: "flexContainer" },
+  { ty: 29, short_name: "ts", long_name: "timeSeries" },
+  { ty: 30, short_name: "tsi", long_name: "timeSeriesInstance" },
 
   // TR-0071 (Technical Report) candidate solution types. Not in the resourceType enumeration of
   // TS-0004 — these numbers are Mobius4's own allocation (config/enums.js) and may change if
@@ -203,6 +205,27 @@ async function probeResourceTypes(base) {
         set(28, "retrieve", await get(flxSid));
         set(28, "update", await put(flxSid, { [FLX_KEY]: { lbl: ["probe"] } }));
         set(28, "delete", await del(flxSid));
+      }
+
+      const ts = await post(aeSid, 29, { "m2m:ts": { rn: "probe_ts" } });
+      set(29, "create", ts);
+      const tsSid = `${aeSid}/probe_ts`;
+      if (created(ts)) {
+        set(29, "retrieve", await get(tsSid));
+        set(29, "update", await put(tsSid, { "m2m:ts": { lbl: ["probe"] } }));
+
+        const tsi = await post(tsSid, 30, {
+          "m2m:tsi": { rn: "probe_tsi", dgt: "20260101T000000", con: "x" },
+        });
+        set(30, "create", tsi);
+        const tsiSid = `${tsSid}/probe_tsi`;
+        if (created(tsi)) {
+          set(30, "retrieve", await get(tsiSid));
+          // No update: TS-0001:10.2.4.27 — "The Update operation shall not apply to
+          // <timeSeriesInstance> resource."
+          set(30, "delete", await del(tsiSid));
+        }
+        set(29, "delete", await del(tsSid));
       }
     }
 

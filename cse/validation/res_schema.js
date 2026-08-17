@@ -227,6 +227,102 @@ const cnt_update_schema = Joi.object().keys({
     mia: Joi.number().integer().min(0)
 });
 
+// <timeSeries> — TS-0001:9.6.36. cni/cbs/mdc/mdlt are RO, so they are forbidden in a request
+// rather than merely optional: accepting them silently would let a client set counters the CSE
+// is supposed to compute. st is forbidden for a different reason — see below.
+const ts_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    acpi: create_common_attr.acpi,
+    lbl: create_common_attr.lbl,
+    cr: create_common_attr.cr,
+    // TS-0001:9.6.36's attribute table has no stateTag entry for <timeSeries> — that attribute
+    // belongs to <container>/<contentInstance> (9.6.6/9.6.7), not this resource type.
+    st: Joi.forbidden(),
+    loc: create_common_attr.loc,
+
+    // retention
+    mni: Joi.number().integer().min(0),
+    mbs: Joi.number().integer().min(0),
+    mia: Joi.number().integer().min(0),
+
+    // missing-data detection
+    pei: Joi.number().integer().min(1),
+    peid: Joi.number().integer().min(0),
+    mdd: Joi.boolean(),
+    mdn: Joi.number().integer().min(1),
+    mdt: Joi.number().integer().min(1),
+
+    cnf: Joi.string().optional(),
+    or: Joi.string().uri({ allowRelative: true }).optional(),
+
+    cni: Joi.forbidden(),
+    cbs: Joi.forbidden(),
+    mdc: Joi.forbidden(),
+    mdlt: Joi.forbidden(),
+});
+
+const ts_update_schema = Joi.object().keys({
+    ...update_universal_attr,
+
+    et: update_common_attr.et,
+    acpi: update_common_attr.acpi,
+    lbl: update_common_attr.lbl,
+    loc: update_common_attr.loc,
+
+    mni: Joi.number().integer().min(0).allow(null),
+    mbs: Joi.number().integer().min(0).allow(null),
+    mia: Joi.number().integer().min(0).allow(null),
+
+    pei: Joi.number().integer().min(1).allow(null),
+    peid: Joi.number().integer().min(0).allow(null),
+    mdd: Joi.boolean(),
+    mdn: Joi.number().integer().min(1).allow(null),
+    mdt: Joi.number().integer().min(1).allow(null),
+
+    // TS-0001:9.6.36 marks contentInfo WO (write-once): settable at CREATE, never changed
+    // afterwards.
+    cnf: Joi.forbidden(),
+    or: Joi.string().uri({ allowRelative: true }).allow(null).optional(),
+
+    cni: Joi.forbidden(),
+    cbs: Joi.forbidden(),
+    mdc: Joi.forbidden(),
+    mdlt: Joi.forbidden(),
+});
+
+// <timeSeriesInstance> — TS-0001:9.6.37. dgt and con are multiplicity 1; cs is RO (the CSE
+// computes it from con). There is no update schema: TS-0001:10.2.4.27 says "The Update
+// operation shall not apply to <timeSeriesInstance> resource."
+const tsi_create_schema = Joi.object().keys({
+    ...create_universal_attr,
+
+    et: create_common_attr.et,
+    // TS-0001:9.6.37: "<timeSeriesInstance> ... does not have its own accessControlPolicyIDs
+    // attribute" — it inherits the parent <timeSeries>'s. Without this, acpi would pass
+    // validation, be silently dropped (no acpi column on the tsi model/table), and the client
+    // would never know.
+    acpi: Joi.forbidden(),
+    lbl: create_common_attr.lbl,
+    cr: create_common_attr.cr,
+    // TS-0001:9.6.37's attribute table has no stateTag entry for <timeSeriesInstance> either.
+    st: Joi.forbidden(),
+    loc: create_common_attr.loc,
+
+    // Same house pattern as et above (create_common_attr.et). TS-0004 types dataGenerationTime
+    // as m2m:absRelTimestamp, a union that also permits fractional seconds and a relative
+    // integer offset — this regex is narrower than that (BACKLOG-108 in mobius4-dev-tool tracks
+    // the gap). Chosen deliberately over no validation at all: an unparseable dgt used to reach
+    // the missing-data sweep's parser and throw, and it sorts arbitrarily in `ORDER BY dgt`
+    // (find_edge_tsi's <latest>/<oldest>, EVICT_TSI_SQL's eviction order), so a malformed value
+    // could pick the wrong eviction victim.
+    dgt: Joi.string().required().regex(/^[0-9]{8}T[0-9]{6}$/),
+    con: Joi.any().required(),
+    snr: Joi.number().integer().min(0),
+    cs: Joi.forbidden(),
+});
+
 // <flexContainer> carries an open set of [customAttribute] members whose names are defined
 // by the document referenced by cnd (TS-0001:9.6.35), so unknown keys must pass Joi and be
 // checked against the specialization registry instead (cse/specialization.js).
@@ -408,6 +504,8 @@ module.exports = {
     csr_create_schema, csr_update_schema,
     cnt_create_schema, cnt_update_schema,
     cin_create_schema,
+    ts_create_schema, ts_update_schema,
+    tsi_create_schema,
     flx_create_schema, flx_update_schema,
     grp_create_schema, grp_update_schema,
     sub_create_schema, sub_update_schema,

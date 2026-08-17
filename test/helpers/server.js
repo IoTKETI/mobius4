@@ -53,7 +53,7 @@ function killChild(child) {
 // can register with each other; everything else leaves it alone and gets config/default.json's
 // identity. It is merged over the admin setting rather than replacing it, so a caller cannot
 // accidentally drop the admin identity that config/validate.js requires.
-async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse = {}, port: fixedPort } = {}) {
+async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse = {}, port: fixedPort, defaults = {} } = {}) {
   // A caller that has to know the port *before* the server starts passes one in. two-cse.js
   // does: a registree's own poa has to carry its port so the registrar can retarget to it, and
   // that has to be in the config we hand to the child.
@@ -87,6 +87,12 @@ async function startServer({ mqttPort, logLevel = "error", dbName = TEST_DB, cse
     // e.g. mqtt.test.js checking bindings/mqtt.js's "broker not reachable" warning -- can
     // raise it to "warn" for just that server.
     logging: { level: logLevel, file: { enabled: false } },
+    // Lets a test override config/default.json's "default" block (e.g. default.timeSeries.*) --
+    // node-config deep-merges this the same way it does the "cse" override above, so a caller
+    // only has to name the leaf it wants to change. Named "defaults" on the options object
+    // (rather than the reserved-adjacent "default") to keep call sites readable; the key handed
+    // to NODE_CONFIG is still the literal "default" config/default.json uses.
+    ...(Object.keys(defaults).length ? { default: defaults } : {}),
   };
 
   const child = spawn(process.execPath, ["mobius4.js"], {

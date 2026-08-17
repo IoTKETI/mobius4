@@ -514,8 +514,17 @@ async function aggregate_fanout_resp_prims(req_prim) {
     const mid_list = grp_res.mid;
 
     return await Promise.all(mid_list.map(async (mid) => {
-        // BACKLOG-042: members are assumed to be local. How far a remote mid actually gets is
-        // unmeasured -- prim_handling may already forward an SP-relative one via request_forwarding.
+        // A member on another CSE reaches it the same way a local one does: prim_handling
+        // resolves the target first, and forwards the request when the mid is not ours. There is
+        // nothing here that special-cases remote members, and that is the point -- the fan-out
+        // does not need to know where a member lives.
+        //
+        // This comment used to say members were "assumed to be local" and that remote reach was
+        // unmeasured. That stopped being true in v4.13.0, which resolves a member's type at the
+        // hosting CSE and splits the outcome three ways (readable / no privilege / unreachable,
+        // TS-0004:7.4.13.2.1). test/group-remote-members.test.js pins it against two live CSEs,
+        // including a fanOutPoint RETRIEVE that reaches across and comes back with each member's
+        // resource ID in the response's From parameter (TS-0004:7.4.14.2.5).
         const fanout_req_prim = {
             fr: req_prim.fr,
             to: (req_prim.vr_path) ? mid + '/' + req_prim.vr_path : mid,

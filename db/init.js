@@ -225,6 +225,76 @@ async function create_tables(client) {
             );
         `);
 
+        // create ts table
+        // "or" (ontologyRef) is quoted because OR is a reserved SQL keyword — same reason as flx.
+        // md_anchor_dgt and md_watermark_n are not oneM2M attributes: they are what the
+        // missing-data sweep needs to resume where it left off, and they never leave the CSE.
+        // No "st" column: TS-0001:9.6.36's attribute table has no stateTag for <timeSeries>.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS ts (
+              ri VARCHAR(${len.ri_max}) PRIMARY KEY,
+              ty INTEGER NOT NULL DEFAULT 29,
+              sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
+              cr VARCHAR(${len.str_token}),
+              int_cr VARCHAR(${len.str_token}),
+              rn VARCHAR(${len.str_token}) NOT NULL,
+              pi VARCHAR(${len.ri_max}),
+              et VARCHAR(${len.timestamp}) NOT NULL,
+              ct VARCHAR(${len.timestamp}) NOT NULL,
+              lt VARCHAR(${len.timestamp}) NOT NULL,
+              acpi VARCHAR(${len.structured_res_id})[],
+              lbl VARCHAR(${len.str_token})[],
+              cni INTEGER DEFAULT 0,
+              cbs INTEGER DEFAULT 0,
+              mni INTEGER,
+              mbs INTEGER,
+              mia INTEGER,
+              pei INTEGER,
+              peid INTEGER,
+              mdd BOOLEAN NOT NULL DEFAULT FALSE,
+              mdn INTEGER,
+              mdlt VARCHAR(${len.timestamp})[] NOT NULL DEFAULT ARRAY[]::VARCHAR[],
+              mdc INTEGER NOT NULL DEFAULT 0,
+              mdt INTEGER,
+              cnf VARCHAR(255),
+              "or" VARCHAR(${len.structured_res_id}),
+              loc GEOMETRY(GEOMETRY, 4326),
+              md_anchor_dgt VARCHAR(${len.timestamp}),
+              md_watermark_n INTEGER
+            );
+          `);
+
+        // create tsi table
+        // The (pi, dgt) unique index is TS-0001:9.6.37: "The value of this attribute shall be
+        // unique among the child <timeSeriesInstance> resources belonging to the same parent
+        // <timeSeries> resource." It is an index rather than an application check because two
+        // concurrent creates would both pass a check-then-insert.
+        // No "acpi" column: TS-0001:9.6.37 says <timeSeriesInstance> "inherits the same access
+        // control policies of the parent <timeSeries> resource, and does not have its own
+        // accessControlPolicyIDs attribute." No "st" column either — same absence as <timeSeries>.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS tsi (
+                ri VARCHAR(${len.ri_max}) PRIMARY KEY,
+                ty INTEGER NOT NULL DEFAULT 30,
+                rn VARCHAR(${len.str_token}) NOT NULL,
+                pi VARCHAR(${len.ri_max}),
+                sid VARCHAR(${len.structured_res_id}) NOT NULL UNIQUE,
+                et VARCHAR(${len.timestamp}),
+                ct VARCHAR(${len.timestamp}),
+                lt VARCHAR(${len.timestamp}),
+                lbl VARCHAR(${len.str_token})[],
+                cr VARCHAR(${len.str_token}),
+                int_cr VARCHAR(${len.str_token}),
+                loc GEOMETRY(GEOMETRY, 4326),
+                dgt VARCHAR(${len.timestamp}) NOT NULL,
+                cs INTEGER,
+                con JSONB,
+                snr INTEGER
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_tsi_pi ON tsi (pi);`);
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_tsi_pi_dgt ON tsi (pi, dgt);`);
+
         // create flx table
         // "or" (ontologyRef) is quoted because OR is a reserved SQL keyword.
         // "custom" holds the [customAttribute] set, which is defined by the document

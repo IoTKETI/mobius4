@@ -20,6 +20,8 @@ const CSR = require('../models/csr-model');
 const FLX = require('../models/flx-model');
 const GRP = require('../models/grp-model');
 const SUB = require('../models/sub-model');
+const TS = require('../models/ts-model');
+const TSI = require('../models/tsi-model');
 
 // non-standard resources yet
 const MRP = require('../models/mrp-model');
@@ -42,6 +44,8 @@ const grp = require("./resources/grp");
 const sub = require("./resources/sub");
 // const smd = require("./resources/smd");
 const flx = require("./resources/flx");
+const ts = require("./resources/ts");
+const tsi = require("./resources/tsi");
 const noti = require("./noti");
 
 // below are not specified in oneM2M yet
@@ -144,6 +148,12 @@ async function create_a_res(req_prim, resp_prim) {
 		case 4:
 			await cin.create_a_cin(req_prim, resp_prim);
 			break;
+		case 29:
+			await ts.create_a_ts(req_prim, resp_prim);
+			break;
+		case 30:
+			await tsi.create_a_tsi(req_prim, resp_prim);
+			break;
 		case 9:
 			await grp.create_a_grp(req_prim, resp_prim);
 			break;
@@ -240,6 +250,12 @@ async function retrieve_a_res(req_prim, resp_prim) {
 		case 4:
 			await cin.retrieve_a_cin(req_prim, resp_prim);
 			break;
+		case 29:
+			await ts.retrieve_a_ts(req_prim, resp_prim);
+			break;
+		case 30:
+			await tsi.retrieve_a_tsi(req_prim, resp_prim);
+			break;
 		case 5:
 			await cb.retrieve_a_cb(resp_prim);
 			break;
@@ -307,7 +323,7 @@ async function retrieve_a_res(req_prim, resp_prim) {
 
 // Resource types whose representations aggr_reses_per_ty knows how to fetch. Anything else
 // discovery finds is skipped here rather than silently returned half-built.
-const AGGREGATABLE_TYPES = ["acp", "ae", "cnt", "cin", "grp", "sub", "flx"];
+const AGGREGATABLE_TYPES = ["acp", "ae", "cnt", "cin", "grp", "sub", "flx", "ts", "tsi"];
 
 /**
  * Fetches the representation of every discovered descendant and indexes it by ri, keeping the
@@ -655,6 +671,12 @@ async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 				case "cin":
 					await cin.retrieve_a_cin(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:cin"];
+				case "ts":
+					await ts.retrieve_a_ts(tmp_req_prim, tmp_resp_prim);
+					return tmp_resp_prim.pc["m2m:ts"];
+				case "tsi":
+					await tsi.retrieve_a_tsi(tmp_req_prim, tmp_resp_prim);
+					return tmp_resp_prim.pc["m2m:tsi"];
 				case "grp":
 					await grp.retrieve_a_grp(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:grp"];
@@ -711,6 +733,12 @@ async function update_a_res(req_prim, resp_prim) {
 		case 3:
 			await cnt.update_a_cnt(req_prim, resp_prim);
 			break;
+		case 29:
+			await ts.update_a_ts(req_prim, resp_prim);
+			break;
+		// No case 30: TS-0001:10.2.4.27 — "The Update operation shall not apply to
+		// <timeSeriesInstance> resource." The switch default answers 4005, which is the
+		// right answer, so the absence here is deliberate.
 		case 9:
 			await grp.update_a_grp(req_prim, resp_prim);
 			break;
@@ -854,6 +882,22 @@ async function delete_a_res(req_prim, resp_prim) {
 		await cnt_res.save();
 	}
 
+	// Same bookkeeping as the <cin>/<cnt> case above, for <timeSeriesInstance>/<timeSeries>
+	// (TS-0001:9.6.36 gives <timeSeries> the same currentNrOfInstances/currentByteSize pair).
+	// This is what makes DELETE <latest>/<oldest> (cse/resources/ts.js) leave the parent's
+	// counters accurate rather than stuck at the count including the just-deleted instance.
+	if (req_prim.to_ty === 30 && req_prim.int_cr_req !== true) {
+		const parent_ts_ri = tmp_resp.pc['m2m:tsi'].pi;
+		const cs = tmp_resp.pc['m2m:tsi'].cs;
+
+		const ts_res = await TS.findByPk(parent_ts_ri);
+		logger.trace({ ts_res }, 'ts_res');
+		ts_res.cni--;
+		ts_res.cbs = ts_res.cbs - cs;
+
+		await ts_res.save();
+	}
+
 	// BACKLOG-088: deleting an <mlModel> shrinks the parent <modelRepo>'s
 	// currentNumberOfModels/currentByteOfModels the same way deleting a <cin> shrinks its
 	// <container>'s cni/cbs above -- TR-0071:7.1.2.1 calls cnmo/cbmo "current", so a model that no
@@ -891,6 +935,7 @@ async function delete_a_res(req_prim, resp_prim) {
 // model registry for batch delete
 const DELETE_MODEL = {
 	1: ACP, 2: AE, 3: CNT, 4: CIN, 9: GRP, 16: CSR, 23: SUB, 28: FLX,
+	29: TS, 30: TSI,
 	101: MRP, 102: MMD, 103: MDP, 104: DPM, 105: DSP, 106: DTS, 107: DSF,
 };
 
@@ -990,6 +1035,8 @@ async function discovery_core(req_prim, opts = {}) {
 		16:  { model: CSR, no_geo: false },
 		23:  { model: SUB, no_geo: true  },
 		28:  { model: FLX, no_geo: false },
+		29:  { model: TS,  no_geo: false },
+		30:  { model: TSI, no_geo: false },
 		101: { model: MRP, no_geo: true  },
 		102: { model: MMD, no_geo: true  },
 		103: { model: MDP, no_geo: true  },
@@ -1583,6 +1630,13 @@ function get_mem_size(obj) {
 // control policies of the parent <container> resource, and does not have its own
 // accessControlPolicyIDs attribute").
 //
+// <timeSeriesInstance> is the same shape, one level down: TS-0001:9.6.37 says "The
+// <timeSeriesInstance> resource inherits the same access control policies of the parent
+// <timeSeries> resource, and does not have its own accessControlPolicyIDs attribute" — cse/
+// resources/tsi.js already has no acpi column and tsi_create_schema already has
+// acpi: Joi.forbidden(); this list is what makes access_decision actually resolve the parent
+// instead of falling through to Case D's creator comparison with an undefined acpi.
+//
 // <schedule> does not belong here: TS-0001:9.6.9 gives it accessControlPolicyIDs 0..1 RW, and a
 // type that has the definition but no value takes the default access policy (custodian, else the
 // creator) rather than the parent's. Left in place for now because moving it narrows access for
@@ -1593,7 +1647,7 @@ function get_mem_size(obj) {
 //
 // discovery_core memoizes its per-resource decisions by this list, so a type added here also
 // changes which discovered resources share a decision. Both readers must see the same list.
-const NORM_RES_WITHOUT_ACPI = ["cin", "sch"];
+const NORM_RES_WITHOUT_ACPI = ["cin", "sch", "tsi"];
 
 async function access_decision(req_prim, resp_prim) {
 	let access_grant = false;

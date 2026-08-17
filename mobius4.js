@@ -17,6 +17,7 @@ const mqtt = require('./bindings/mqtt');
 const config = require('config');
 
 let cleanupIntervalId;
+let missingDataIntervalId;
 
 async function main() {
     const { version } = require('./package.json');
@@ -66,6 +67,20 @@ async function main() {
         expired_resource_cleanup()
             .catch((err) => logger.error({ err }, 'startup expired resource cleanup failed'))
             .finally(() => { if (process.send) process.send('startup-sweep-done'); });
+
+        // Missing-data detection for <timeSeries> (TS-0001:10.2.4.29). Same singleton gate as the
+        // cleanup above and for the same reason: the sweep is global, so running it in every
+        // process would do the work N times and have N writers contend for the same rows.
+        //
+        // The interval is the upper bound on how late a detection can be, so it is much shorter
+        // than the cleanup's — which is measured in days.
+        const sweepIntervalMs = config.cse.missing_data_sweep_interval_seconds * 1000;
+        const { sweep_missing_data } = require('./cse/missing-data');
+        missingDataIntervalId = setInterval(
+            () => sweep_missing_data().catch((err) => logger.error({ err }, 'missing-data sweep failed')),
+            sweepIntervalMs
+        );
+        logger.info({ intervalSeconds: config.cse.missing_data_sweep_interval_seconds }, 'missing data sweep scheduled');
     } else {
         logger.info({ instance: process.env.NODE_APP_INSTANCE }, 'expired resource cleanup runs on instance 0; skipped here');
     }
@@ -87,6 +102,7 @@ async function shutdown(signal) {
     try {
         // 1. Stop the intervals (blocks any new work from being scheduled)
         if (cleanupIntervalId) clearInterval(cleanupIntervalId);
+        if (missingDataIntervalId) clearInterval(missingDataIntervalId);
         require('./cse/datasetManager').shutdown();
 
         // 2. Close the HTTP servers — refuse new connections + drop keep-alive connections at once

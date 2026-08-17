@@ -37,7 +37,9 @@
       9,
       16,
       23,
-      28
+      28,
+      29,
+      30
     ],
     "serializations": [
       "json"
@@ -46,6 +48,7 @@
     "timestamp_format": "YYYYMMDDTHHmmss",
     "allowed_ri_characters": "0123456789abcdefghijklmnopqrstuvwxyz",
     "expired_resource_cleanup_interval_days": 1,
+    "missing_data_sweep_interval_seconds": 30,
     "discovery_limit": 200,
     "allow_discovery_for_any": false,
     "keep_alive_timeout": 60
@@ -156,6 +159,15 @@
       "mbs": 10000000,
       "mni": 10000,
       "mia": 31536000
+    },
+    "timeSeries": {
+      "mbs": 10000000,
+      "mni": 10000,
+      "mia": 31536000,
+      "peid_default": 0,
+      "mdt_default": 60,
+      "max_points_per_sweep": 10000,
+      "mdn_default": 10000
     },
     "datasetPolicy": {
       "tcd": 60,

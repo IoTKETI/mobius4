@@ -21,6 +21,69 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.16.0 (2026-08-16)
+
+**Why MINOR**: `<timeSeries>` and `<timeSeriesInstance>` are oneM2M resource types that did
+not exist here before, and `db/migrations/v4.16.0.sql` is a backward-compatible schema
+change (two new tables, nothing altered). Both are MINOR triggers by the table above.
+
+### Added `<timeSeries>` (ty=29) and `<timeSeriesInstance>` (ty=30): CRUD, retention, and the first layer of missing-data detection
+
+`TS-0001:10.2.4.20` draws the line between `<timeSeries>` and `<container>` in one sentence:
+"similar in function to `<container>` and `<contentInstance>`, however a `<timeSeries>`
+provides missing data detection." Until now this CSE had no way to notice that a periodic
+sensor stopped sending — data loss was silent.
+
+What a client can do with this release:
+
+- Create a `<timeSeries>` with a retention policy (`mni`/`mbs`/`mia`, same semantics as
+  `<container>`) and read it back with `mdd`/`mdc` (missing-data-detect flag and current
+  count) always present in the response, per `TS-0001:9.6.36`.
+- Create `<timeSeriesInstance>` children under it (`TS-0001:9.6.37`); `dataGenerationTime`
+  (`dgt`) is enforced unique among siblings, and retention eviction removes the instance with
+  the oldest `dgt` first when `mni`/`mbs`/`mia` is exceeded (`TS-0001:10.2.4.25`).
+- UPDATE on a `<timeSeriesInstance>` is refused — `TS-0001:10.2.4.27` says the operation does
+  not apply to this type — and DELETE on the `<timeSeries>` itself stops the detection
+  timers, per `TS-0001:10.2.4.24`.
+- Retrieve `<latest>`/`<oldest>` virtual children, ordered by `dataGenerationTime` rather than
+  arrival order — `<container>` orders by insertion (`stateTag`), but a `<timeSeries>` has no
+  `stateTag` at all (absent from both attribute tables) and the data's own timestamp is the
+  more meaningful axis for a time series.
+- Set `periodicInterval`/`missingDataDetect` and get missing-data detection running: a
+  periodic sweep (gated the same way the existing expired-resource cleanup is, so only one
+  CSE instance runs it) computes the detection arithmetic of `TS-0001:10.2.4.29` and records
+  missing points into `missingDataList`/`missingDataCurrentNr`, pushing out the oldest entry
+  once `missingDataMaxNr` is reached. Toggling `missingDataDetect` clears and restarts the
+  list, per `10.2.4.29`'s pause/resume rule. Changing `missingDataDetectTimer`,
+  `missingDataMaxNr`, `periodicIntervalDelta` or `periodicInterval` while detection is paused
+  also clears the list, per the same clause's addition to `10.2.4.23`'s "Processing at
+  Receiver" row — and `10.2.4.23`'s **Exceptions** row requires an error instead of a clear when
+  detection is running, which this release now returns (`BAD_REQUEST`) rather than clearing and
+  continuing. The sweep bounds how many expected points it examines per `<timeSeries>` per tick
+  (`default.timeSeries.max_points_per_sweep`, resuming from where it left off on the next tick)
+  rather than building the whole range at once — an old `<timeSeriesInstance>` backfilled at a
+  small `periodicInterval` could otherwise imply hundreds of thousands of points computed
+  synchronously in one pass. An omitted `missingDataDetectTimer` now derives its default from
+  `periodicIntervalDelta` when one is present, rather than a flat 60s, so a legal
+  `peid > 60` configuration cannot make the CSE detect a point as missing before the delta
+  window it declared could close. And the sweep tells a genuine gap apart from an instance that
+  arrived and was later evicted by retention (`10.2.4.25`) before any sweep looked at it —
+  restricting its query to instances new enough to matter and skipping (without recording) any
+  expected point whose whole window predates the oldest surviving instance.
+
+What it cannot do yet: **nothing subscribes to it.** `10.2.4.29` also defines a
+`<subscription>`-side reporting path — a `missingData` condition in
+`eventNotificationCriteria`, `notificationEventType=8`, a per-subscription window timer — and
+none of that is built. `cse/noti.js` still only knows event types 1 through 4, so an AE has no
+way to be told about a missing point short of polling `missingDataList` itself.
+`TP/oneM2M/CSE/TS/003` through `005` (the notification test purposes) are consequently not
+covered, and neither is the fuller TS-0018 DMR parameter-expansion catalogue for these two
+types (67 for `_TS`, 6 for `_TSI` by our own count of the corpus) — this release carries over
+one representative test purpose per CRUD operation, not the full set, since most of the rest
+exercise addressing/filtering/`rcn`/error-code paths already covered by other resource types.
+The feature inventory (`mobius4-dev-tool` `features/inventory.yaml`) accordingly records this
+as partial (⚠️), not complete.
+
 ## v4.15.1 (2026-08-15)
 
 ### Discovery and `rcn=4`/`rcn=8` return child resources newest first — and in a fixed order
