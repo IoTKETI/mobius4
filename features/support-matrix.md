@@ -66,6 +66,40 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
 | **total** | | **38 / 112** | **73** |
 
+## Resource types
+
+The same entries, grouped by the resource type they act on rather than by test-suite
+area. An area folds several resource types together, so it cannot answer the question
+most readers arrive with — whether a particular resource type works here.
+
+A type is ✅ only when every operation recorded for it is implemented and tested, so a
+type whose CRUD works but whose announcement does not reads as ⚠️ with a zero in the
+✅ column — read all three counts, not the first one alone. The operations column lists
+the operations this inventory tracks for the type, not the ones the standard defines.
+
+| resource type | status | ✅ / ⚠️ / ❌ | operations | test purposes |
+|---|---|---|---|---|
+| `<accessControlPolicy>` (acp) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
+| `<AE>` (ae) | ✅ full | 4 / 0 / 0 | CREATE, RETRIEVE, UPDATE | 11 |
+| `<container>` (cnt) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
+| `<contentInstance>` (cin) | ⚠️ partial | 4 / 0 / 2 | CREATE, DELETE, RETRIEVE | — |
+| `<flexContainer>` | ⚠️ partial | 0 / 2 / 0 | CREATE, UPDATE | — |
+| `<group>` (grp) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
+| `<node>` (nod) | ❌ none | 0 / 0 / 3 | CREATE, RETRIEVE, UPDATE | — |
+| `<remoteCSE>` (csr) | ✅ full | 6 / 0 / 0 | CREATE, DELETE, RETRIEVE, UPDATE | — |
+| `<subscription>` (sub) | ✅ full | 5 / 0 / 0 | CREATE, DELETE, RETRIEVE, UPDATE | — |
+| `<timeSeries>` (ts) | ⚠️ partial | 0 / 4 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | 3 |
+| `<timeSeriesInstance>` (tsi) | ⚠️ partial | 0 / 3 / 3 | CREATE, DELETE, RETRIEVE, UPDATE | 1 |
+
+## Known limitations
+
+What a type marked ⚠️ does not do yet. Silence here is not a promise: a type may be
+⚠️ for a reason nobody has written down, and this list only shows the reasons that
+were.
+
+- `<timeSeries>` — Missing-data detection records into missingDataList but does not notify: the missingData condition of eventNotificationCriteria and notificationEventType=8 are not implemented.
+- `<timeSeriesInstance>` — dataGenerationTime accepts only the absolute YYYYMMDDTHHMMSS form; the fractional-second and relative-offset forms that TS-0004 permits for absRelTimestamp are rejected.
+
 ## Non-normative entries (candidate solutions and project proposals)
 
 These entries are **not part of the ratified oneM2M standard**. The `source` column
