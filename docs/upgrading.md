@@ -109,6 +109,44 @@ already carry every column it sorts on.
 
 ---
 
+## v4.15.0
+
+### Required: DB migration
+
+`db/migrations/v4.15.0.sql` touches the AI/ML tables only. A deployment that has never created
+an `<mlModel>`, `<modelRepo>`, `<modelDeployment>` or `<dataset>` has nothing at risk in it, but
+still has to run it — later releases assume the schema it produces.
+
+**`<mlModel>`'s stored bytes change type, and a bad row stops the migration.** `mmd.mmd` becomes
+`BYTEA`, converted with `decode(mmd, 'base64')`. Until this release nothing checked that the
+stored text was valid base64, so a row that is not will fail the migration outright rather than
+decode to garbage. That is deliberate — silently storing rubbish is worse — but it means the
+migration can stop partway on a database that has been accepting arbitrary content. Check first:
+
+```sql
+SELECT ri FROM mmd WHERE mmd !~ '^[A-Za-z0-9+/]*={0,2}$' OR length(mmd) % 4 <> 0;
+```
+
+Any row this returns has to be corrected or deleted before the migration will run.
+
+`mlModelSize` (`mms`) changes value as a consequence: it used to measure the base64 *text*, which
+inflates by 4/3, so `mms` and the `currentByteOfModels`/`maxByteOfModels` budget it feeds were
+about a third larger than the model actually is. After the migration they report the real size.
+A deployment that tuned `maxByteOfModels` against the inflated figure is now roughly a third
+more permissive than it intended.
+
+The migration also drops three columns (`mrp.mmd_list`, `mdp.dpm_list`, `dts.dsf_list`) that
+duplicated the parent-child link already held in `lookup`, and adds five `<mlModel>` attributes.
+None of that needs anything from you.
+
+### Not required, but read it if you use `<modelDeployment>`
+
+CREATE can now reject a deployment whose model is incompatible with the target — it could not
+before, because the two descriptor attributes it compares did not exist. A deployment that never
+sets them sees no change.
+
+---
+
 ## v4.14.0
 
 ### Required only if your client computes `ofst` itself: the offset filter is 1-based
