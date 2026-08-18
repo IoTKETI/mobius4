@@ -452,3 +452,49 @@ test("discovery keeps <timeSeriesInstance> decisions apart when their parents' p
   assert.ok(!found.includes(b.tsiSid),
     `a TSI under a policy that does not name this originator leaked in: ${JSON.stringify(found)}`);
 });
+
+// Revoking access on the parent must actually revoke it — the direction the four tests above
+// cannot see.
+//
+// They all read a <tsi> the administrator created, as some other originator. If <tsi> fell out of
+// NORM_RES_WITHOUT_ACPI those would fail too, because Case D would compare int_cr against an
+// originator that is not the creator and refuse. So they pin "the parent's policy is consulted",
+// but only where Case B and Case D happen to agree.
+//
+// The two disagree exactly when the originator IS the creator and the parent's policy says no.
+// Case B refuses; Case D grants, because a <timeSeriesInstance> has no acpi column of its own and
+// the empty-acpi branch falls back to int_cr == fr. That is an over-grant, and it is the shape a
+// real deployment meets: an AE writes its own data, the operator later takes the AE off the
+// parent's policy, and the AE keeps reading what it wrote.
+test("a <timeSeriesInstance>'s creator loses access when the parent's policy stops naming it", async () => {
+  const granting = await policyGranting(OTHER_AE, 63);
+  const rn = uniqueRn("ts");
+  const ts = await create(srv.baseUrl, parent, 29, { "m2m:ts": { rn, acpi: [granting] } });
+  assert.equal(ts.rsc, "2001", `<ts> setup failed: ${ts.raw.slice(0, 200)}`);
+  const tsSid = `${parent}/${rn}`;
+
+  // OTHER_AE creates the instance, so it is the creator this time — unlike every fixture above.
+  const tsi = await create(srv.baseUrl, tsSid, 30, {
+    "m2m:tsi": { dgt: "20260818T000000", con: "mine" },
+  }, { originator: OTHER_AE });
+  assert.equal(tsi.rsc, "2001", `<tsi> setup failed: ${tsi.raw.slice(0, 200)}`);
+  const tsiSid = `${tsSid}/${tsi.body["m2m:tsi"].rn}`;
+
+  // It can read its own instance while the parent's policy still names it.
+  const before = await retrieve(srv.baseUrl, tsiSid, { originator: OTHER_AE });
+  assert.equal(before.rsc, "2000", "precondition: the creator can read it before revocation");
+
+  // The operator moves the parent to a policy that does not name OTHER_AE.
+  const revoked = await policyGranting(THIRD_AE, 63);
+  const upd = await update(srv.baseUrl, tsSid, { "m2m:ts": { acpi: [revoked] } });
+  assert.equal(upd.rsc, "2004", `revocation failed: ${upd.raw.slice(0, 200)}`);
+
+  const after = await retrieve(srv.baseUrl, tsiSid, { originator: OTHER_AE });
+  assert.equal(after.rsc, "4103",
+    "the parent's policy no longer names the creator, so the child must not be readable either");
+
+  // And the revocation is about the policy, not about that one originator: THIRD_AE, which the
+  // new policy does name, can read the instance it did not create.
+  const third = await retrieve(srv.baseUrl, tsiSid, { originator: THIRD_AE });
+  assert.equal(third.rsc, "2000", "the new policy decides for the child, in both directions");
+});
