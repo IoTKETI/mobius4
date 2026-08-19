@@ -21,6 +21,24 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.16.1 (2026-08-19)
+
+**Why PATCH**: a bug fix that restores an existing filter criterion. No new capability and no
+schema change — the `cr` column was already present on every resource table. PATCH by the
+table above.
+
+### Fixed: the `cr` (creator) discovery filter answered 5000 instead of matching
+
+A discovery with `?fu=1&cr=<identity>` returned RSC 5000 (internal error) rather than
+narrowing results by creator. `set_where_clause` (`cse/hostingCSE.js`) built the creator
+condition as `where.rn = rn` — a leftover copy of the resource-name branch that assigned the
+(undefined) `rn` instead of `cr`. The per-type query then carried a malformed condition and
+could return nothing. It now filters on the `cr` column, which every resource table already
+has; `creator` is a discovery filter criterion in `TS-0004:7.3.3.17.9`. Exact match only —
+the wildcard form that clause also permits (`creator=CAE-ID*`) is not part of this fix. Found
+while verifying a SQL-injection report against the discovery filters — the filter values were
+parameter-bound throughout, so this was a correctness bug, not an injection.
+
 ## v4.16.0 (2026-08-16)
 
 **Why MINOR**: `<timeSeries>` and `<timeSeriesInstance>` are oneM2M resource types that did

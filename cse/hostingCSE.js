@@ -1336,7 +1336,7 @@ function set_where_clause(req_prim) {
 		}
 	}
 	if (cr) {
-		where.rn = rn;
+		where.cr = cr;
 	}
 
 	// in the list
