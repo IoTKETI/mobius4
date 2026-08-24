@@ -467,19 +467,26 @@ function get_to_info(req_prim) {
 // when 'to' includes postfix after virtual resource name, this function returns 'true'
 // e.g. 'base/grp/fopt/path' and 'base/cnt/la/3'
 async function set_virtual_res_info(req_prim) {
+  // The name has to match a whole path segment, not a substring. Matching with
+  // includes("/" + name) made the virtual resource of a container depend on the name of that
+  // container: in 'Mobius/temp1/lamp/la' the first "/la" is inside "/lamp", so to_parent came
+  // out as 'Mobius/temp1' and the remainder as 'mp/la', and the "'cnt/la' but not 'cnt/later'"
+  // guard below then returned out of the whole function -- the request fell through to an
+  // ordinary RETRIEVE and answered 4004. Every resource whose name merely starts with 'la',
+  // 'ol' or 'fopt' lost its virtual children that way (measured 2026-08-24: lamp, later, label,
+  // fopta -> 404; led, DATA, olive -> 200). BACKLOG-118.
+  //
+  // The list order still decides which name wins when a path carries more than one -- 'fopt'
+  // comes first so that 'grp/fopt/la' is the group's fopt with vr_path 'la'.
+  const segments = req_prim.to.split("/");
   for (const vir_res_name of hostingCSE.virtual_res_names) {
-    // const vir_res_name = item; // this assginement is needed indeed, to prevent async handling error
-    if (req_prim.to.includes("/" + vir_res_name) === true) {
-      const to_parent = req_prim.to.split("/" + vir_res_name)[0];
-      // req_prim.sid = to_parent;
-
-      // 'cnt/la' is virtual resource, but 'cnt/later' is not
-      const remainder = req_prim.to.split("/" + vir_res_name)[1];
-      if (remainder && remainder[0] != "/") {
-        return;
-      }
-
-      const vir_res_path = req_prim.to.split(vir_res_name + "/")[1];
+    // A virtual resource is always someone's child, so index 0 cannot be it. Resources cannot
+    // be named after one either (hostingCSE.js rejects such an 'rn' with 4005), so the first
+    // matching segment is the virtual resource and anything after it is its path.
+    const idx = segments.indexOf(vir_res_name);
+    if (idx >= 1) {
+      const to_parent = segments.slice(0, idx).join("/");
+      const vir_res_path = segments.slice(idx + 1).join("/");
 
       // by now, the parent_res_id is in structured ID format
       // get parent resource and cross-check with child virtual resource

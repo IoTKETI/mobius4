@@ -43,7 +43,7 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Announcement (ANNC) | ❌ none | 0 / 23 | — |
 | Device automation (DAU) | ❌ none | 0 / 1 | — |
 | Discovery (DIS) | ⚠️ partial | 0 / 1 | — |
-| Data management and repository (DMR) | ⚠️ partial | 24 / 39 | 4 |
+| Data management and repository (DMR) | ⚠️ partial | 24 / 39 | 6 |
 | flexContainer (FLXC) | ⚠️ partial | 0 / 2 | — |
 | General capability (GEN) | ⚠️ partial | 4 / 8 | — |
 | Group management (GMG) | ⚠️ partial | 3 / 4 | 21 |
@@ -64,7 +64,7 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Subscription and notification (SUB) | ⚠️ partial | 2 / 7 | — |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
 | Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
-| **total** | | **38 / 112** | **73** |
+| **total** | | **38 / 112** | **75** |
 
 ## Resource types
 
@@ -82,7 +82,7 @@ the operations this inventory tracks for the type, not the ones the standard def
 | `<accessControlPolicy>` (acp) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
 | `<AE>` (ae) | ✅ full | 4 / 0 / 0 | CREATE, RETRIEVE, UPDATE | 11 |
 | `<container>` (cnt) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
-| `<contentInstance>` (cin) | ⚠️ partial | 4 / 0 / 2 | CREATE, DELETE, RETRIEVE | — |
+| `<contentInstance>` (cin) | ⚠️ partial | 4 / 0 / 2 | CREATE, DELETE, RETRIEVE | 2 |
 | `<flexContainer>` | ⚠️ partial | 0 / 2 / 0 | CREATE, UPDATE | — |
 | `<group>` (grp) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
 | `<node>` (nod) | ❌ none | 0 / 0 / 3 | CREATE, RETRIEVE, UPDATE | — |
