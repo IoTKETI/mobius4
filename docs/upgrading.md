@@ -49,6 +49,23 @@ as a credential applies with more force.
 
 ---
 
+## v4.16.2
+
+### Nothing required, but check your resource names
+
+No migration and no configuration change. What changes is that `<latest>`, `<oldest>` and
+`<fanOutPoint>` now work under a parent whose `resourceName` begins with `la`, `ol` or `fopt`
+— they answered 404 / RSC 4004 before.
+
+If you worked around this by renaming a resource (`lamp` → `led`, say) so that `.../la` would
+resolve, the rename is no longer needed. Undoing it is optional and changes nothing either way.
+
+Nothing that worked before stops working: a child named `later` is still an ordinary child, not
+`la` with a leftover, and `grp/fopt/la` is still the group's `<fanOutPoint>` with `la` as the
+relative path.
+
+---
+
 ## v4.16.0
 
 ### Required: DB migration

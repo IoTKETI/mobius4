@@ -21,6 +21,34 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.16.2 (2026-08-24)
+
+**Why PATCH**: a bug fix that restores addressing which was already meant to work. No new
+capability, no schema change — `<latest>`, `<oldest>` and `<fanOutPoint>` were all implemented
+and tested; what was broken was which parents could reach them. PATCH by the table above.
+
+### Fixed: `<latest>`, `<oldest>` and `<fanOutPoint>` were unreachable under a parent whose name starts with `la`, `ol` or `fopt`
+
+`GET Mobius/temp1/lamp/la` answered **404 / RSC 4004** while the same request against a
+container named `led` or `DATA` answered 2000. The parent's own name decided whether its
+virtual children existed.
+
+`set_virtual_res_info` (`cse/reqPrim.js`) located the virtual resource with
+`to.includes("/" + name)`, a substring test. In `Mobius/temp1/lamp/la` the first `/la` matches
+inside `/lamp`, so the parent came out as `Mobius/temp1` and the leftover as `mp/la`; the guard
+that separates `cnt/la` from `cnt/later` then returned out of the whole lookup, and the request
+was handled as an ordinary RETRIEVE of a resource that does not exist. Any parent whose name
+merely *starts with* one of the three virtual resource names lost its virtual children —
+measured: `lamp`, `later`, `label`, `fopta` answered 4004, `led`, `DATA` answered 2000.
+
+The name is now matched against a whole path segment. `<latest>` is a virtual child of every
+`<container>` (`TS-0001:9.6.6`) and nothing in the specification makes that addressing depend
+on what the parent is called. The list order is unchanged, so `grp/fopt/la` is still the
+group's `<fanOutPoint>` with `la` as the relative path.
+
+Found while a container named `lamp` — the name the freeboard dashboard course hands out for
+an LED container — made a Grafana panel go blank.
+
 ## v4.16.1 (2026-08-19)
 
 **Why PATCH**: a bug fix that restores an existing filter criterion. No new capability and no
