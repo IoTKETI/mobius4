@@ -86,8 +86,61 @@ Excluded from HTTP access logging. Exposes default Node.js process metrics plus:
 
 ## Resource browser tool
 
-Mobius provides a oneM2M resource browser tool for real-time monitoring of resource events in Mobius4. The Mobius4-compatible resource browser can be downloaded from the "Releases" menu on the GitHub repository.
+A terminal tool for exploring a running Mobius4 — walk the resource tree, read attributes, and
+watch resources change in real time. Download a build for your OS from the **Releases** menu on
+this repository; **no Python or other runtime is needed.**
 
 ![oneM2M resource browser](images/res_browser.png)
 
-When the popup requests an ACP Originator name, enter your Admin ID from the configuration (e.g. `SM`) to have full privileges to access all resources.
+| Platform | Asset |
+|---|---|
+| macOS (Apple Silicon) | `mobius4-browser-<version>-macos-arm64.zip` |
+| macOS (Intel) | `mobius4-browser-<version>-macos-x86_64.zip` |
+| Linux (x86_64) | `mobius4-browser-<version>-linux-x86_64.zip` |
+| Linux (arm64) | `mobius4-browser-<version>-linux-arm64.zip` |
+| Windows (x64) | `mobius4-browser-<version>-windows-x86_64.zip` |
+
+Unzip it and run the `mobius4-browser` executable inside:
+
+```bash
+unzip mobius4-browser-<version>-linux-x86_64.zip
+./mobius4-browser-<version>-linux-x86_64/mobius4-browser
+```
+
+### macOS: clear the quarantine flag first
+
+Downloads from the internet are marked with the `com.apple.quarantine` attribute. Because these
+builds are not signed with an Apple Developer ID, Gatekeeper **kills the process with no message
+at all** — no dialog, no output, the command simply exits. Clear the attribute in the unzipped
+folder:
+
+```bash
+xattr -r -d com.apple.quarantine ./mobius4-browser-<version>-macos-arm64
+```
+
+### First run
+
+On first start the tool asks for the connection details, then stores them as a profile:
+
+| Field | Value |
+|---|---|
+| Host / Port | Where Mobius4 serves HTTP (e.g. `localhost` / `7579`) |
+| CSEBase name | `cseBaseName` from your configuration (default `Mobius`) |
+| Originator | Your **Admin ID** (`cseAdmin`) to see everything; any AE-ID to see what that AE sees |
+| MQTT broker | Optional — needed only to receive notifications; without it the tool polls |
+
+> Set the originator to an AE-ID rather than the admin to check what that AE is actually allowed
+> to see. The header line always states whose view you are looking at.
+
+### What it does beyond browsing
+
+- **Watch (`w`)** — creates a `<subscription>` and highlights attributes as they change. Every
+  subscription it creates carries a lease (`expirationTime`) and a label, and is deleted on exit;
+  a later run cleans up anything a crash left behind.
+- **Write (`n` create, `e` edit, `D` delete)** — confirmation gets stricter the more that is at
+  risk. Deleting shows what disappears with it first. Set `environment: production` in the profile
+  when pointing at a production CSE to raise every confirmation a step.
+- **Standard-only** — it never uses a Mobius4-specific API, so what you see is what any conformant
+  oneM2M client would see.
+
+Source, full user guide and issue tracker: <https://github.com/ooosm/mobius4-browser>

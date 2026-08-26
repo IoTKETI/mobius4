@@ -71,6 +71,21 @@ Operations:
 - Local configuration override via `config/local.json` (gitignored) — credentials and environment-specific settings never committed
 - PM2 process management via `ecosystem.config.js` — auto-restart, environment profiles, graceful stop integration
 
+## Resource browser
+
+A terminal tool for exploring a running Mobius4 — walk the resource tree, read attributes with
+their long names decoded, and watch resources change in real time over subscriptions.
+
+![oneM2M Resource Browser](docs/images/res_browser.png)
+
+It is a **standard oneM2M client**, not a Mobius4 add-on: everything it shows comes from ordinary
+RETRIEVE, discovery and subscription requests, so it works against other CSEs too. Short names are
+resolved from the TS-0004 tables (`3 = container`), timestamps are rendered in your local time, and
+attributes that point at other resources are marked so you can follow them.
+
+Download a build for your OS from the [Releases](../../releases) page — **no Python needed**. See
+[docs/operations.md](docs/operations.md#resource-browser-tool) for setup and the macOS note.
+
 ## Postman scripts
 
 Try oneM2M APIs over HTTP binding with Postman client. You can download [Postman script collection](./docs/Mobius4.postman_collection.json) and import it on your Postman. There are two variables set in the collection `mp_url` for Mobius4 platform URL and `cb` for CSEBase resource name, so please add in your Postman variable settings. 
@@ -95,13 +110,57 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 - PostGIS v3.6 — **required, not optional.** `db/init.js` declares `GEOMETRY(GEOMETRY, 4326)` columns on the resource tables, so schema creation fails without the extension even if you never issue a geo-query. Developed on 3.6.4; CI runs the `postgis/postgis:17-3.6-alpine` image. 3.x releases below 3.6 are expected to work but are not tested here. Enable it per database with `CREATE EXTENSION postgis;`.
 - MQTT broker (e.g. Mosquitto)
 
-**With Docker, there is nothing on this list to install** and no database to create by hand:
-`cp .env.example .env && docker compose up -d` brings up Mobius4, PostgreSQL with PostGIS and an
-MQTT broker together — see **[docs/docker.md](docs/docker.md)**.
+**With Docker, there is nothing on this list to install** and no database to create by hand —
+see [Installation → With Docker Compose](#with-docker-compose) below.
 
 For OS-specific installation instructions (Windows, macOS, Linux): [docs/installation.md](docs/installation.md)
 
 ## Installation
+
+Two ways. **Docker Compose is the shorter one** — it brings up Mobius4, PostgreSQL with PostGIS
+and an MQTT broker together, so nothing on the Prerequisites list has to be installed by hand.
+Install natively when you want Mobius4 running directly on the host, or already have a database
+and broker to point at.
+
+### With Docker Compose
+
+```bash
+git clone https://github.com/iotketi/mobius4
+cd mobius4
+cp .env.example .env
+# edit .env: DB_PW and CSE_POA at least
+docker compose up -d
+curl localhost:7599/health
+```
+
+That is the whole install — no Node, no database, no manual `createdb`. The schema is created on
+first boot.
+
+| Service | Image | Published to the host |
+| :--- | :--- | :---: |
+| `mobius4` | built from this repository | 7599 (HTTP), 7580 (HTTPS, when enabled) |
+| `postgres` | `postgis/postgis:17-3.5` | **no** |
+| `mosquitto` | `eclipse-mosquitto:2` | **no** |
+
+The database and the broker are reachable from the compose network and nowhere else. For a `psql`
+session, use `docker compose exec postgres psql -U "$DB_USER" "$DB_NAME"`.
+
+To upgrade later:
+
+```bash
+git pull
+docker compose build
+docker compose up -d
+```
+
+> **On Apple Silicon and other arm64 hosts**, the official PostGIS image is `linux/amd64` only and
+> the pull fails with `no matching manifest for linux/arm64`. Set `POSTGRES_IMAGE` in `.env` to a
+> multi-architecture build — `.env.example` names two.
+
+Everything else — HTTPS, MQTT, the administrator identity, backup and restore, registering with
+another CSE, and what to check before upgrading — is in **[docs/docker.md](docs/docker.md)**.
+
+### Native install
 
 1. Create a database named `mobius4` on PostgreSQL
 
