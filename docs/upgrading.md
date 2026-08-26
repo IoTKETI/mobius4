@@ -49,6 +49,26 @@ as a credential applies with more force.
 
 ---
 
+## v4.17.0
+
+### Nothing required
+
+No migration, no configuration change, and nothing existing behaves differently. The CSE subscribes
+to one additional MQTT topic pair (`/oneM2M/reg_req` and `/oneM2M/reg_resp`, `TS-0010:6.4.4`); every
+topic that worked before works the same way.
+
+Two things to know if you plan to use it:
+
+- **It accepts registration only** — `<AE>` and `<remoteCSE>` creation. Any other operation sent
+  there is refused with 4005 OPERATION_NOT_ALLOWED. If you want a general-purpose request channel,
+  that is `/oneM2M/req`, unchanged.
+- **It does not authenticate.** `TS-0010:6.4.4` calls the topic's originator segment a
+  Credential-ID, but this CSE has no authentication layer, so the segment is an opaque string used
+  only to address the response. Reaching the topic proves nothing about who is asking — treat it
+  exactly as you treat `X-M2M-Origin` over HTTP.
+
+---
+
 ## v4.16.2
 
 ### Nothing required, but check your resource names
