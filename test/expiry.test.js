@@ -169,7 +169,16 @@ test("an expired <subscription> is still retrievable and discoverable", async ()
   const got = await retrieve(srv.baseUrl, fx.subDying);
   assert.equal(got.rsc, "2000");
 
-  const found = await discover(srv.baseUrl, CSE_BASE, { ty: "23" });
+  // Scoped to this file's own root rather than the <CSEBase>. The claim under test is that an
+  // expired <subscription> is still discoverable, and a discovery rooted here proves it just as
+  // well -- while a <CSEBase>-wide one silently depends on how many <subscription> rows the whole
+  // database holds. cse.discovery_limit caps the read at 200 rows per type, applied after the
+  // subtree condition in SQL but before anything reaches the client, so once the sub table passes
+  // 200 this assertion is deciding on a truncated list. Measured 2026-08-26 before the suite
+  // started resetting its database (scripts/reset-test-db.js): 236 sub rows, and a <CSEBase>-wide
+  // discovery returned exactly 200. It passed only because discovery is newest-first since
+  // v4.15.1 and this fixture is fresh -- luck, not a property this test was pinning.
+  const found = await discover(srv.baseUrl, root.sid, { ty: "23" });
   assert.ok(urils(found).includes(fx.subDying), "still discoverable until the sweep runs");
 });
 

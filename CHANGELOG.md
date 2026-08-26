@@ -21,6 +21,35 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## [Unreleased]
+
+### Fixed (tests): the suite decided on a database nobody reset
+
+`npm test` now recreates `mobius4_test` before it runs (`scripts/reset-test-db.js`, wired as
+`pretest`). It used to start from whatever the previous run left behind.
+
+Cleanup between runs is best-effort by design — `delete_a_res` removes descendants without
+awaiting, and `waitForSubtreeGone` gives up after five seconds rather than failing a test over
+slow cleanup — so rows accumulate. Measured 2026-08-26 before this change: 6804 `lookup` rows,
+1023 `<container>`, 236 `<subscription>`. One clean run leaves about 426 `lookup` rows behind,
+so the count climbs steadily.
+
+That matters because `cse.discovery_limit` (200) caps how many rows *per type* a discovery reads
+out of each table. A discovery scoped to a resource is unaffected: the subtree condition
+(`sid LIKE 'target/%'`) is applied in SQL before the limit. One aimed at the `<CSEBase>` reads the
+whole CSE and gets cut — and `test/expiry.test.js` had an assertion of exactly that shape,
+checking that its own `<subscription>` came back from a `<CSEBase>`-wide discovery. With 236 rows
+against a cap of 200 it was already deciding on a truncated list. It passed only because discovery
+has been newest-first since v4.15.1 and the fixture was fresh; under the oldest-first ordering
+that preceded it, the same accumulation would have hidden the fixture. That assertion is now
+scoped to the file's own root, which proves the same claim without depending on the size of the
+database.
+
+`test/discovery-scope-limit.test.js` pins the property that makes the scoped form the correct one:
+with the server started at `discovery_limit` 2, a scoped discovery still returns the target's own
+subtree while the `<CSEBase>`-wide one is truncated, and `lim` bounds the result from inside the
+scope. No runtime code changed.
+
 ## v4.16.2 (2026-08-24)
 
 **Why PATCH**: a bug fix that restores addressing which was already meant to work. No new
