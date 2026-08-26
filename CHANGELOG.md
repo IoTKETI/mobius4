@@ -21,7 +21,61 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## [Unreleased]
+## v4.17.0 (2026-08-26)
+
+**Why MINOR**: a oneM2M capability the CSE did not serve before. `/oneM2M/reg_req` is an entry
+point defined by `TS-0010:6.4.4` that nothing here subscribed to, so a conforming client using it
+got no answer at all. Purely additive — no existing topic, client or schema changes. MINOR by the
+table above, on the same reading as "new binding": the binding was already there, this is a part
+of it that was not.
+
+### Added: the MQTT registration topic (`TS-0010:6.4.4`)
+
+An Originator registering for the first time does not have an AE-ID, and the ordinary request
+topic's `<originator>` segment is that very ID (`TS-0010:6.4.2`). So the specification gives
+registration a topic pair of its own, carrying a Credential-ID instead:
+
+```
+/oneM2M/reg_req/<originator>/<receiver>/<type>
+/oneM2M/reg_resp/<originator>/<receiver>/<type>
+```
+
+Nothing subscribed to it. Measured on v4.16.2: publishing an `<AE>` CREATE there produced **no
+response whatsoever**. The CSE now serves the pair, and answers on `reg_resp` mirroring the request
+topic.
+
+**What was not broken**: registration over MQTT already worked through the ordinary `/oneM2M/req`
+topic — measured, an `<AE>` CREATE with `From` set to a made-up credential, to an empty string, or
+to nothing at all all answered 2001. This was a conformance gap, not a functional one, which is why
+nothing existing can notice the change.
+
+**The topic serves registration only.** `op=1` with `ty` of 2 (`<AE>`) or 16 (`<remoteCSE>`) is
+handled; anything else is refused **4005 OPERATION_NOT_ALLOWED**. Nothing in `TS-0010:6.4.4`
+demands that, and accepting everything would have been less code — but then the topic is an alias
+for `/oneM2M/req` under another name, clients come to depend on that, and narrowing it later breaks
+them.
+
+**It does not authenticate.** `TS-0010:6.4.4` calls the `<originator>` segment a Credential-ID,
+which is a `TS-0003` concept, and this CSE has no authentication layer. The segment is an opaque
+string used only to address the response. Reaching this topic proves nothing about who is asking.
+
+### Added (tests): the same behaviour asserted over both bindings
+
+`test/binding-parity.test.js` runs one test body per binding, following the arrangement
+`TS-0019:5.1` describes for the conformance ATS — one set of test purposes over interchangeable
+lower layers, with `bindingProtocol` a component parameter (`TS-0019:7.3`) rather than a fork in
+the tests.
+
+The suite was HTTP with a few MQTT tests bolted on: access control, discovery, `rcn`, retention,
+expiry and group fanout all went over HTTP only. For filterCriteria that was not merely untested
+but unwritable — `test/helpers/mqtt-onem2m.js` had nowhere to put `fc` at all, because the two
+bindings carry it in different places (HTTP in the query string, MQTT in the request primitive).
+`test/helpers/binding.js` takes a request structurally and lets each binding serialize it, so a
+test says what it wants and being wrong about where that lands is a defect the suite can see.
+
+Eleven behaviours now run on both: CRUD round trips, discovery narrowing by type, `lim`, `rcn=4`,
+`<latest>`, three error paths, and `<AE>` registration. Removing the MQTT `fc`/`rcn` passthrough
+turns exactly the three MQTT transport tests red and leaves every HTTP one green.
 
 ### Fixed (tests): the suite decided on a database nobody reset
 

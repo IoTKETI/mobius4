@@ -139,11 +139,16 @@ async function connect(brokerPort, { originator = ADMIN } = {}) {
   // bindings/mqtt.js derives the response topic from the *request topic's* originator segment
   // (mqtt.js:97), not from the primitive's `fr`, and that segment is fixed to whatever this
   // client subscribed at connect() time.
-  function request({ op, to, ty, pc, originator: fr = originator, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  // fc and rcn are primitive fields here, where the HTTP binding spells them as query parameters
+  // (TS-0010:6.4.1 against TS-0009:6.2.2.2). They had no way in at all until test/helpers/binding.js
+  // needed them, which is why no MQTT discovery test existed: it could not be written.
+  function request({ op, to, ty, pc, fc, rcn, originator: fr = originator, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
     const rqi = nextRqi();
     const reqPrim = { op, to, fr, rqi, rvi: "3" };
     if (ty !== undefined) reqPrim.ty = ty;
     if (pc !== undefined) reqPrim.pc = pc;
+    if (fc !== undefined) reqPrim.fc = fc;
+    if (rcn !== undefined) reqPrim.rcn = rcn;
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

@@ -3,6 +3,7 @@ const config = require("config");
 
 const logger = require("../logger").forFile(__filename);
 const reqPrim = require('../cse/reqPrim');
+const enums = require('../config/enums');
 const metrics = require('../metrics');
 
 let mqtt_client = null;
@@ -70,6 +71,12 @@ exports.init_client = async function () {
 
         try {
             await mqtt_client.subscribe(`/oneM2M/req/+${config.cse.cse_id}/json`);
+            // TS-0010:6.4.4 Initial Registration. An Originator that does not yet know its AE-ID
+            // or CSE-ID cannot address the topic above, whose <originator> segment is that very
+            // ID, so the specification gives registration a topic pair of its own carrying a
+            // Credential-ID instead. Only the topic names differ -- "except that they use Topics
+            // containing a credential ID" -- so the handling below is the ordinary request path.
+            await mqtt_client.subscribe(`/oneM2M/reg_req/+${config.cse.cse_id}/json`);
             await mqtt_client.subscribe('self/datasetManager/#');
             logger.info({ cseId: config.cse.cse_id }, 'mqtt subscriptions ready');
         } catch (err) {
@@ -105,9 +112,22 @@ exports.init_client = async function () {
     }
 };
 
+// The resource types a request on the registration topic may create. TS-0010:6.4.4 exists for an
+// Originator that "might not initially know its AE-ID or CSE-ID", and TS-0010:6.3.3 names the same
+// pair -- so <AE> and <remoteCSE> registration are what the topic is for. Anything else arriving
+// there is refused rather than served, so that the topic name means what it says; see the guard in
+// mqtt_receiver for why that is worth the two lines.
+const REGISTRATION_TYPES = [2, 16]; // <AE>, <remoteCSE>
+
 async function mqtt_receiver(req_topic, req_prim_str) {
-    const originator = req_topic.split('/')[3]; // topic: /oneM2M/req/<originator>/<receiver_id>/json
-    const resp_topic = '/oneM2M/resp/' + originator + '/' + config.cse.cse_id.split('/')[1] + '/json';
+    // topic: /oneM2M/req/<originator>/<receiver_id>/json, or /oneM2M/reg_req/... for an initial
+    // registration (TS-0010:6.4.4). The segment index is the same in both, and so is the response
+    // topic's shape -- only the literal changes, req/resp becoming reg_req/reg_resp.
+    const segments = req_topic.split('/');
+    const originator = segments[3];
+    const is_registration = segments[2] === 'reg_req';
+    const resp_literal = is_registration ? 'reg_resp' : 'resp';
+    const resp_topic = '/oneM2M/' + resp_literal + '/' + originator + '/' + config.cse.cse_id.split('/')[1] + '/json';
 
     const req_prim = JSON.parse(req_prim_str.toString());
 
@@ -121,6 +141,38 @@ async function mqtt_receiver(req_topic, req_prim_str) {
     }
 
     metrics.mqttMessagesTotal.inc();
+
+    // The registration topic serves registration only.
+    //
+    // Nothing in TS-0010:6.4.4 forbids other operations there, and letting them through would be
+    // fewer lines. It is refused anyway because the alternative is worse later: a topic that
+    // accepts everything is an alias for /oneM2M/req with a different name, clients come to rely
+    // on that, and narrowing it afterwards breaks them. Refusing now costs nothing, since
+    // registration is the only thing an Originator without an AE-ID can do.
+    //
+    // What this does NOT do is authenticate. TS-0010:6.4.4 calls the <originator> segment a
+    // Credential-ID, which is a TS-0003 concept, and mobius4 has no authentication layer at all
+    // (BACKLOG-104 in mobius4-dev-tool). The segment is carried as an opaque string and is used
+    // only to address the response, exactly as the ordinary request topic's originator segment is.
+    // Reaching this topic proves nothing about who is asking. Saying so here because the last
+    // mechanism that looked like proof and was not -- the mTLS listener removed in v4.7.0 -- read
+    // as an assurance to everyone who found it.
+    if (is_registration && !(req_prim.op === 1 && REGISTRATION_TYPES.includes(req_prim.ty))) {
+        const refused = {
+            rqi: req_prim.rqi,
+            rvi: req_prim.rvi || config.cse.versions[0],
+            rsc: enums.rsc_str['OPERATION_NOT_ALLOWED'],
+            pc: { 'm2m:dbg': 'the registration topic accepts only <AE> and <remoteCSE> creation' },
+        };
+        logger.warn({ topic: req_topic, op: req_prim.op, ty: req_prim.ty, rqi: req_prim.rqi },
+            'non-registration request on the registration topic');
+        try {
+            await mqtt_client.publish(resp_topic, JSON.stringify(refused));
+        } catch (err) {
+            logger.error({ err, topic: resp_topic }, 'mqtt publish failed');
+        }
+        return;
+    }
 
     const resp_prim = await reqPrim.prim_handling(req_prim);
 
