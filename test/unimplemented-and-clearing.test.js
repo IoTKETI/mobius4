@@ -20,7 +20,10 @@ const assert = require("node:assert/strict");
 const config = require("config");
 const { startServer } = require("./helpers/server");
 const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
-const { NORM_RES_WITHOUT_ACPI } = require("../cse/hostingCSE");
+// From its own module, not from cse/hostingCSE: requiring the CSE from a test process pulls in
+// configuration that only exists inside a spawned server, and doing so passed locally while
+// failing in CI with 'Configuration property "cse.admin" is not defined'.
+const { NORM_RES_WITHOUT_ACPI } = require("../cse/parent-governed-types");
 
 const SRT = config.get("cse.supported_resource_types");
 const TY_SMD = 24; // <semanticDescriptor>

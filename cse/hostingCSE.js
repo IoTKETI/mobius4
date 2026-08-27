@@ -1687,24 +1687,7 @@ function unsupported_resource_type(ty) {
 	return UNIMPLEMENTED_TYPES.has(Number(ty));
 }
 
-// Resource types whose access is decided by the parent's policy because the type has no
-// accessControlPolicyIDs attribute of its own: <contentInstance> (TS-0001:9.6.7, "does not have
-// its own accessControlPolicyIDs attribute") and <timeSeriesInstance> (TS-0001:9.6.37, same
-// wording).
-//
-// <schedule> used to be in this list and is not a member. TS-0001:9.6.9 gives <schedule> an
-// accessControlPolicyIDs of its own (0..1 RW), and TS-0001:9.6.1.3.2 turns on exactly that
-// distinction: a type with no such attribute defers to the parent, while a type that has one but
-// leaves it empty falls to the default access policy -- the custodian, or failing that the
-// creator alone. Deciding a <schedule> by its parent's policy is therefore wrong in both
-// directions: too open under a permissive parent, and locking the creator out under a strict one.
-//
-// Nothing observable changes today, because mobius4 does not implement <schedule>: there is no
-// models/sch-model.js, no cse/resources/sch.js, and config/enums.js has no "sch" in ty_str, so
-// enums.ty_str[ty] can never produce the string this list was matching. It is removed now because
-// the cost of leaving it is paid later and by someone else -- whoever implements <schedule> would
-// find the name already here and reasonably conclude it belonged. BACKLOG-043.
-const NORM_RES_WITHOUT_ACPI = ["cin", "tsi"];
+const { NORM_RES_WITHOUT_ACPI } = require('./parent-governed-types');
 
 async function access_decision(req_prim, resp_prim) {
 	let access_grant = false;
@@ -2142,10 +2125,6 @@ module.exports = {
 	set_ri_sid,
 	create_a_lookup_record,
 	create_a_res,
-	// Exported for test/unimplemented-and-clearing.test.js, which pins the membership. The list
-	// encodes a reading of TS-0001:9.6.1.3.2 that nothing else can check: <schedule> was in it for
-	// a type mobius4 does not implement, so no behaviour test could ever have caught it.
-	NORM_RES_WITHOUT_ACPI,
 	retrieve_a_res,
 	rcn48_retrieve,
 	rcn56_retrieve,
