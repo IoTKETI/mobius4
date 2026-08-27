@@ -181,6 +181,39 @@ test("the ordinary request topic still serves every operation", async () => {
   assert.equal(String(got.body.rsc), "2000", `expected OK: ${got.raw.slice(0, 200)}`);
 });
 
+test("an unserved serialization is refused rather than dropped", async () => {
+  // TS-0010:6.4.2 and 6.4.4 end both topics with a <type> segment of "xml", "json" or "cbor"
+  // (6.5.4). Only json is implemented. Before v4.17.1 the other two were not subscribed at all,
+  // so a request using either vanished — measured 2026-08-26, no response of any kind, which a
+  // client cannot tell apart from a dead CSE. They are subscribed now purely so the answer exists.
+  //
+  // The refusal is published as json on a json response topic, because emitting xml or cbor is
+  // precisely what this CSE cannot do. A client that cannot parse it is no worse off than with
+  // the silence, and it now has a response at all. BACKLOG-121 tracks implementing them properly.
+  for (const type of ["xml", "cbor"]) {
+    const cred = credential(`ser-${type}`);
+    const respTopic = `/oneM2M/resp/${cred}/${RECEIVER}/json`;
+    await raw.subscribe(respTopic);
+    const from = inbox.length;
+
+    // Deliberately not valid JSON: an xml or cbor payload is not, and the refusal has to come
+    // before parsing or the request dies on the parse instead.
+    await raw.publish(`/oneM2M/req/${cred}/${RECEIVER}/${type}`, "<not-json/>");
+
+    const deadline = Date.now() + 4000;
+    let hit = null;
+    while (Date.now() < deadline && !hit) {
+      hit = inbox.slice(from).find((m) => m.topic === respTopic);
+      if (!hit) await new Promise((r) => setTimeout(r, 25));
+    }
+
+    assert.ok(hit, `${type}: no response — silence is what this change exists to end`);
+    assert.equal(String(hit.body.rsc), "5001",
+      `${type}: expected NOT_IMPLEMENTED: ${hit.raw.slice(0, 200)}`);
+    assert.match(hit.body.pc["m2m:dbg"], /json/, "the message should say what to use instead");
+  }
+});
+
 test("the registration topic authenticates nothing — any credential string reaches it", async () => {
   // Not a feature. TS-0010:6.4.4 names the segment a Credential-ID, which in TS-0003 is something
   // a security framework establishes; mobius4 has no authentication layer, so the segment is an

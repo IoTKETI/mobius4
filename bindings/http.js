@@ -256,13 +256,13 @@ app.post('/*', async (req, resp) => {
     }
   }
   else if (resp_prim.rsc == enums.rsc_str["NOT_FOUND"]) {
-    resp.status(404).end();
+    send_error(resp, 404, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["OPERATION_NOT_ALLOWED"]) {
-    resp.status(405).end();
+    send_error(resp, 405, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["NOT_ACCEPTABLE"]) {
-    resp.status(406).end();
+    send_error(resp, 406, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["CONFLICT"]) {
     if (resp_prim.pc && resp_prim.pc["m2m:dbg"]) {
@@ -398,13 +398,13 @@ app.put('/*', async (req, resp) => {
     }
   }
   else if (resp_prim.rsc == enums.rsc_str["NOT_FOUND"]) {
-    resp.status(404).end();
+    send_error(resp, 404, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["OPERATION_NOT_ALLOWED"]) {
-    resp.status(405).end();
+    send_error(resp, 405, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["NOT_ACCEPTABLE"]) {
-    resp.status(406).end();
+    send_error(resp, 406, resp_prim);
   }
   else if (
     resp_prim.rsc == enums.rsc_str["NOT_IMPLEMENTED"] ||
@@ -459,15 +459,40 @@ app.delete('/*', async (req, resp) => {
     }
   }
   else if (resp_prim.rsc == enums.rsc_str["NOT_FOUND"]) {
-    resp.status(404).end();
+    send_error(resp, 404, resp_prim);
   }
   else if (resp_prim.rsc == enums.rsc_str["OPERATION_NOT_ALLOWED"]) {
-    resp.status(405).end();
+    send_error(resp, 405, resp_prim);
   }
   else {
     send_unmapped_rsc(resp_prim, resp, 'DELETE');
   }
 });
+
+// Sends an error response, carrying the CSE's own explanation when there is one.
+//
+// TS-0004:7.5.2 note 5 makes m2m:debugInfo "a plain text message which can optionally be included
+// as debugging information in error responses", TS-0004:7.2.1.2 lists it among the things a
+// response's Content may be, and TS-0009:6.5 maps the Content parameter to the message-body "for
+// all primitives" with two named exceptions -- partial Retrieve requests, and a 4103 carrying
+// Token Request Information. None of the codes below is an exception.
+//
+// Eight branches ended in a bare .end() and threw the message away: 404, 405 and 406 in the POST,
+// PUT and DELETE handlers (DELETE has no 406). The CSE had already built the text -- the
+// <contentInstance> size refusal names mbs, and the <modelDeployment> compatibility refusal names
+// the exact features the dataset was missing -- and the client got Content-Length: 0. Meanwhile
+// GET's own 404 branch already did carry it, so the file disagreed with itself.
+//
+// Only the eight broken sites are routed through here. The branches that were already correct
+// (400, 403, 409, GET's 404, 500) keep their inline form: converting them would be a change to
+// code that works, in a commit about code that does not.
+function send_error(resp, status, resp_prim) {
+  if (resp_prim.pc && resp_prim.pc["m2m:dbg"]) {
+    resp.status(status).json(resp_prim.pc);
+  } else {
+    resp.status(status).end();
+  }
+}
 
 // Last-resort responder for an RSC no branch above matched.
 //

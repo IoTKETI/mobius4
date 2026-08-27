@@ -210,21 +210,35 @@ const cnt_update_schema = Joi.object().keys({
     ...update_universal_attr,
 
     et: update_common_attr.et,
-    acpi: update_common_attr.acpi,
-    lbl: update_common_attr.lbl,
+    // .allow(null) on all six below: null is how oneM2M's UPDATE deletes an optional attribute,
+    // and update_a_cnt (cse/resources/cnt.js) has always had a branch for each of them. None of
+    // those branches could run — Joi rejected the null first, so a client asking to clear mni got
+    // 4000 "mni must be a number" and the clearing code sat there looking correct. Measured
+    // 2026-08-26 before this change: all six answered 4000 over HTTP. BACKLOG-046.
+    //
+    // The two groups mean different things, and cnt.js already distinguishes them: acpi, lbl and
+    // loc are set to null (deleted), while mni, mbs and mia fall back to the deployment default
+    // (config.default.container) rather than becoming unbounded, because a <container> with no
+    // retention policy is not the same thing as one whose policy was never set.
+    //
+    // Scoped to <container> deliberately. update_common_attr is shared with <AE>, <subscription>,
+    // <group>, <remoteCSE> and <accessControlPolicy>, and whether each of those handles a null is
+    // not something this change checked -- letting null through to a handler that does not expect
+    // it would replace a wrong rejection with a wrong acceptance. That sweep is the rest of
+    // BACKLOG-046.
+    acpi: update_common_attr.acpi.allow(null),
+    lbl: update_common_attr.lbl.allow(null),
     cr: update_common_attr.cr,
     st: update_common_attr.st,
-    loc: update_common_attr.loc,
+    loc: update_common_attr.loc.allow(null),
 
     // resource specific attributes
-    mni: Joi.number().integer().min(0),
-    mbs: Joi.number().integer().min(0),
-    // .allow(null): unlike mni/mbs/mia (whose null-clears-it branch in cnt.js is unreachable —
-    // Joi rejects null before that code runs, a pre-existing defect tracked as BACKLOG-046 —
-    // not fixed here), mbis is designed from the start to be clearable, and cnt.js's handling
-    // of prim_res.mbis === null depends on this actually reaching it.
+    mni: Joi.number().integer().min(0).allow(null),
+    mbs: Joi.number().integer().min(0).allow(null),
+    // mbis was clearable from the start (v4.9.0): it is the one attribute whose null branch was
+    // reachable, because this .allow(null) was here and the others were not.
     mbis: Joi.number().integer().min(0).allow(null),
-    mia: Joi.number().integer().min(0)
+    mia: Joi.number().integer().min(0).allow(null)
 });
 
 // <timeSeries> — TS-0001:9.6.36. cni/cbs/mdc/mdlt are RO, so they are forbidden in a request

@@ -77,6 +77,16 @@ exports.init_client = async function () {
             // Credential-ID instead. Only the topic names differ -- "except that they use Topics
             // containing a credential ID" -- so the handling below is the ordinary request path.
             await mqtt_client.subscribe(`/oneM2M/reg_req/+${config.cse.cse_id}/json`);
+            // TS-0010:6.4.2 and 6.4.4 end both topics with a <type> segment that is "xml", "json"
+            // or "cbor" (6.5.4). Only json is served. Subscribing to the other two anyway is not a
+            // step towards serving them -- it is so that a client using one gets told. Before
+            // this, xml and cbor requests were not subscribed at all and simply vanished: measured
+            // 2026-08-26, publishing to either produced no response of any kind, which a client
+            // cannot tell apart from a dead CSE. BACKLOG-121 tracks actually implementing them.
+            for (const type of UNSERVED_SERIALIZATIONS) {
+                await mqtt_client.subscribe(`/oneM2M/req/+${config.cse.cse_id}/${type}`);
+                await mqtt_client.subscribe(`/oneM2M/reg_req/+${config.cse.cse_id}/${type}`);
+            }
             await mqtt_client.subscribe('self/datasetManager/#');
             logger.info({ cseId: config.cse.cse_id }, 'mqtt subscriptions ready');
         } catch (err) {
@@ -119,6 +129,10 @@ exports.init_client = async function () {
 // mqtt_receiver for why that is worth the two lines.
 const REGISTRATION_TYPES = [2, 16]; // <AE>, <remoteCSE>
 
+// Serializations TS-0010:6.5.4 names that this binding does not implement. Subscribed only so a
+// request using one is refused rather than dropped -- see the subscribe block above.
+const UNSERVED_SERIALIZATIONS = ['xml', 'cbor'];
+
 async function mqtt_receiver(req_topic, req_prim_str) {
     // topic: /oneM2M/req/<originator>/<receiver_id>/json, or /oneM2M/reg_req/... for an initial
     // registration (TS-0010:6.4.4). The segment index is the same in both, and so is the response
@@ -128,6 +142,25 @@ async function mqtt_receiver(req_topic, req_prim_str) {
     const is_registration = segments[2] === 'reg_req';
     const resp_literal = is_registration ? 'reg_resp' : 'resp';
     const resp_topic = '/oneM2M/' + resp_literal + '/' + originator + '/' + config.cse.cse_id.split('/')[1] + '/json';
+
+    // The serialization is the topic's last segment. An unserved one is answered before parsing:
+    // the payload is xml or cbor, so JSON.parse would throw and the request would be dropped for a
+    // second reason. The response goes out as json regardless -- a client that cannot read it is
+    // no worse off than with the silence this replaces, and the alternative is emitting a
+    // serialization this binding does not implement.
+    const serialization = segments[segments.length - 1];
+    if (UNSERVED_SERIALIZATIONS.includes(serialization)) {
+        logger.warn({ topic: req_topic, serialization }, 'unserved serialization on an oneM2M topic');
+        try {
+            await mqtt_client.publish(resp_topic.replace(new RegExp(`/${serialization}$`), '/json'), JSON.stringify({
+                rsc: enums.rsc_str['NOT_IMPLEMENTED'],
+                pc: { 'm2m:dbg': `serialization '${serialization}' is not supported by this CSE; use json` },
+            }));
+        } catch (err) {
+            logger.error({ err, topic: resp_topic }, 'mqtt publish failed');
+        }
+        return;
+    }
 
     const req_prim = JSON.parse(req_prim_str.toString());
 

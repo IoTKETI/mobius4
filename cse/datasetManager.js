@@ -58,12 +58,24 @@ async function create_a_historical_dataset(dsp_res, dst, det, lof) {
         pc: { "m2m:dts": dts_res },
         ri: cb_res.ri,
         sid: cb_res.rn,
-        to_ty: 5, // cb resource type
-        fr: admin_id
+        ty: 106,    // dts resource type -- selects hostingCSE.create_a_res's dispatch case
+        to_ty: 5,   // cb resource type (the parent)
+        fr: admin_id,
+        // Marks this as a request the CSE raised itself. create_a_res refuses ty 106/107 without
+        // it, because TR-0071:7.2.3.2 defines no client-facing Create for <dataset>.
+        int_cr_req: true
     };
     const tmp_resp_dts = {};
 
-    await dts.create_a_dts(tmp_req, tmp_resp_dts);
+    // Routed through create_a_res rather than calling dts.create_a_dts directly, for the same
+    // reason <datasetFragment> is (see create_historical_dataset_fragments below): the
+    // notification that follows create_a_res's dispatch switch is the only one there is, so a
+    // <dataset> created this way was invisible to anyone subscribed to the <CSEBase>'s children.
+    // <datasetFragment> was fixed this way earlier and <dataset> was left behind, which meant
+    // "internal creates skip notification" held for one of the two and not the other, with
+    // nothing saying which was intended. BACKLOG-097.
+    const { create_a_res } = require('./hostingCSE');
+    await create_a_res(tmp_req, tmp_resp_dts);
     const dts_res_created = tmp_resp_dts.pc["m2m:dts"];
     const hdi = cb_res.rn + '/' + dts_res_created.rn;
 
@@ -334,7 +346,9 @@ async function create_dataset_fragments(rows, nrhd, dsfm, dts_ri) {
                      // Distinct from 'to_ty' below (the *parent's* type, which dsf.create_a_dsf
                      // still reads for its own parent-type check).
             to_ty: 106, // dts resource type
-            fr: admin_id
+            fr: admin_id,
+            // See the <dataset> create above: create_a_res refuses ty 106/107 without this.
+            int_cr_req: true
         };
         const tmp_resp = {};
 
@@ -560,7 +574,10 @@ async function create_a_live_dsf(dsp_ri, dts_ri, dts_sid, duration, nvp) {
         ty: 107, // dsf resource type -- see create_dataset_fragments() above for why this goes
                  // through create_a_res (notification) rather than dsf.create_a_dsf directly.
         to_ty: 106, // dts resource type
-        fr: admin_id
+        fr: admin_id,
+        // The live path's fragment create. Same marker as the other two internal creates in this
+        // file: create_a_res refuses ty 106/107 without it (BACKLOG-090).
+        int_cr_req: true
     };
     const tmp_resp = {};
     await create_a_res(tmp_req, tmp_resp);
