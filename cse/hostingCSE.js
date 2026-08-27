@@ -97,6 +97,13 @@ async function create_a_lookup_record(ty, rn, sid, ri, pi, cr, int_cr, loc) {
 
 async function create_a_res(req_prim, resp_prim) {
 	const ty = req_prim.ty;
+
+	if (unsupported_resource_type(ty)) {
+		resp_prim.rsc = enums.rsc_str["NOT_IMPLEMENTED"];
+		resp_prim.pc = { "m2m:dbg": `resource type ${ty} is defined by oneM2M but not implemented by this CSE` };
+		return;
+	}
+
 	const obj_key = Object.keys(req_prim.pc)[0];
 	const res_rep = req_prim.pc[obj_key];
 
@@ -163,14 +170,8 @@ async function create_a_res(req_prim, resp_prim) {
 		case 23:
 			await sub.create_a_sub(req_prim, resp_prim);
 			break;
-		case 24:
-			await smd.create_a_smd(req_prim, resp_prim);
-			break;
 		case 28:
 			await flx.create_a_flx(req_prim, resp_prim);
-			break;
-		case 34:
-			await dac.create_a_dac(req_prim, resp_prim);
 			break;
 		case 101:
 			await mrp.create_an_mrp(req_prim, resp_prim);
@@ -187,11 +188,25 @@ async function create_a_res(req_prim, resp_prim) {
 		case 105:
 			await dsp.create_a_dsp(req_prim, resp_prim);
 			break;
-		case 106: // this is not called by client, temporary for testing
-			await dts.create_a_dts(req_prim, resp_prim);
-			break;
-		case 107: // this is not called by client, temporary for testing
-			await dsf.create_a_dsf(req_prim, resp_prim);
+		// <dataset> and <datasetFragment> are created by the Hosting CSE, not by a client:
+		// TR-0071:7.2.3.2 and 7.2.3.3 define no Create procedure over the API for either. The
+		// dispatch arms exist because cse/datasetManager.js routes its own creates through here to
+		// get the notification that follows the switch -- so the arms stay and the *caller* is
+		// what decides. int_cr_req is the same marker the <cin> and <timeSeriesInstance> counter
+		// guards further down already use for "the CSE raised this request itself".
+		//
+		// Before this, the comment on these two arms said "this is not called by client, temporary
+		// for testing" and nothing enforced it: a client that got the parent type right was
+		// answered 2001. BACKLOG-090.
+		case 106:
+		case 107:
+			if (req_prim.int_cr_req !== true) {
+				resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
+				resp_prim.pc = { "m2m:dbg": `resource type ${ty} is created by the hosting CSE, not by a client` };
+				return;
+			}
+			if (ty === 106) await dts.create_a_dts(req_prim, resp_prim);
+			else await dsf.create_a_dsf(req_prim, resp_prim);
 			break;
 		default:
 			resp_prim.rsc = enums.rsc_str["OPERATION_NOT_ALLOWED"];
@@ -237,6 +252,12 @@ async function create_a_res(req_prim, resp_prim) {
 
 // unlike other operations, this returns a resource object, not a response primitive. so this can be used for other purposes e.g. rcn=4
 async function retrieve_a_res(req_prim, resp_prim) {
+	if (unsupported_resource_type(req_prim.to_ty)) {
+		resp_prim.rsc = enums.rsc_str["NOT_IMPLEMENTED"];
+		resp_prim.pc = { "m2m:dbg": `resource type ${req_prim.to_ty} is defined by oneM2M but not implemented by this CSE` };
+		return;
+	}
+
 	switch (req_prim.to_ty) {
 		case 1:
 			await acp.retrieve_an_acp(req_prim, resp_prim);
@@ -267,9 +288,6 @@ async function retrieve_a_res(req_prim, resp_prim) {
 			break;
 		case 23:
 			await sub.retrieve_a_sub(req_prim, resp_prim);
-			break;
-		case 24:
-			await smd.retrieve_a_smd(req_prim, resp_prim);
 			break;
 		case 28:
 			await flx.retrieve_a_flx(req_prim, resp_prim);
@@ -683,9 +701,6 @@ async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 				case "sub":
 					await sub.retrieve_a_sub(tmp_req_prim, tmp_resp_prim);
 					return tmp_resp_prim.pc["m2m:sub"];
-				case "smd":
-					await sub.retrieve_a_smd(tmp_req_prim, tmp_resp_prim);
-					return tmp_resp_prim.pc["m2m:smd"];
 				case "flx":
 					await flx.retrieve_a_flx(tmp_req_prim, tmp_resp_prim);
 					// object keys are different for flexContainer specializations, so the whole
@@ -710,6 +725,12 @@ async function aggr_reses_per_ty(req_prim, ri_list, ty) {
 }
 
 async function update_a_res(req_prim, resp_prim) {
+	if (unsupported_resource_type(req_prim.to_ty)) {
+		resp_prim.rsc = enums.rsc_str["NOT_IMPLEMENTED"];
+		resp_prim.pc = { "m2m:dbg": `resource type ${req_prim.to_ty} is defined by oneM2M but not implemented by this CSE` };
+		return;
+	}
+
 	// request validity check
 
 	// 'et' validation
@@ -748,15 +769,9 @@ async function update_a_res(req_prim, resp_prim) {
 		case 23:
 			await sub.update_a_sub(req_prim, resp_prim);
 			break;
-		case 24:
-			await smd.update_a_smd(req_prim, resp_prim);
-			break;
 		case 28:
 			await flx.update_a_flx(req_prim, resp_prim);
 			break;
-		// case 34:
-		//   await dac.update_a_dac(req_prim, resp_prim);
-		//   break;
 		case 101:
 			await mrp.update_an_mrp(req_prim, resp_prim);
 			break;
@@ -1647,7 +1662,49 @@ function get_mem_size(obj) {
 //
 // discovery_core memoizes its per-resource decisions by this list, so a type added here also
 // changes which discovered resources share a decision. Both readers must see the same list.
-const NORM_RES_WITHOUT_ACPI = ["cin", "sch", "tsi"];
+// oneM2M resource types this CSE does not implement.
+//
+// <semanticDescriptor> (24) and <dynamicAuthorizationConsultation> (34) had dispatch arms calling
+// cse/resources/smd.js and dac.js, which do not exist and are not required at the top of this
+// file. The arms therefore threw ReferenceError and the request was answered 5000
+// INTERNAL_SERVER_ERROR -- which per TS-0004:6.6.3.6 means the server broke, not that the feature
+// is absent. 5001 NOT_IMPLEMENTED is the code for the latter, and the two call for opposite
+// responses from a client: stop asking, or retry later.
+//
+// The list is written out rather than derived from cse.supported_resource_types, which was the
+// first attempt and is wrong. srt answers "which oneM2M-standard types does this CSE support" and
+// is published as the <CSEBase>'s srt attribute; the TR-0071 AI/ML types (101-107) are absent from
+// it by design, because they are R5 draft rather than standard -- while being fully implemented
+// and, for most of them, client-creatable. Deriving from srt therefore refused every <modelRepo>
+// and <mlModel> create with 5001. The test suite caught it, which is the argument for the two
+// tests in test/unimplemented-and-clearing.test.js that pin the boundary in both directions.
+//
+// So this names exactly the types whose implementation is missing. Adding one is a line here;
+// implementing one is deleting a line here and adding a dispatch arm.
+const UNIMPLEMENTED_TYPES = new Set([24, 34]);
+
+function unsupported_resource_type(ty) {
+	return UNIMPLEMENTED_TYPES.has(Number(ty));
+}
+
+// Resource types whose access is decided by the parent's policy because the type has no
+// accessControlPolicyIDs attribute of its own: <contentInstance> (TS-0001:9.6.7, "does not have
+// its own accessControlPolicyIDs attribute") and <timeSeriesInstance> (TS-0001:9.6.37, same
+// wording).
+//
+// <schedule> used to be in this list and is not a member. TS-0001:9.6.9 gives <schedule> an
+// accessControlPolicyIDs of its own (0..1 RW), and TS-0001:9.6.1.3.2 turns on exactly that
+// distinction: a type with no such attribute defers to the parent, while a type that has one but
+// leaves it empty falls to the default access policy -- the custodian, or failing that the
+// creator alone. Deciding a <schedule> by its parent's policy is therefore wrong in both
+// directions: too open under a permissive parent, and locking the creator out under a strict one.
+//
+// Nothing observable changes today, because mobius4 does not implement <schedule>: there is no
+// models/sch-model.js, no cse/resources/sch.js, and config/enums.js has no "sch" in ty_str, so
+// enums.ty_str[ty] can never produce the string this list was matching. It is removed now because
+// the cost of leaving it is paid later and by someone else -- whoever implements <schedule> would
+// find the name already here and reasonably conclude it belonged. BACKLOG-043.
+const NORM_RES_WITHOUT_ACPI = ["cin", "tsi"];
 
 async function access_decision(req_prim, resp_prim) {
 	let access_grant = false;
@@ -2085,6 +2142,10 @@ module.exports = {
 	set_ri_sid,
 	create_a_lookup_record,
 	create_a_res,
+	// Exported for test/unimplemented-and-clearing.test.js, which pins the membership. The list
+	// encodes a reading of TS-0001:9.6.1.3.2 that nothing else can check: <schedule> was in it for
+	// a type mobius4 does not implement, so no behaviour test could ever have caught it.
+	NORM_RES_WITHOUT_ACPI,
 	retrieve_a_res,
 	rcn48_retrieve,
 	rcn56_retrieve,

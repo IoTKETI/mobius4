@@ -49,6 +49,34 @@ as a credential applies with more force.
 
 ---
 
+## v4.17.1
+
+### Required only if a client creates `<dataset>` or `<datasetFragment>` directly
+
+No migration and no configuration change. One behaviour is **narrower** than before:
+
+- **A client CREATE of `<dataset>` (ty=106) or `<datasetFragment>` (ty=107) is now refused 4005.**
+  `TR-0071:7.2.3.2` and `7.2.3.3` define both as created by the Hosting CSE from an
+  `<mlDatasetPolicy>`, with no Create procedure over the API — but nothing enforced it, so a client
+  that got the parent type right was answered 2001. If you have tooling that seeds datasets this
+  way, it must create the `<mlDatasetPolicy>` and let the CSE build them.
+
+Everything else is a refusal turning into a *better* refusal, or a request that used to fail
+starting to work:
+
+- Clearing a `<container>`'s `mni`, `mbs`, `mia`, `acpi`, `lbl` or `loc` with `null` **now works**;
+  it used to be answered 4000. `mni`/`mbs`/`mia` fall back to the deployment default rather than
+  becoming unbounded — if you want them unbounded, that is not what `null` does.
+- `<semanticDescriptor>` and `<dynamicAuthorizationConsultation>` requests answer **5001
+  NOT_IMPLEMENTED** instead of 5000. A client retrying on 5xx should stop retrying on 5001.
+- MQTT requests on an `xml` or `cbor` topic get a **5001 refusal on the json response topic**
+  instead of silence.
+- A `<dataset>` the CSE creates now notifies `<CSEBase>` subscribers watching for `ty=106`
+  children, as `<datasetFragment>` already did. A subscriber that filtered on `chty` will start
+  seeing these.
+
+---
+
 ## v4.17.0
 
 ### Nothing required

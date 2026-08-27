@@ -19,7 +19,7 @@ const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
 const { startBroker } = require("./helpers/broker");
-const { create, retrieve, update, discover, uniqueRn, urils, CSE_BASE } = require("./helpers/onem2m");
+const { create, retrieve, update, remove, discover, uniqueRn, urils, CSE_BASE } = require("./helpers/onem2m");
 const { startSink } = require("./helpers/noti-sink");
 
 const TY = { CNT: 3, CIN: 4, DSP: 105, DTS: 106, DSF: 107 };
@@ -157,28 +157,23 @@ test("TC_TR0071_DST_CRE_004: TP/TR-0071/CSE/DST/CRE/004 — liveDatasetID resolv
   assert.equal(got.body["m2m:dts"].ty, TY.DTS);
 });
 
-// FAILS 2026-08-13: a client CREATE straight at <dataset> succeeds instead of being rejected.
-// TR-0071:7.2.3.2 says the Create procedure for <dataset> "is not specified as an API" -- it is
-// only ever created by the hosting CSE, from a policy. But cse/hostingCSE.js's CREATE dispatch
-// table (around line 180) lists `case 106: await dts.create_a_dts(...)` next to every other
-// client-facing resource type, with a comment admitting "this is not called by client, temporary
-// for testing" -- there is no check distinguishing an internal call (from datasetManager.js) from
-// an external client request. Any parent that accepts a <dataset> child (dts_parent_res_types =
-// ["cb", "ae", "csr"], cse/resources/dts.js:12) will accept a direct client CREATE too. Flagged
-// in features/test-purposes/TR-0071.md TP/TR-0071/CSE/DST/CRE/005; not covered by the revision
-// proposal.
-test("TC_TR0071_DST_CRE_005: TP/TR-0071/CSE/DST/CRE/005 — <dataset> has no client CREATE", { todo: true }, async () => {
+// Fixed in v4.17.1. TR-0071:7.2.3.2 says the Create procedure for <dataset> "is not specified as
+// an API" -- it is only ever created by the hosting CSE, from a policy. The CREATE dispatch used
+// to list `case 106: await dts.create_a_dts(...)` next to every client-facing type, with a comment
+// admitting "this is not called by client, temporary for testing" and nothing enforcing it, so any
+// parent that accepts a <dataset> child accepted a direct client CREATE too. The dispatch now
+// requires req_prim.int_cr_req, the same marker the <cin> and <timeSeriesInstance> counter guards
+// use for a request the CSE raised itself (BACKLOG-090). Promoted from { todo: true }.
+test("TC_TR0071_DST_CRE_005: TP/TR-0071/CSE/DST/CRE/005 — <dataset> has no client CREATE", async () => {
   const rn = uniqueRn("dts");
   const res = await create(srv.baseUrl, CSE_BASE, TY.DTS, { "m2m:dts": { rn } });
   assert.notEqual(res.rsc, "2001", `<dataset> accepted a direct client CREATE: ${res.raw.slice(0, 200)}`);
 });
 
-// FAILS 2026-08-13: same gap as CRE/005, one level down. TR-0071:7.2.3.3 says <datasetFragment>
+// Fixed in v4.17.1, same guard as CRE/005 one level down. TR-0071:7.2.3.3 says <datasetFragment>
 // "is created by the <dataset> resource hosting CSE, so the Create procedure is not specified as
-// an API." cse/hostingCSE.js's CREATE dispatch has the identical "temporary for testing" case for
-// `case 107: await dsf.create_a_dsf(...)`. Flagged in features/test-purposes/TR-0071.md
-// TP/TR-0071/CSE/DST/CRE/006; not covered by the revision proposal.
-test("TC_TR0071_DST_CRE_006: TP/TR-0071/CSE/DST/CRE/006 — <datasetFragment> has no client CREATE", { todo: true }, async () => {
+// an API." Promoted from { todo: true }.
+test("TC_TR0071_DST_CRE_006: TP/TR-0071/CSE/DST/CRE/006 — <datasetFragment> has no client CREATE", async () => {
   const { dtsSid } = await makeDatasetWithFragment();
   const res = await create(srv.baseUrl, dtsSid, TY.DSF,
     { "m2m:dsf": { rn: uniqueRn("dsf"), dsfr: {}, dsfm: 1 } });
@@ -421,6 +416,48 @@ test("TC_TR0071_DST_NTF_001: TP/TR-0071/CSE/DST/NTF/001 — a new live <datasetF
 
     const noti = await sink.waitFor((i) => i.body && i.body["m2m:sgn"], { timeoutMs: 8000 });
     assert.ok(noti.body["m2m:sgn"].nev.rep["m2m:dsf"], "notification should carry the new <datasetFragment>");
+  } finally {
+    await sink.stop();
+  }
+});
+
+// BACKLOG-097. The counterpart of NTF/001 one level up: does the <dataset> the CSE creates for
+// itself notify a subscriber the way the <datasetFragment> does?
+//
+// It did not. cse/datasetManager.js called dts.create_a_dts directly, bypassing create_a_res --
+// and noti.check_and_send_noti lives in create_a_res, right after its dispatch switch, so it is
+// the only place a create notification comes from. <datasetFragment> had been routed through
+// create_a_res earlier for exactly this reason and <dataset> was left behind, which left "an
+// internal create skips notification" true for one of the two and false for the other, with
+// nothing in the code saying which was intended.
+//
+// TR-0071 does not require this notification -- §7.2.2.1 asks for new inference *input* to be
+// notifiable, which is the fragment, and that already worked. The reason to fix it is that the
+// rule was inconsistent rather than that the behaviour was forbidden. TS-0018 has no TP, and
+// TR-0071 has no test purpose for <dataset> creation notification either, so this carries no
+// identifier rather than an invented one.
+test("BACKLOG-097 — a <dataset> the CSE creates for itself notifies a <CSEBase> subscriber", async () => {
+  const sink = await startSink();
+  try {
+    // net=3 is "a child was created"; chty narrows it to <dataset> so the <container>s and
+    // <subscription>s this file creates under the <CSEBase> do not match.
+    const sub = await create(srv.baseUrl, CSE_BASE, 23,
+      { "m2m:sub": { rn: uniqueRn("s97"), nu: [sink.url], enc: { net: [3], chty: [TY.DTS] } } });
+    assert.equal(sub.rsc, "2001", `subscription create failed: ${sub.raw.slice(0, 200)}`);
+    const subSid = `${CSE_BASE}/${sub.body["m2m:sub"].rn}`;
+
+    try {
+      const src = await makeSource("src97", [{ x: 1 }, { x: 2 }]);
+      const { res } = await makePolicy({ sri: [src.sid], nrhd: 10 });
+      assert.equal(res.rsc, "2001", `policy create failed: ${res.raw.slice(0, 200)}`);
+      assert.ok(res.body["m2m:dsp"].hdi, "historicalDatasetID was not set — no <dataset> was made");
+
+      const noti = await sink.waitFor((i) => i.body && i.body["m2m:sgn"], { timeoutMs: 8000 });
+      assert.ok(noti.body["m2m:sgn"].nev.rep["m2m:dts"],
+        `the notification should carry the new <dataset>: ${JSON.stringify(noti.body["m2m:sgn"].nev.rep).slice(0, 200)}`);
+    } finally {
+      await remove(srv.baseUrl, subSid);
+    }
   } finally {
     await sink.stop();
   }

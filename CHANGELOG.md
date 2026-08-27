@@ -21,6 +21,72 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.17.1 (2026-08-27)
+
+**Why PATCH**: six bug fixes, no new capability and no schema change. Each replaces an answer the
+CSE did not mean with the one it did. PATCH by the table above.
+
+### Fixed: an unimplemented resource type answered 5000 instead of 5001
+
+`<semanticDescriptor>` (ty=24) and `<dynamicAuthorizationConsultation>` (ty=34) had dispatch arms
+calling `cse/resources/smd.js` and `dac.js`, which do not exist and were never required. The arms
+threw `ReferenceError`, and the request came back **5000 INTERNAL_SERVER_ERROR** — which per
+`TS-0004:6.6.3.6` means the server broke, not that the feature is absent. The answer is now
+**5001 NOT_IMPLEMENTED**. A client cannot tell a CSE that lacks a feature from one that is broken
+if both answer the same code, and the two call for opposite responses: stop asking, or retry.
+
+A `ty` outside the standard is still a client error, not 5001 — 5001 promises the type exists in
+oneM2M and this CSE does not serve it.
+
+### Fixed: a `<container>`'s `mni`, `mbs`, `mia`, `acpi`, `lbl` and `loc` could not be cleared
+
+oneM2M's UPDATE deletes an optional attribute by sending it as `null`, and `update_a_cnt` has
+always had a branch for each of these six. None could run: Joi rejected the `null` first, so a
+client asking to clear `mni` got **4000 "mni must be a number"** while the clearing code sat behind
+that refusal looking correct. Measured before the change, all six answered 4000.
+
+The two groups mean different things and the existing code already distinguished them: `acpi`,
+`lbl` and `loc` are deleted, while `mni`, `mbs` and `mia` fall back to the deployment default
+rather than becoming unbounded. Scoped to `<container>`; whether `<AE>`, `<subscription>`,
+`<group>`, `<remoteCSE>` and `<accessControlPolicy>` handle a null was not checked here, and
+letting one through to a handler that does not expect it would replace a wrong rejection with a
+wrong acceptance.
+
+### Fixed: `<dataset>` and `<datasetFragment>` accepted a client CREATE
+
+`TR-0071:7.2.3.2` and `7.2.3.3` define both as created by the Hosting CSE, with no Create procedure
+over the API. The dispatch arms carried a comment saying exactly that — "this is not called by
+client, temporary for testing" — and nothing enforced it, so any parent that accepts such a child
+accepted a direct client CREATE and answered 2001. It is now **4005 OPERATION_NOT_ALLOWED** unless
+the request came from the CSE itself.
+
+**This refuses something that used to work.** See [docs/upgrading.md](docs/upgrading.md#v4171).
+
+### Fixed: a `<dataset>` the CSE created notified nobody
+
+`cse/datasetManager.js` called `dts.create_a_dts` directly, bypassing `create_a_res` — where the
+create notification lives. `<datasetFragment>` had been routed through `create_a_res` earlier for
+exactly this reason and `<dataset>` was left behind, so "an internal create skips notification" was
+true for one of the two and false for the other, with nothing saying which was intended.
+
+### Fixed: `xml` and `cbor` MQTT requests vanished
+
+`TS-0010:6.4.2` and `6.4.4` end their topics with a `<type>` segment of `xml`, `json` or `cbor`.
+Only `json` is implemented, and the other two were not subscribed at all — measured, publishing to
+either produced **no response of any kind**, which a client cannot tell apart from a dead CSE. They
+are now subscribed solely so the request is refused **5001** on the corresponding `json` response
+topic. Implementing them is still open.
+
+### Fixed: `<schedule>` was listed as governed by its parent's access policy
+
+`TS-0001:9.6.1.3.2` splits on whether a resource type *has* an `accessControlPolicyIDs` attribute.
+`<contentInstance>` (`9.6.7`) and `<timeSeriesInstance>` (`9.6.37`) do not and defer to the parent;
+`<schedule>` (`9.6.9`) has one, so an empty value there means the default access policy instead.
+
+**Nothing observable changed** — `<schedule>` is not implemented, so no request could reach the
+wrong branch. It is removed because whoever implements `<schedule>` would find the name already
+there and reasonably conclude it belonged.
+
 ## v4.17.0 (2026-08-26)
 
 **Why MINOR**: a oneM2M capability the CSE did not serve before. `/oneM2M/reg_req` is an entry

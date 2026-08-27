@@ -206,9 +206,6 @@ async function update_a_cnt(req_prim, resp_prim) {
         if (prim_res.mbs) db_res.mbs = prim_res.mbs;
         if (prim_res.mbis) db_res.mbis = prim_res.mbis;
         if (prim_res.mia) db_res.mia = prim_res.mia;
-        if (prim_res.mni === null) db_res.mni = config.default.container.mni;
-        if (prim_res.mbs === null) db_res.mbs = config.default.container.mbs;
-        if (prim_res.mia === null) db_res.mia = config.default.container.mia;
 
         // delete optional attributes if they are null in the request
         // universal/common attributes
