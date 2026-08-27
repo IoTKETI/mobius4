@@ -23,7 +23,7 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## v4.17.1 (2026-08-27)
 
-**Why PATCH**: six bug fixes, no new capability and no schema change. Each replaces an answer the
+**Why PATCH**: seven bug fixes, no new capability and no schema change. Each replaces an answer the
 CSE did not mean with the one it did. PATCH by the table above.
 
 ### Fixed: an unimplemented resource type answered 5000 instead of 5001
@@ -76,6 +76,27 @@ Only `json` is implemented, and the other two were not subscribed at all — mea
 either produced **no response of any kind**, which a client cannot tell apart from a dead CSE. They
 are now subscribed solely so the request is refused **5001** on the corresponding `json` response
 topic. Implementing them is still open.
+
+### Fixed: error responses threw away the reason they were refused
+
+A `<modelDeployment>` compatibility refusal came back **406 with `Content-Length: 0`** while the CSE
+had already computed the names of the exact features the dataset was missing. Reported from the
+`tr0071-ai-course` lab.
+
+All four sites that raise **5207 NOT_ACCEPTABLE** build a message and all four were dropped —
+including two on standard resource types, the `<contentInstance>` and `<timeSeriesInstance>` size
+refusals. The same held for **405** and for **404** on POST, PUT and DELETE. Eight branches in
+`bindings/http.js` ended in a bare `.end()`, while GET's own 404 branch carried the body, so the
+file disagreed with itself about the same code.
+
+`TS-0004:7.5.2` note 5 makes `m2m:debugInfo` "a plain text message which can optionally be included
+as debugging information in error responses"; `TS-0004:7.2.1.2` lists it among the permitted
+Content values of a response; and `TS-0009:6.5` maps Content to the message-body "for all
+primitives" bar two named exceptions — partial Retrieve requests, and a 4103 carrying Token Request
+Information. None of these codes is an exception.
+
+The `X-M2M-RSC` header was always correct, which is why no test noticed: the new ones assert the
+body.
 
 ### Fixed: `<schedule>` was listed as governed by its parent's access policy
 

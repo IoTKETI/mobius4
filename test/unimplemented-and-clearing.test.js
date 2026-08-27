@@ -188,3 +188,66 @@ test("only types with no accessControlPolicyIDs of their own are decided by the 
   assert.deepEqual([...NORM_RES_WITHOUT_ACPI].sort(), ["cin", "tsi"],
     "adding a type here means asserting TS-0001 gives it no accessControlPolicyIDs of its own");
 });
+
+// --- The CSE's explanation reaches the client ------------------------------------------------
+//
+// TS-0004:7.5.2 note 5 makes m2m:debugInfo "a plain text message which can optionally be included
+// as debugging information in error responses"; TS-0004:7.2.1.2 lists it among the permitted
+// Content values of a response; and TS-0009:6.5 maps Content to the message-body "for all
+// primitives" bar two named exceptions, neither of which is any code below.
+//
+// Reported from the tr0071-ai-course lab: a <modelDeployment> refusal came back 406 with
+// Content-Length: 0, while the CSE had computed the names of the exact features the dataset was
+// missing. Four sites raise 5207 and all four build a message. The same held for 405 and for POST/
+// PUT/DELETE's 404 — and this batch made it worse, because the <dataset> refusal added above is a
+// 4005 whose text was being dropped on the way out.
+//
+// These assert the body, not the status: X-M2M-RSC was always right, which is why no existing test
+// noticed. Each covers a different handler, since the branches were duplicated per handler and a
+// single fix site would not have been enough.
+
+test("a 406 NOT_ACCEPTABLE carries the reason it was refused (POST)", async () => {
+  const rn = uniqueRn("tiny");
+  const made = await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn, mbs: 4 } });
+  assert.equal(made.rsc, "2001", `setup: ${made.raw.slice(0, 200)}`);
+
+  const res = await create(srv.baseUrl, `${root.sid}/${rn}`, 4,
+    { "m2m:cin": { con: "far larger than four bytes" } });
+
+  assert.equal(res.rsc, "5207", `expected NOT_ACCEPTABLE: ${res.raw.slice(0, 200)}`);
+  assert.ok(res.body && res.body["m2m:dbg"],
+    `the refusal must say why — this is the reported defect: ${JSON.stringify(res.raw)}`);
+  assert.match(res.body["m2m:dbg"], /mbs|size/i);
+});
+
+test("a 405 OPERATION_NOT_ALLOWED carries its reason (POST)", async () => {
+  // The one this batch created: the <dataset> refusal added above is a 4005, which maps to 405.
+  const res = await create(srv.baseUrl, root.sid, 106, { "m2m:dts": { rn: uniqueRn("d") } });
+
+  assert.equal(res.rsc, "4005");
+  assert.ok(res.body && res.body["m2m:dbg"],
+    `the refusal added in this same change was itself being dropped: ${JSON.stringify(res.raw)}`);
+  assert.match(res.body["m2m:dbg"], /hosting CSE/);
+});
+
+test("a 404 carries its reason on POST, PUT and DELETE as it already did on GET", async () => {
+  // GET's 404 branch already carried the body; the other three handlers ended bare, so the file
+  // disagreed with itself about the same code.
+  const missing = `${root.sid}/${uniqueRn("gone")}`;
+
+  const posted = await create(srv.baseUrl, missing, 3, { "m2m:cnt": { rn: uniqueRn("c") } });
+  assert.equal(posted.rsc, "4004");
+  assert.ok(posted.body && posted.body["m2m:dbg"], `POST 404 body: ${JSON.stringify(posted.raw)}`);
+
+  const put = await update(srv.baseUrl, missing, { "m2m:cnt": { lbl: ["x"] } });
+  assert.equal(put.rsc, "4004");
+  assert.ok(put.body && put.body["m2m:dbg"], `PUT 404 body: ${JSON.stringify(put.raw)}`);
+
+  const deleted = await remove(srv.baseUrl, missing);
+  assert.equal(deleted.rsc, "4004");
+  assert.ok(deleted.body && deleted.body["m2m:dbg"], `DELETE 404 body: ${JSON.stringify(deleted.raw)}`);
+
+  const got = await retrieve(srv.baseUrl, missing);
+  assert.equal(got.rsc, "4004");
+  assert.ok(got.body && got.body["m2m:dbg"], "GET 404 already carried it and must keep doing so");
+});

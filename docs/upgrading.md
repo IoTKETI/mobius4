@@ -74,6 +74,9 @@ starting to work:
 - A `<dataset>` the CSE creates now notifies `<CSEBase>` subscribers watching for `ty=106`
   children, as `<datasetFragment>` already did. A subscriber that filtered on `chty` will start
   seeing these.
+- **Error responses that used to have an empty body now carry `m2m:dbg`** — 404, 405 and 406 over
+  POST, PUT and DELETE. `X-M2M-RSC` is unchanged, so a client reading the code is unaffected; one
+  that asserts `Content-Length: 0` on these will need updating. GET's 404 already behaved this way.
 
 ---
 
