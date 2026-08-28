@@ -545,3 +545,75 @@ test("childResource directly under the extension is structure too, not an array 
     bare({ spots: { type: "integer" } }),
   );
 });
+
+// ---------------------------------------------------------------------------------------------
+// Task 2: refusal paths the file above did not yet pin (BACKLOG-024 task-2-brief.md). Verified
+// against the current implementation by running it, not against the brief's original regexes --
+// several of those were written against Task 1's first cut and no longer match.
+// ---------------------------------------------------------------------------------------------
+
+test("an extension that redeclares an inherited attribute is refused", () => {
+  // The guard the structural exclusion cannot provide: xs:extension not repeating the base's
+  // elements only keeps INHERITED_ELEMENTS out when the author follows that convention. If this
+  // were accepted, 'labels' would be registered as a [customAttribute] while the runtime already
+  // treats 'lbl' as a reserved one.
+  const xsd = SAMPLE_XSD.replace(
+    '<xs:element name="type" type="xs:string" minOccurs="0"/>',
+    '<xs:element name="labels" type="xs:string" minOccurs="0"/>'
+  );
+
+  assert.throws(
+    () => extractSpecialization(xsd, { cnd: "urn:example:bad" }),
+    /urn:example:bad.*labels.*must not be redeclared/s
+  );
+});
+
+test("an XSD type the registry cannot express is refused, naming the attribute", () => {
+  // cse/specialization.js's type_matches returns true for a type it does not recognise, so passing
+  // one through would turn that attribute's validation off silently. Failing here is the point.
+  const xsd = SAMPLE_XSD.replace('type="xs:integer"', 'type="m2m:geoCoordinates"');
+
+  assert.throws(
+    () => extractSpecialization(xsd, { cnd: "urn:example:bad" }),
+    /urn:example:bad.*availableSpotNumber.*m2m:geoCoordinates/s
+  );
+});
+
+test("an XSD that is not an extension of flexContainerResource is refused", () => {
+  // The brief's original fixture for this case (a bare top-level element, no substitutionGroup) is
+  // caught earlier by specializationElementOf's "no top-level element is a specialization" error --
+  // a different message than this one guards. Reaching the actual "is not an extension" throw needs
+  // an element that DOES join the substitution group but was never given a complexType/extension at
+  // all (e.g. authored with a plain @type instead), which is the shape verified against the code.
+  const xsd = schema(
+    '  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource" type="xs:string"/>'
+  );
+
+  assert.throws(
+    () => extractSpecialization(xsd, { cnd: "urn:example:bad" }),
+    /urn:example:bad.*parkingBlock.*is not an extension/s
+  );
+});
+
+test("malformed XML is refused, naming the cnd", () => {
+  // fast-xml-parser is lenient about most malformed input (e.g. an unclosed element tag just yields
+  // an incomplete tree, no exception) -- verified by running it. An unterminated attribute value is
+  // what actually drives the parser itself to throw, exercising parseXsd's try/catch rather than a
+  // downstream check that happens to also mention the cnd.
+  assert.throws(
+    () => extractSpecialization('<xs:schema attr="unterminated>', { cnd: "urn:example:broken" }),
+    /urn:example:broken.*could not be parsed/s
+  );
+});
+
+test("a schema with no targetNamespace is refused", () => {
+  // The exact phrase, not just the word "targetNamespace" -- namespacePrefixOf's own fallback path
+  // (bound only to the default xmlns) also mentions "targetNamespace" in its message, once `target`
+  // is undefined, so a looser regex kept passing even with this guard removed.
+  const xsd = SAMPLE_XSD.replace(' targetNamespace="http://www.example.com/schema"', "");
+
+  assert.throws(
+    () => extractSpecialization(xsd, { cnd: "urn:example:nons" }),
+    /urn:example:nons: the schema has no targetNamespace/
+  );
+});
