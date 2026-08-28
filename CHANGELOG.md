@@ -21,7 +21,15 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## [Unreleased]
+## v4.18.0 (2026-08-28)
+
+**Why MINOR**: nothing the CSE answers changes — `cse/` is untouched, the registry format is the
+same, `probe-capabilities --check` reports no drift, and there is no schema change and no
+migration. The PATCH row of the table above covers a bug fix, performance, docs or tests, and this
+is none of them: it **adds** an operator-facing tool and a new runtime dependency that ships in the
+image. That is the same shape as v4.8.0 (`docker compose up`), which added a deployment capability
+with no change to an existing source deployment and was MINOR. Nothing breaks for a deployment that
+upgrades and never runs the new command.
 
 ### Added: specialization registries are built from XSDs instead of written by hand
 
