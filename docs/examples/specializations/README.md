@@ -60,11 +60,9 @@ type it does not recognise — an unmapped type would switch that attribute's va
 
 ## Using it
 
-The build runs **on the host**, in a checkout of this repository. There is no `docker compose exec`
-form of it: the deployment image contains no `scripts/` directory (see the `COPY` list in the
-`Dockerfile`), and its `/app` is owned by root while the process runs as `node`, so nothing in the
-container could write the registry anyway. A Docker deployment builds the registry here and rebuilds
-its image, which copies `config/` in.
+The build runs **on the host**, in a checkout of this repository. A Docker deployment runs the same
+script inside the image instead, without needing Node on the host — see
+[Under Docker](#under-docker) below.
 
 Rehearse first, where the example ships. This reads the manifest in place and writes somewhere
 temporary, so nothing under `config/` is touched:
@@ -129,3 +127,60 @@ Add them to the manifest, or pass --allow-removals if the removal is intended.
 Nothing is written when it stops. Move the named entries into the manifest, or pass
 `--allow-removals` if losing them is what you meant — every `<flexContainer>` using a `cnd` that
 leaves the registry starts answering 4125.
+
+## Under Docker
+
+The image carries this script, the XSD reader it uses (`scripts/lib/xsd-specialization.js`) and
+`fast-xml-parser`, so a deployment with no Node toolchain on the host can still build a registry.
+That is why `fast-xml-parser` is a runtime dependency rather than a development one.
+
+Run it in a throwaway container with your checkout's `config/` mounted over the image's, so the
+registry lands on the host rather than inside a container that the next `docker compose up` replaces:
+
+```bash
+docker compose run --rm --no-deps --entrypoint node \
+  -v "$PWD/config:/app/config" mobius4 scripts/build-specializations.js
+```
+
+```
+build-specializations: wrote 1 specialization(s) to /app/config/specializations.json
+  http://developers.iotocean.org/schema/parkingBlock.xsd -> sc:parkingBlock (6 custom attribute(s))
+restart mobius4 for this to take effect — the registry is read once at startup
+```
+
+Then rebuild and restart. The image copies `config/` in, so this is what carries the new registry
+into the running CSE:
+
+```bash
+docker compose up -d --build
+```
+
+Three details decide the shape of that command.
+
+- **`--entrypoint node`.** The image's entrypoint is `docker/entrypoint.js`, which starts the CSE
+  rather than exec'ing its arguments, so `docker run <image> node scripts/build-specializations.js`
+  starts mobius4 and ignores the rest. (`docker compose exec` does not go through the entrypoint and
+  needs no override — but it writes inside the running container, where the registry lasts only as
+  long as that container does.)
+- **Mounted at `/app/config`, not at some other path.** A relative `xsd` resolves from the
+  manifest's own directory, and the shipped entry points at
+  `../docs/examples/specializations/parkingBlock.xsd` — `/app/docs/...` in the image, which is the
+  one file `.dockerignore` re-admits from `docs/`. Mount the directory anywhere else and that path
+  resolves to nothing. Your own XSDs are simplest kept in `config/` beside the manifest and named
+  `./yourBlock.xsd`; they then arrive with the same mount and need no second one.
+- **The whole directory, not the two files.** A single-file bind mount is a mount point, and the
+  build writes a temporary file and renames it over the target, which a mount point refuses:
+  `EBUSY: resource busy or locked, rename '/app/config/specializations.json.tmp-1' -> '/app/config/specializations.json'`.
+
+To rehearse without touching your checkout, leave the mount off and write inside the container:
+
+```bash
+docker run --rm --entrypoint node mobius4:local \
+  scripts/build-specializations.js --out /tmp/specializations.json
+```
+
+`docker-compose.yml` deliberately mounts no host `config/` of its own. It could, and a rebuilt
+registry would then need only `docker compose restart` — but the same mount would carry
+`config/local*.json` into a deployment the `Dockerfile` goes out of its way to keep them out of, and
+would shadow a newer image's `config/default.json` with whatever an older checkout happens to hold.
+Building on the host and rebuilding the image keeps a generated file where generated files belong.

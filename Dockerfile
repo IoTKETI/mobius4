@@ -24,9 +24,26 @@ COPY bindings ./bindings
 COPY cse ./cse
 COPY db ./db
 COPY models ./models
-COPY config ./config
 COPY docker ./docker
 COPY logger.js metrics.js ./
+
+# --chown, unlike every other COPY here, because config/specializations.json is written in place by
+# scripts/build-specializations.js below and the process runs as `node`. Without it the directory
+# arrives root-owned and the build fails on the temporary file it renames from:
+# `EACCES: permission denied, open '/app/config/specializations.json.tmp-1'`.
+COPY --chown=node:node config ./config
+
+# The specialization registry build. It is here so that a Docker deployment can add a
+# <flexContainer> specialization without a Node toolchain on the host -- which is also why
+# fast-xml-parser is a runtime dependency rather than a dev one. Named files rather than
+# `COPY scripts ./scripts`: probe-capabilities.js and reset-test-db.js are development tools.
+COPY --chown=node:node scripts/build-specializations.js ./scripts/
+COPY --chown=node:node scripts/lib/xsd-specialization.js ./scripts/lib/
+
+# The XSD that the shipped config/specializations.manifest.json resolves to. .dockerignore excludes
+# docs/ wholesale and re-admits this one file, so that the manifest as shipped builds inside the
+# image rather than failing on a path that is not there.
+COPY --chown=node:node docs/examples/specializations/parkingBlock.xsd ./docs/examples/specializations/
 
 # Copying paths one by one rather than `COPY . .` plus .dockerignore. Both work; this way the
 # image contains what someone chose to put there, and a new directory in the repository does not

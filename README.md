@@ -113,10 +113,13 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 Node dependencies come with `npm install` and are not on the list above, with one worth naming:
 
 - `fast-xml-parser` — reads specialization XSDs in `scripts/build-specializations.js`. Nothing on a
-  request path uses it: that script is an operator command, run **on the host** from a checkout of
-  this repository, not inside the deployment image (which contains no `scripts/`). It is listed
-  under `dependencies` because this repository declares no `devDependencies` at all — see
-  [docs/examples/specializations/](docs/examples/specializations/) for what the script is for.
+  request path uses it; the script is an operator command, run when a `<flexContainer>`
+  specialization is added. It is a runtime dependency rather than a development one because the
+  deployment image carries the script, so a Docker operator can build the registry in a container
+  instead of installing Node on the host:
+  `docker compose run --rm --no-deps --entrypoint node -v "$PWD/config:/app/config" mobius4 scripts/build-specializations.js`.
+  See [docs/examples/specializations/](docs/examples/specializations/) for what the script is for
+  and why the command looks like that.
 
 **With Docker, there is nothing on this list to install** and no database to create by hand —
 see [Installation → With Docker Compose](#with-docker-compose) below.
