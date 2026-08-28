@@ -1,0 +1,12 @@
+[
+  {
+    "cnd": "http://www.example.com/schema/parkingBlock.xsd",
+    "xsd": "../../docs/examples/specializations/parkingBlock.xsd",
+    "description": "A URL-style containerDefinition: the identifier happens to be where the XSD lives."
+  },
+  {
+    "cnd": "org.onem2m.common.moduleclass.alarmSpeaker",
+    "xsd": "./xsd/alarmSpeaker.xsd",
+    "description": "A TS-0023 standard containerDefinition. It is an identifier, not a location, so the XSD path is unrelated to it."
+  }
+]

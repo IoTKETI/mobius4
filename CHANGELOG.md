@@ -21,6 +21,29 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## [Unreleased]
+
+### Added: specialization registries are built from XSDs instead of written by hand
+
+`node scripts/build-specializations.js` reads `config/specializations.manifest.json`, resolves each
+XSD from a path or an `http(s)` URL, and writes `config/specializations.json`. The runtime is
+untouched — `cse/specialization.js` reads the same format it always did, once at startup, so a
+rebuild takes effect on the next restart.
+
+The manifest keeps `cnd` and `xsd` as separate fields because `containerDefinition` is an
+identifier, not a location: `TS-0023:6.4.1` calls it "a unique identifier" and the values the
+standard assigns (`org.onem2m.common.moduleclass.alarmSpeaker`, `TS-0023:6.4.3`) point nowhere,
+though its type `xs:anyURI` would permit a URL.
+
+Failures name the `cnd` and leave the existing registry byte-for-byte unchanged, and a `cnd` that
+the manifest no longer lists stops the build rather than disappearing — the tool is for adding
+several at once, where half-applied is the worst outcome.
+
+See `docs/examples/specializations/` for a sample XSD and manifest.
+
+**New dependency**: `fast-xml-parser`, in `dependencies` rather than `devDependencies` so a Docker
+deployment can run the script.
+
 ## v4.17.1 (2026-08-27)
 
 **Why PATCH**: seven bug fixes, no new capability and no schema change. Each replaces an answer the

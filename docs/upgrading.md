@@ -49,6 +49,28 @@ as a credential applies with more force.
 
 ---
 
+## v4.18.0
+
+### Required only if you added `<flexContainer>` specializations by hand
+
+`config/specializations.json` is now generated from `config/specializations.manifest.json` by
+`node scripts/build-specializations.js`, and the build **overwrites** it. If you edited it by hand,
+move each entry into the manifest before the first build — point `xsd` at the XSD that defines it.
+
+The build refuses to drop a `cnd` that the old registry had, so a first run that would lose one
+stops and names it rather than deleting it. Nothing is written when it stops.
+
+**One entry changed in this repository's own registry.** The `parkingBlock` example's attribute list
+now comes from `docs/examples/specializations/parkingBlock.xsd` rather than from the hand-written
+JSON. The XSD at `http://developers.iotocean.org/schema/parkingBlock.xsd` is not in the repository
+and could not be reproduced, so the example XSD stands in for it. If you rely on that `cnd`, put
+your own XSD in the manifest.
+
+Nothing else changes: the registry format is the same and `cse/specialization.js` is untouched, so
+a deployment that does not use `<flexContainer>` has nothing to do.
+
+---
+
 ## v4.17.1
 
 ### Required only if a client creates `<dataset>` or `<datasetFragment>` directly

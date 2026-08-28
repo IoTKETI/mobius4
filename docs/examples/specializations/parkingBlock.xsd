@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A <flexContainer> specialization, in the shape TS-0001:9.6.35 describes: an extension of
+  m2m:flexContainerResource that adds the attributes this information model needs.
+
+  The base type's own attributes (containerDefinition, labels, contentSize and the rest, see
+  TS-0004 CDT-commonTypes.xsd) are inherited and must NOT be repeated here.
+
+  Attribute types must be XSD built-ins that map onto the six the registry understands:
+  string, integer, number, boolean, array (maxOccurs > 1) and object (an inline complexType).
+  A type outside that set is refused by scripts/build-specializations.js rather than guessed at.
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:m2m="http://www.onem2m.org/xml/protocols"
+           xmlns:sc="http://www.example.com/schema"
+           targetNamespace="http://www.example.com/schema"
+           elementFormDefault="unqualified">
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType>
+      <xs:complexContent>
+        <xs:extension base="m2m:flexContainerResource">
+          <xs:sequence>
+            <xs:element name="type" type="xs:string" minOccurs="0"/>
+            <xs:element name="name" type="xs:string" minOccurs="0"/>
+            <xs:element name="category" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="availableSpotNumber" type="xs:integer" minOccurs="0"/>
+            <xs:element name="totalSpotNumber" type="xs:integer" minOccurs="0"/>
+            <xs:element name="refParkingSpot" type="xs:anyURI" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:extension>
+      </xs:complexContent>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
