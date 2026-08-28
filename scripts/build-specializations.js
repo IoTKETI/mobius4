@@ -24,8 +24,12 @@ const DEFAULT_MANIFEST = path.join(REPO_ROOT, "config", "specializations.manifes
 const DEFAULT_OUT = path.join(REPO_ROOT, "config", "specializations.json");
 
 // Bounds on reading an XSD over the network. This runs as a deliberate operator command rather than
-// on a request path, so the exposure is small -- but an unbounded fetch in a build step is still a
-// build step that can hang forever.
+// on a request path, so the exposure is small -- but the two constants guard different failure
+// modes. FETCH_TIMEOUT_MS bounds how long a stalled or slow host can hang the build (enforced via
+// the AbortController below). MAX_XSD_BYTES bounds how much of the response body ever sits in
+// memory at once -- fetchXsd counts bytes as they stream in and aborts as soon as the running total
+// crosses the cap, so a misbehaving host serving an arbitrarily large response is never buffered in
+// full before the cap can fire.
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_XSD_BYTES = 1024 * 1024;
 const MAX_REDIRECTS = 3;
@@ -72,11 +76,19 @@ async function fetchXsd(url, cnd) {
   try {
     const res = await fetch(url, { signal: controller.signal, redirect: "follow" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-    if (Buffer.byteLength(text) > MAX_XSD_BYTES) {
-      throw new Error(`larger than ${MAX_XSD_BYTES} bytes`);
+    // Count bytes as they arrive instead of materializing the whole body first, so an oversized
+    // response is caught while only part of it has been read -- not after it is already in memory.
+    let total = 0;
+    const chunks = [];
+    for await (const chunk of res.body) {
+      total += chunk.length;
+      if (total > MAX_XSD_BYTES) {
+        controller.abort();
+        throw new Error(`larger than ${MAX_XSD_BYTES} bytes`);
+      }
+      chunks.push(chunk);
     }
-    return text;
+    return Buffer.concat(chunks).toString("utf8");
   } catch (err) {
     throw new Error(`${cnd}: cannot read ${url} — ${err.message}`);
   } finally {
@@ -90,6 +102,10 @@ async function resolveSource(entry, manifestDir) {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(src)) {
     throw new Error(`${entry.cnd}: only http and https URLs are read, got ${src}`);
   }
+  // path.resolve lets an absolute src or a `..` escape read outside manifestDir. That is fine here:
+  // the manifest is authored by the operator running this script with their own filesystem access,
+  // not by an untrusted request -- do not "fix" this into a restriction that breaks a legitimate
+  // absolute path.
   const file = path.resolve(manifestDir, src);
   try {
     return fs.readFileSync(file, "utf8");
@@ -109,5 +125,5 @@ async function buildRegistry(entries, manifestDir) {
 
 module.exports = {
   readManifest, resolveSource, buildRegistry,
-  DEFAULT_MANIFEST, DEFAULT_OUT, MAX_REDIRECTS,
+  DEFAULT_MANIFEST, DEFAULT_OUT, MAX_REDIRECTS, MAX_XSD_BYTES,
 };

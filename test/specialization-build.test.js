@@ -627,9 +627,10 @@ test("a schema with no targetNamespace is refused", () => {
 // derived from the cnd -- it has to be declared in the manifest.
 
 const fs = require("node:fs");
+const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { readManifest, buildRegistry } = require("../scripts/build-specializations");
+const { readManifest, buildRegistry, resolveSource, MAX_XSD_BYTES } = require("../scripts/build-specializations");
 
 // A throwaway directory holding a manifest and its XSD, so the manifest's relative paths are
 // exercised the way an operator would write them.
@@ -704,4 +705,79 @@ test("an XSD that extractSpecialization refuses propagates through buildRegistry
     () => buildRegistry(entries, dir),
     /urn:example:not-a-specialization: no top-level element is a <flexContainer> specialization/
   );
+});
+
+// --- fetchXsd: the size cap must stream, not buffer-then-check ---
+//
+// A naive "does fetching an oversized URL throw" test passes against both a streaming cap and a
+// cap applied after res.text() has already read the whole body -- the old implementation throws
+// too, just later. What distinguishes them is how much of the body was ever allowed onto the wire:
+// a streaming cap aborts the connection a few chunks past MAX_XSD_BYTES; a buffer-then-check cap
+// lets the server finish sending everything it has; the client only rejects afterwards. So this
+// server counts the bytes it actually manages to write and the test asserts that count stays far
+// below the body's true (much larger) size.
+
+// Serves a body far larger than MAX_XSD_BYTES, in small paced chunks, so a client that aborts
+// mid-stream visibly stops it short -- and a client that reads to the end lets it finish.
+function startOversizedXsdServer(totalBytes, chunkSize) {
+  return new Promise((resolvePromise) => {
+    let bytesWritten = 0;
+    const server = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "application/xml" });
+      res.on("error", () => {}); // client aborted mid-write -- nothing to do about it here
+      const chunk = Buffer.alloc(chunkSize, "a");
+      const writeNext = () => {
+        if (res.destroyed || bytesWritten >= totalBytes) {
+          if (!res.destroyed) res.end();
+          return;
+        }
+        res.write(chunk);
+        bytesWritten += chunk.length;
+        setTimeout(writeNext, 2);
+      };
+      writeNext();
+    });
+    server.listen(0, "127.0.0.1", () => {
+      resolvePromise({ server, getBytesWritten: () => bytesWritten });
+    });
+  });
+}
+
+test("fetchXsd aborts once the streamed total crosses MAX_XSD_BYTES, instead of buffering the whole body first", async () => {
+  const chunkSize = 256 * 1024; // 256 KiB
+  const totalBytes = MAX_XSD_BYTES * 50; // 50x the cap -- large enough that "read to completion" and
+  // "stopped near the cap" are unmistakably different outcomes.
+  const { server, getBytesWritten } = await startOversizedXsdServer(totalBytes, chunkSize);
+  const cnd = "urn:example:oversized";
+
+  try {
+    const { port } = server.address();
+
+    await assert.rejects(
+      () => resolveSource({ cnd, xsd: `http://127.0.0.1:${port}/` }, "."),
+      (err) => {
+        assert.match(err.message, /urn:example:oversized/);
+        assert.match(err.message, /larger than/);
+        return true;
+      }
+    );
+
+    // Let the aborted connection actually stop the server's write loop (the abort is signalled
+    // asynchronously over the socket, not the instant fetchXsd throws).
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+
+    // The load-bearing assertion: against the old buffer-then-check implementation, res.text()
+    // reads until the server ends the response, so the server would be left to write the entire
+    // totalBytes body (getBytesWritten() === totalBytes) before the byte-length check ever runs.
+    // Streaming instead cuts the connection a few chunks past MAX_XSD_BYTES, so the server is
+    // stopped far short of the full body it was prepared to send.
+    assert.ok(
+      getBytesWritten() < MAX_XSD_BYTES * 10,
+      `expected the connection to be aborted within a few chunks of MAX_XSD_BYTES ` +
+        `(${MAX_XSD_BYTES}), but the server wrote ${getBytesWritten()} of ${totalBytes} bytes -- ` +
+        "the whole body was buffered before the cap fired"
+    );
+  } finally {
+    await new Promise((resolveClose) => server.close(resolveClose));
+  }
 });
