@@ -123,7 +123,68 @@ async function buildRegistry(entries, manifestDir) {
   return registry;
 }
 
+// Refuses to drop a cnd that the previous registry had. The manifest is the source of truth, so a
+// removal is a legitimate thing to want -- but it is also exactly what happens when an operator
+// runs this for the first time without having moved the hand-written entries across, and losing a
+// specialization means every <flexContainer> using it starts answering 4125.
+function checkNoSilentDeletion(registry, outPath) {
+  let previous;
+  try {
+    previous = JSON.parse(fs.readFileSync(outPath, "utf8"));
+  } catch {
+    return; // no previous registry, or it is unreadable: nothing can be lost
+  }
+  const removed = Object.keys(previous).filter((cnd) => !(cnd in registry));
+  if (removed.length === 0) return;
+  throw new Error(
+    `these containerDefinitions are in ${outPath} but not in the manifest, and would be removed:\n` +
+    removed.map((c) => `  - ${c}`).join("\n") +
+    `\nAdd them to the manifest, or pass --allow-removals if the removal is intended.`
+  );
+}
+
+// Writes through a temporary file in the same directory, then renames. rename is atomic within a
+// filesystem, so a reader either sees the old registry or the new one and never a half-written
+// file -- which matters because mobius4 reads this at startup and a truncated read means every
+// containerDefinition is refused.
+function writeAtomically(registry, outPath) {
+  const tmp = `${outPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(registry, null, 4)}\n`, "utf8");
+  fs.renameSync(tmp, outPath);
+}
+
+async function main(argv) {
+  const arg = (name, fallback) => {
+    const i = argv.indexOf(name);
+    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
+  };
+  const manifestPath = path.resolve(arg("--manifest", DEFAULT_MANIFEST));
+  const outPath = path.resolve(arg("--out", DEFAULT_OUT));
+  const allowRemovals = argv.includes("--allow-removals");
+
+  const entries = readManifest(manifestPath);
+  const registry = await buildRegistry(entries, path.dirname(manifestPath));
+  if (!allowRemovals) checkNoSilentDeletion(registry, outPath);
+  writeAtomically(registry, outPath);
+
+  const names = Object.keys(registry);
+  console.log(`build-specializations: wrote ${names.length} specialization(s) to ${outPath}`);
+  for (const cnd of names) {
+    console.log(`  ${cnd} -> ${registry[cnd].namespacePrefix}:${registry[cnd].typeName} ` +
+                `(${Object.keys(registry[cnd].attributes).length} custom attribute(s))`);
+  }
+  console.log("restart mobius4 for this to take effect — the registry is read once at startup");
+}
+
+if (require.main === module) {
+  main(process.argv.slice(2)).catch((err) => {
+    // Loud and specific: the operator is adding several at once and needs to know which one.
+    console.error(`build-specializations: ${err.message}`);
+    process.exit(1);
+  });
+}
+
 module.exports = {
-  readManifest, resolveSource, buildRegistry,
+  readManifest, resolveSource, buildRegistry, checkNoSilentDeletion, writeAtomically,
   DEFAULT_MANIFEST, DEFAULT_OUT, MAX_REDIRECTS, MAX_XSD_BYTES,
 };

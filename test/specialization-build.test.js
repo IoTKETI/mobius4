@@ -630,7 +630,9 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { readManifest, buildRegistry, resolveSource, MAX_XSD_BYTES } = require("../scripts/build-specializations");
+const {
+  readManifest, buildRegistry, checkNoSilentDeletion, writeAtomically, resolveSource, MAX_XSD_BYTES,
+} = require("../scripts/build-specializations");
 
 // A throwaway directory holding a manifest and its XSD, so the manifest's relative paths are
 // exercised the way an operator would write them.
@@ -779,5 +781,72 @@ test("fetchXsd aborts once the streamed total crosses MAX_XSD_BYTES, instead of 
     );
   } finally {
     await new Promise((resolveClose) => server.close(resolveClose));
+  }
+});
+
+// --- checkNoSilentDeletion / writeAtomically: the migration-safety half of this task ---
+
+test("an existing cnd that the manifest no longer lists stops the build", async () => {
+  // The migration hazard. The current config/specializations.json was written by hand; running the
+  // build before moving that entry into the manifest would delete it. Stopping is the only answer
+  // that does not lose something silently.
+  const dir = makeManifestDir(
+    [{ cnd: "urn:example:kept", xsd: "./x.xsd" }],
+    { "x.xsd": SAMPLE_XSD }
+  );
+  const out = path.join(dir, "specializations.json");
+  fs.writeFileSync(out, JSON.stringify({
+    "urn:example:kept": { typeName: "a", namespacePrefix: "sc", attributes: {} },
+    "urn:example:about-to-vanish": { typeName: "b", namespacePrefix: "sc", attributes: {} },
+  }));
+
+  const entries = readManifest(path.join(dir, "manifest.json"));
+  const registry = await buildRegistry(entries, dir);
+
+  assert.throws(() => checkNoSilentDeletion(registry, out), /urn:example:about-to-vanish/);
+});
+
+test("a failed build leaves the existing registry byte-for-byte unchanged", async () => {
+  // An operator adding five specializations must not end up with three of them applied.
+  const dir = makeManifestDir(
+    [
+      { cnd: "urn:example:good", xsd: "./good.xsd" },
+      { cnd: "urn:example:bad", xsd: "./bad.xsd" },
+    ],
+    { "good.xsd": SAMPLE_XSD, "bad.xsd": "<xs:schema><nonsense/></xs:schema>" }
+  );
+  const out = path.join(dir, "specializations.json");
+  const before = JSON.stringify({ "urn:example:old": { typeName: "old", namespacePrefix: "sc", attributes: {} } });
+  fs.writeFileSync(out, before);
+
+  const entries = readManifest(path.join(dir, "manifest.json"));
+  await assert.rejects(() => buildRegistry(entries, dir), /urn:example:bad/);
+
+  assert.equal(fs.readFileSync(out, "utf8"), before, "nothing may be written when any entry fails");
+});
+
+test("the written registry is what cse/specialization.js reads back", async () => {
+  // The round trip. Everything above tests the builder against its own idea of the format; this is
+  // the only test that shows the CSE agrees.
+  const dir = makeManifestDir(
+    [{ cnd: "urn:example:roundtrip", xsd: "./x.xsd" }],
+    { "x.xsd": SAMPLE_XSD }
+  );
+  const out = path.join(dir, "specializations.json");
+  const entries = readManifest(path.join(dir, "manifest.json"));
+  writeAtomically(await buildRegistry(entries, dir), out);
+
+  const written = JSON.parse(fs.readFileSync(out, "utf8"));
+  const entry = written["urn:example:roundtrip"];
+
+  // The three things cse/specialization.js's lookup(), expected_envelope_key() and
+  // validate_custom() require of an entry.
+  assert.equal(typeof entry.typeName, "string");
+  assert.equal(typeof entry.namespacePrefix, "string");
+  assert.equal(typeof entry.attributes, "object");
+  assert.equal(`${entry.namespacePrefix}:${entry.typeName}`, "sc:parkingBlock");
+  for (const decl of Object.values(entry.attributes)) {
+    assert.ok(["string", "integer", "number", "boolean", "array", "object"].includes(decl.type),
+      `type_matches only understands six types, got ${decl.type}`);
   }
 });
