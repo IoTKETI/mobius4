@@ -1,12 +1,7 @@
 [
   {
     "cnd": "http://www.example.com/schema/parkingBlock.xsd",
-    "xsd": "../../docs/examples/specializations/parkingBlock.xsd",
-    "description": "A URL-style containerDefinition: the identifier happens to be where the XSD lives."
-  },
-  {
-    "cnd": "org.onem2m.common.moduleclass.alarmSpeaker",
-    "xsd": "./xsd/alarmSpeaker.xsd",
-    "description": "A TS-0023 standard containerDefinition. It is an identifier, not a location, so the XSD path is unrelated to it."
+    "xsd": "./parkingBlock.xsd",
+    "description": "A URL-style containerDefinition: the identifier happens to be where the XSD lives. The xsd path is relative to THIS file's directory, so it resolves while the manifest sits here in docs/examples/specializations/. Copy the manifest to config/ and the path has to be rewritten -- see the README beside this file."
   }
 ]

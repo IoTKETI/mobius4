@@ -9,12 +9,31 @@
   Attribute types must be XSD built-ins that map onto the six the registry understands:
   string, integer, number, boolean, array (maxOccurs > 1) and object (an inline complexType).
   A type outside that set is refused by scripts/build-specializations.js rather than guessed at.
+
+  The xs:import below is what makes this file compile as a schema. Its targetNamespace is the
+  vendor's own, so the two m2m names it uses need importing: the flexContainerResource base
+  type, and the sg_flexContainerResource substitution group head. Both are declared in
+  TS-0004's CDT-commonTypes.xsd. (oneM2M's own specializations, such as
+  CDT-allJoynSvcObject.xsd, need no import only because their targetNamespace IS the m2m
+  namespace. A vendor specialization with its own namespace is not that case.)
+
+  schemaLocation names a file that is NOT in this repository: oneM2M's schemas are not
+  redistributed here. Put your copy of CDT-commonTypes.xsd beside this file, or change the
+  attribute to point at wherever you keep the TS-0004 schema set. Until you do, an XML tool
+  reports that it cannot load CDT-commonTypes.xsd, which names the missing neighbour rather
+  than blaming this file.
+
+  scripts/build-specializations.js never resolves imports; it reads the declared types
+  directly. So the build works whether or not the import can be loaded, and this declaration
+  is here for the XML tools an operator validates their own copy with.
 -->
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
            xmlns:m2m="http://www.onem2m.org/xml/protocols"
            xmlns:sc="http://www.example.com/schema"
            targetNamespace="http://www.example.com/schema"
            elementFormDefault="unqualified">
+  <xs:import namespace="http://www.onem2m.org/xml/protocols" schemaLocation="CDT-commonTypes.xsd"/>
+
   <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
     <xs:complexType>
       <xs:complexContent>

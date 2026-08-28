@@ -23,6 +23,28 @@ answers "what do I have to *do* about it."
 
 ## [Unreleased]
 
+### Required only if you added `<flexContainer>` specializations by hand
+
+`config/specializations.json` is now generated from `config/specializations.manifest.json` by
+`node scripts/build-specializations.js`, and the build **overwrites** it. If you edited it by hand,
+move each entry into the manifest before the first build — point `xsd` at the XSD that defines it.
+
+The build refuses to drop a `cnd` that the old registry had, so a first run that would lose one
+stops and names it rather than deleting it. Nothing is written when it stops.
+
+The build runs on the host, in a checkout of this repository; it is not in the deployment image.
+A Docker deployment builds the registry here and rebuilds its image, which copies `config/` in.
+See [docs/examples/specializations/](examples/specializations/).
+
+**One entry changed in this repository's own registry.** The `parkingBlock` example's attribute list
+now comes from `docs/examples/specializations/parkingBlock.xsd` rather than from the hand-written
+JSON. The XSD at `http://developers.iotocean.org/schema/parkingBlock.xsd` is not in the repository
+and could not be reproduced, so the example XSD stands in for it. If you rely on that `cnd`, put
+your own XSD in the manifest.
+
+Nothing else changes: the registry format is the same and `cse/specialization.js` is untouched, so
+a deployment that does not use `<flexContainer>` has nothing to do.
+
 ### Nothing required: the administrator bypasses access control again
 
 The short-circuit removed in [§ v4.6.0 below](#v460) is back. `cse.admin` is granted every
@@ -46,28 +68,6 @@ One thing to check instead: **`cse.admin` is now a full bypass, so its blast rad
 than the admin policy's was.** If you had come to rely on the policy bounding what the identity
 could do, it no longer does. Everything [§ v4.6.0 below](#v460) says about treating the value
 as a credential applies with more force.
-
----
-
-## v4.18.0
-
-### Required only if you added `<flexContainer>` specializations by hand
-
-`config/specializations.json` is now generated from `config/specializations.manifest.json` by
-`node scripts/build-specializations.js`, and the build **overwrites** it. If you edited it by hand,
-move each entry into the manifest before the first build — point `xsd` at the XSD that defines it.
-
-The build refuses to drop a `cnd` that the old registry had, so a first run that would lose one
-stops and names it rather than deleting it. Nothing is written when it stops.
-
-**One entry changed in this repository's own registry.** The `parkingBlock` example's attribute list
-now comes from `docs/examples/specializations/parkingBlock.xsd` rather than from the hand-written
-JSON. The XSD at `http://developers.iotocean.org/schema/parkingBlock.xsd` is not in the repository
-and could not be reproduced, so the example XSD stands in for it. If you rely on that `cnd`, put
-your own XSD in the manifest.
-
-Nothing else changes: the registry format is the same and `cse/specialization.js` is untouched, so
-a deployment that does not use `<flexContainer>` has nothing to do.
 
 ---
 
