@@ -16,22 +16,47 @@
 
 const { XMLParser } = require("fast-xml-parser");
 
-// The elements m2m:flexContainerResource declares, from CDT-commonTypes.xsd:1701 (TS-0004). An
-// xs:extension does not repeat its base's elements, so these are excluded structurally rather than
-// by this list -- the list is a guard for the case where an XSD declares one anyway, which would
-// otherwise register an inherited attribute as a custom one and collide with the short name the
-// runtime uses for it.
+// The attributes m2m:flexContainerResource already carries, from CDT-commonTypes.xsd:1701
+// (TS-0004). An xs:extension does not repeat its base's elements, so these are excluded
+// structurally rather than by this list -- the list is a guard for the case where an XSD declares
+// one anyway, which would otherwise register an inherited attribute as a custom one and collide
+// with the short name the runtime uses for it.
 //
 // These are LONG names. cse/specialization.js's RESERVED_ATTRS holds the SHORT names (ty, ri, cnd)
 // because that is what appears on the wire. The two lists live in different name spaces and are not
 // copies of each other, so they do not need to be kept in sync.
+//
+// Two entries are not xs:elements of the base type, which is why reading its xs:sequence alone
+// missed them:
+//
+//   resourceName  is an XML *attribute* of flexContainerResource, not an element
+//                 (<xs:attribute name="resourceName" type="m2m:resourceName" use="required"/> on
+//                 the same complexType). It is still an attribute of the resource -- RESERVED_ATTRS
+//                 carries its short name 'rn' -- so a specialization declaring it collides.
+//   fcinEnabled   is in TS-0001:9.6.35 table 9.6.35-2, listed among the attributes of
+//                 <flexContainer> between location and maxNrOfInstances, both of which are already
+//                 here. It is absent from every XSD in the R4 corpus, so unlike the rest of this
+//                 list nothing structural excludes it -- this entry is the only thing stopping a
+//                 specialization from claiming a common attribute's name as a [customAttribute].
 const INHERITED_ELEMENTS = new Set([
-  "resourceType", "resourceID", "parentID", "creationTime", "lastModifiedTime", "labels",
-  "accessControlPolicyIDs", "expirationTime", "dynamicAuthorizationConsultationIDs", "announceTo",
-  "announcedAttribute", "announceSyncType", "stateTag", "creator", "location", "custodian",
-  "containerDefinition", "ontologyRef", "contentSize", "nodeLink", "maxNrOfInstances",
-  "maxInstanceAge", "maxByteSize", "currentNrOfInstances", "currentByteSize",
+  "resourceName", "resourceType", "resourceID", "parentID", "creationTime", "lastModifiedTime",
+  "labels", "accessControlPolicyIDs", "expirationTime", "dynamicAuthorizationConsultationIDs",
+  "announceTo", "announcedAttribute", "announceSyncType", "stateTag", "creator", "location",
+  "custodian", "containerDefinition", "ontologyRef", "contentSize", "nodeLink", "fcinEnabled",
+  "maxNrOfInstances", "maxInstanceAge", "maxByteSize", "currentNrOfInstances", "currentByteSize",
 ]);
+
+// The child-resource slot. TS-0001:9.6.35 table 9.6.35-1 lists <flexContainer>'s child resources,
+// and the XSDs spell that slot as an element named childResource typed m2m:childResourceRef. It is
+// structure, not a [customAttribute], in whichever particle it turns up -- so it is skipped when
+// collecting attributes and exempt from the nested-element check below.
+//
+// Both halves of that are load-bearing. All eight specializations in the TS-0004 corpus put it in
+// a nested xs:choice (CDT-allJoynSvcObject.xsd:37), so a nested-element check that did not exempt
+// it would refuse every one of them. And directly under the extension it used to register as a
+// custom attribute of type 'array' without a word, because typeOf answers on maxOccurs before it
+// ever looks at the type and the corpus always declares it maxOccurs="unbounded".
+const CHILD_RESOURCE_ELEMENT = "childResource";
 
 // XSD built-in types mapped onto the six the registry knows (cse/specialization.js's type_matches).
 // Anything not here is refused rather than passed through.
@@ -191,15 +216,86 @@ function specializationElementOf(elements, cnd) {
 }
 
 // The elements the extension adds, from whichever particle holds them. Only direct children count:
-// a nested xs:choice is the base type's child-resource list, not a [customAttribute].
+// a nested xs:choice is the base type's child-resource list, not a [customAttribute]. What this
+// pass cannot see, unreachedContributorsOf below refuses rather than lets pass as an empty set.
 function declaredElementsOf(extension) {
   const found = [];
   for (const container of PARTICLE_CONTAINERS) {
     for (const particle of toArray(extension[container])) {
-      found.push(...toArray(particle?.element));
+      for (const element of toArray(particle?.element)) {
+        if (element?.["@_name"] === CHILD_RESOURCE_ELEMENT) continue;
+        found.push(element);
+      }
     }
   }
   return found;
+}
+
+// Subtrees whose contents are not the specialization's own elements, and so are not walked when
+// looking for what the pass above missed:
+//
+//   complexType, simpleType   an inline type's elements belong to that type. typeOf already answers
+//                             for the whole of it ('object', or whatever the restriction bases on),
+//                             so its internals are not attributes of the specialization.
+//   annotation                xs:appinfo admits arbitrary well-formed XML, which may include a
+//                             literal xs:element documenting something else entirely.
+const OPAQUE_SUBTREES = new Set(["complexType", "simpleType", "annotation"]);
+
+// Walks the extension for the two things that add elements out of the direct-children pass's
+// sight: named elements sitting in a nested particle, and xs:group references.
+//
+// Elements carrying ref= rather than name= are not collected. A ref points at a global element
+// declaration -- m2m:subscription, m2m:semanticDescriptor -- which is a child resource, not a
+// [customAttribute], and the corpus nests them by the dozen.
+function scanSubtree(node, found) {
+  if (!node || typeof node !== "object") return found;
+  for (const [key, value] of Object.entries(node)) {
+    if (key.startsWith("@_") || OPAQUE_SUBTREES.has(key)) continue;
+    for (const child of toArray(value)) {
+      if (!child || typeof child !== "object") continue;
+      if (key === "element" && child["@_name"]) found.elements.push(child["@_name"]);
+      if (key === "group" && child["@_ref"]) found.groupRefs.push(child["@_ref"]);
+      scanSubtree(child, found);
+    }
+  }
+  return found;
+}
+
+// What the extension contributes that declaredElementsOf did not collect, described so the error
+// can name it. Returns an empty array when the direct-children pass saw everything.
+//
+// This exists because the alternative is silent. Both shapes below yield attributes = {} and no
+// error, and validate_custom then rejects every custom attribute of the resource as undeclared --
+// the same failure reading all three particle containers fixed one level up. Neither shape appears
+// in the corpus today, so this refuses a document nobody has written yet; that is the point, since
+// the one that does write it should be told rather than left with a specialization that rejects
+// everything.
+function unreachedContributorsOf(extension, collected) {
+  const found = scanSubtree(extension, { elements: [], groupRefs: [] });
+  const complaints = [];
+
+  const nested = [...new Set(found.elements)].filter(
+    (name) => !collected.has(name) && name !== CHILD_RESOURCE_ELEMENT
+  );
+  if (nested.length > 0) {
+    complaints.push(
+      `element(s) ${quoteAll(nested)} declared inside a nested particle, which only the ` +
+      `extension's own xs:sequence, xs:all or xs:choice is read`
+    );
+  }
+
+  const groupRefs = [...new Set(found.groupRefs)];
+  if (groupRefs.length > 0) {
+    complaints.push(
+      `xs:group reference(s) ${quoteAll(groupRefs)}, whose elements are declared elsewhere and ` +
+      `cannot be enumerated without resolving the reference`
+    );
+  }
+  return complaints;
+}
+
+function quoteAll(names) {
+  return names.map((name) => `'${name}'`).join(", ");
 }
 
 function mapBuiltinType(declared, cnd, owner) {
@@ -267,11 +363,28 @@ function extractSpecialization(xsdText, { cnd }) {
     );
   }
 
+  const declared = declaredElementsOf(extension);
+
+  // Refuse before mapping types: an attribute set that is missing entries is wrong as a whole, and
+  // saying which type failed to map would answer a smaller question than the one that matters.
+  const unreached = unreachedContributorsOf(
+    extension,
+    new Set(declared.map((el) => el?.["@_name"]).filter(Boolean))
+  );
+  if (unreached.length > 0) {
+    throw new Error(
+      `${cnd}: the extension of <${typeName}> adds ${unreached.join("; and ")}. Extracting it ` +
+      `would hand back an attribute set with those missing and no sign of it, after which the CSE ` +
+      `rejects every request carrying one as an undeclared custom attribute. Declare them as ` +
+      `direct children of the extension's particle.`
+    );
+  }
+
   // Null prototype: an XSD may legally declare an attribute called __proto__, and assigning that
   // key on a plain object rewrites the prototype instead of adding a property -- the attribute
   // would disappear from the registry and every request carrying it be rejected as undeclared.
   const attributes = Object.create(null);
-  for (const el of declaredElementsOf(extension)) {
+  for (const el of declared) {
     const name = el["@_name"];
     if (!name) continue;
     if (INHERITED_ELEMENTS.has(name)) {

@@ -376,3 +376,172 @@ test("an attribute named __proto__ becomes an own property of attributes", () =>
   assert.ok(Object.hasOwn(got.attributes, "__proto__"), "__proto__ must be an own property");
   assert.deepEqual(Object.getOwnPropertyDescriptor(got.attributes, "__proto__").value, { type: "string" });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Pinning the two refusals the mutation testing found unprotected, and the elements the
+// direct-children pass cannot see.
+// ---------------------------------------------------------------------------------------------
+
+test("refuses an element that declares neither a type nor an inline type", () => {
+  // Such an element is xs:anyType, which is any of the six or none of them. Answering "object" --
+  // what this did before -- tells a client sending {"mode":"ON"} that mode must be an object, and
+  // answering anything else is a guess. There is no reading of the XSD that settles it.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence><xs:element name="mode" minOccurs="0"/></xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.throws(() => extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }), (err) => {
+    assert.match(err.message, /urn:example:parkingBlock/);
+    assert.match(err.message, /mode/);
+    assert.match(err.message, /anyType/);
+    return true;
+  });
+});
+
+test("refuses an inline xs:simpleType that is an xs:list or an xs:union", () => {
+  // An xs:list is a whitespace-separated string on the wire, not a JSON array, and an xs:union is
+  // whichever member type the value happens to satisfy. Calling either an object -- what this did
+  // before -- switched that attribute's validation off for every value a client could send.
+  for (const [kind, body] of [
+    ["xs:list", '<xs:list itemType="xs:string"/>'],
+    ["xs:union", '<xs:union memberTypes="xs:integer xs:string"/>'],
+  ]) {
+    const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:element name="mode" minOccurs="0"><xs:simpleType>${body}</xs:simpleType></xs:element>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+    assert.throws(
+      () => extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }),
+      (err) => {
+        assert.match(err.message, /urn:example:parkingBlock/);
+        assert.match(err.message, /mode/);
+        assert.match(err.message, /xs:list or xs:union/);
+        return true;
+      },
+      `an inline ${kind} must be refused`,
+    );
+  }
+});
+
+test("refuses a custom attribute declared inside a nested particle", () => {
+  // Only the extension's direct children are read, so a nested particle used to yield an empty
+  // attribute set and no error -- after which validate_custom rejected every custom attribute as
+  // undeclared. That is the same silent failure reading all three particle containers fixed one
+  // level up, and refusing is what this module's doctrine says to do when it cannot see.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:sequence>
+          <xs:element name="spots" type="xs:integer" minOccurs="0"/>
+        </xs:sequence>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.throws(() => extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }), (err) => {
+    assert.match(err.message, /urn:example:parkingBlock/);
+    assert.match(err.message, /spots/);
+    return true;
+  });
+});
+
+test("refuses a nested xs:choice holding named elements", () => {
+  // The nested-choice position is where every corpus specialization puts childResource, which is
+  // structure and exempt. A named element that is NOT childResource sitting there is a custom
+  // attribute this cannot see.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:element name="enable" type="xs:boolean"/>
+        <xs:choice minOccurs="0">
+          <xs:element name="childResource" type="m2m:childResourceRef" maxOccurs="unbounded"/>
+          <xs:element name="spots" type="xs:integer"/>
+        </xs:choice>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.throws(() => extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }), (err) => {
+    assert.match(err.message, /spots/);
+    assert.ok(!/childResource/.test(err.message), "childResource is structure and must not be named");
+    return true;
+  });
+});
+
+test("refuses an xs:group reference, whose elements are declared out of sight", () => {
+  // A group ref contributes elements this cannot enumerate without resolving the reference into
+  // another schema. Nothing named is missing from the subtree -- there is simply nothing there --
+  // so the nested-element check alone would let it through as an empty attribute set.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:group ref="m2m:parkingBlockAttributes"/>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.throws(() => extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }), (err) => {
+    assert.match(err.message, /urn:example:parkingBlock/);
+    assert.match(err.message, /parkingBlockAttributes/);
+    return true;
+  });
+});
+
+test("the nested childResource every corpus specialization declares is structure, not an attribute", () => {
+  // Verbatim from CDT-allJoynSvcObject.xsd:32-45. All eight specializations in the corpus put
+  // childResource in a nested xs:choice, so a guard that refused named elements there without
+  // exempting it would refuse every one of them -- the extraction would go from seven to none.
+  const xsd = schema(`
+  <xs:element name="allJoynSvcObject" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:element name="objectPath" type="xs:string"/>
+        <xs:element name="enable" type="xs:boolean"/>
+        <xs:choice minOccurs="0" maxOccurs="1">
+          <xs:element name="childResource" type="m2m:childResourceRef" minOccurs="1" maxOccurs="unbounded"/>
+          <xs:choice minOccurs="0" maxOccurs="unbounded">
+            <xs:element ref="m2m:semanticDescriptor"/>
+            <xs:element ref="m2m:subscription"/>
+          </xs:choice>
+        </xs:choice>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.deepEqual(
+    extractSpecialization(xsd, { cnd: "urn:example:allJoynSvcObject" }).attributes,
+    bare({ objectPath: { type: "string" }, enable: { type: "boolean" } }),
+  );
+});
+
+test("childResource directly under the extension is structure too, not an array attribute", () => {
+  // The inverse of the nested case. typeOf answers on maxOccurs before it ever looks at the type,
+  // and the corpus always declares childResource maxOccurs="unbounded" -- so in this position it
+  // used to register silently as a custom attribute of type 'array', and the registry would then
+  // accept a client's `childResource` as a [customAttribute] of the specialization.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:choice>
+        <xs:element name="childResource" type="m2m:childResourceRef" maxOccurs="unbounded"/>
+        <xs:element name="spots" type="xs:integer"/>
+      </xs:choice>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.deepEqual(
+    extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }).attributes,
+    bare({ spots: { type: "integer" } }),
+  );
+});
