@@ -148,6 +148,20 @@ build-specializations: wrote 1 specialization(s) to /app/config/specializations.
 restart mobius4 for this to take effect — the registry is read once at startup
 ```
 
+⚠️ **On Linux, check who owns your checkout.** The container writes as uid 1000 (the image's `node`
+user), so if `config/` is owned by a different uid the command above fails with a bare `EACCES`.
+Add your own uid to it:
+
+```bash
+docker compose run --rm --no-deps --entrypoint node --user "$(id -u):$(id -g)" \
+  -v "$PWD/config:/app/config" mobius4 scripts/build-specializations.js
+```
+
+**The Linux failure above was not reproduced here.** The testing behind this page was done on macOS
+(Rancher Desktop), where the file-sharing layer maps ownership and the plain command succeeds
+whatever the checkout's uid; the `--user` form was run there and also succeeds, but what it is for
+is reasoned from how bind mounts pass host uids through, not measured.
+
 Then rebuild and restart. The image copies `config/` in, so this is what carries the new registry
 into the running CSE:
 
@@ -155,13 +169,20 @@ into the running CSE:
 docker compose up -d --build
 ```
 
-Three details decide the shape of that command.
+That last step assumes you deploy by building from a checkout, which is what `docker-compose.yml`
+here does (`build: context: .`). If you deploy a published image instead, there is no rebuild to
+bake the registry into — generate `config/specializations.json` wherever that image is built, or
+mount the file in at run time.
+
+Three details decide the shape of that `docker compose run` command.
 
 - **`--entrypoint node`.** The image's entrypoint is `docker/entrypoint.js`, which starts the CSE
   rather than exec'ing its arguments, so `docker run <image> node scripts/build-specializations.js`
-  starts mobius4 and ignores the rest. (`docker compose exec` does not go through the entrypoint and
-  needs no override — but it writes inside the running container, where the registry lasts only as
-  long as that container does.)
+  starts mobius4 and ignores the rest — and mints and prints a new administrator identity on the
+  way, so a mistyped invocation looks like something worse than it is. (`docker compose exec` needs
+  no override, since it does not go through the entrypoint, but it is not a route to a new registry
+  either: it writes inside the running container, whose `/app/config` is the image's root-owned
+  copy, and anything written elsewhere lasts only as long as that container.)
 - **Mounted at `/app/config`, not at some other path.** A relative `xsd` resolves from the
   manifest's own directory, and the shipped entry points at
   `../docs/examples/specializations/parkingBlock.xsd` — `/app/docs/...` in the image, which is the
@@ -172,15 +193,24 @@ Three details decide the shape of that command.
   build writes a temporary file and renames it over the target, which a mount point refuses:
   `EBUSY: resource busy or locked, rename '/app/config/specializations.json.tmp-1' -> '/app/config/specializations.json'`.
 
-To rehearse without touching your checkout, leave the mount off and write inside the container:
+To rehearse without touching your checkout, leave the mount off and write to a scratch path inside
+the container. `mobius4:local` is the tag `docker-compose.yml` gives the image it builds, so you
+have it once you have run `docker compose build` (or `docker compose up --build`); otherwise Docker
+answers "Unable to find image".
 
 ```bash
 docker run --rm --entrypoint node mobius4:local \
   scripts/build-specializations.js --out /tmp/specializations.json
 ```
 
+`--out` matters here. The image's `/app/config` is root-owned and the CSE runs as `node`, so an
+unmounted container cannot write the registry in place — which is deliberate: `config/enums.js` and
+`config/validate.js` are loaded on request paths, and they stay unwritable by the uid the CSE runs
+as.
+
 `docker-compose.yml` deliberately mounts no host `config/` of its own. It could, and a rebuilt
 registry would then need only `docker compose restart` — but the same mount would carry
 `config/local*.json` into a deployment the `Dockerfile` goes out of its way to keep them out of, and
 would shadow a newer image's `config/default.json` with whatever an older checkout happens to hold.
-Building on the host and rebuilding the image keeps a generated file where generated files belong.
+Generating the registry into the checkout — with the mounted `docker compose run` above, or on the
+host — and then rebuilding the image keeps a generated file where generated files belong.

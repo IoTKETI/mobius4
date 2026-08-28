@@ -45,11 +45,11 @@ See `docs/examples/specializations/` for a sample XSD and manifest.
 deployment can run the script.
 
 The image carries the build accordingly: `scripts/build-specializations.js`,
-`scripts/lib/xsd-specialization.js` and the one XSD the shipped manifest resolves to, with
-`/app/config` owned by the `node` user so the registry can be written in place. The documented
-invocation mounts the host's `config/` over it, so the result lands in the checkout and the next
-image build carries it in — `docs/examples/specializations/README.md` has the command and the three
-things that decide its shape.
+`scripts/lib/xsd-specialization.js` and the one XSD the shipped manifest resolves to. `/app/config`
+stays root-owned and unwritable by the user the CSE runs as, so the registry is not written in
+place: the documented invocation mounts the host's `config/` over it, and the result lands in the
+checkout for the next image build to carry in. `docs/examples/specializations/README.md` has the
+command and the three things that decide its shape.
 
 ## v4.17.1 (2026-08-27)
 
