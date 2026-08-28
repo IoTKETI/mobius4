@@ -617,3 +617,91 @@ test("a schema with no targetNamespace is refused", () => {
     /urn:example:nons: the schema has no targetNamespace/
   );
 });
+
+// --- build-specializations.js: reading a manifest and resolving each entry's XSD ---
+//
+// cnd and xsd are separate fields on purpose: TS-0023:6.4.1 calls containerDefinition "a unique
+// identifier", and the values the standard actually assigns are reverse-DNS strings that point
+// nowhere ("org.onem2m.common.moduleclass.alarmSpeaker", TS-0023:6.4.3). Its XSD type is
+// xs:anyURI, which permits a URL but does not require one, so the XSD's location cannot be
+// derived from the cnd -- it has to be declared in the manifest.
+
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { readManifest, buildRegistry } = require("../scripts/build-specializations");
+
+// A throwaway directory holding a manifest and its XSD, so the manifest's relative paths are
+// exercised the way an operator would write them.
+function makeManifestDir(entries, files = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(entries, null, 2));
+  for (const [name, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), body);
+  }
+  return dir;
+}
+
+test("a manifest entry resolves a relative XSD path and produces a registry keyed by cnd", async () => {
+  const dir = makeManifestDir(
+    [{ cnd: "org.onem2m.example.moduleclass.parkingBlock", xsd: "./xsd/parkingBlock.xsd" }],
+    { "xsd/parkingBlock.xsd": SAMPLE_XSD }
+  );
+
+  const entries = readManifest(path.join(dir, "manifest.json"));
+  const registry = await buildRegistry(entries, dir);
+
+  assert.deepEqual(Object.keys(registry), ["org.onem2m.example.moduleclass.parkingBlock"]);
+  assert.equal(registry["org.onem2m.example.moduleclass.parkingBlock"].typeName, "parkingBlock");
+  assert.equal(registry["org.onem2m.example.moduleclass.parkingBlock"].namespacePrefix, "sc");
+});
+
+test("a manifest entry with no cnd is refused", () => {
+  const dir = makeManifestDir([{ xsd: "./x.xsd" }]);
+  assert.throws(() => readManifest(path.join(dir, "manifest.json")), /cnd/);
+});
+
+test("a manifest entry with no xsd is refused", () => {
+  const dir = makeManifestDir([{ cnd: "urn:example:x" }]);
+  assert.throws(() => readManifest(path.join(dir, "manifest.json")), /xsd/);
+});
+
+test("two manifest entries with the same cnd are refused", () => {
+  // Silently keeping the last one would make the registry depend on manifest order.
+  const dir = makeManifestDir([
+    { cnd: "urn:example:dup", xsd: "./a.xsd" },
+    { cnd: "urn:example:dup", xsd: "./b.xsd" },
+  ]);
+  assert.throws(() => readManifest(path.join(dir, "manifest.json")), /urn:example:dup/);
+});
+
+test("a manifest that is not an array is refused", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ cnd: "x" }));
+  assert.throws(() => readManifest(path.join(dir, "manifest.json")), /array/i);
+});
+
+test("a missing XSD file names the cnd, not just the path", async () => {
+  const dir = makeManifestDir([{ cnd: "urn:example:missing", xsd: "./nope.xsd" }]);
+  const entries = readManifest(path.join(dir, "manifest.json"));
+
+  await assert.rejects(() => buildRegistry(entries, dir), /urn:example:missing/);
+});
+
+test("an XSD that extractSpecialization refuses propagates through buildRegistry with the cnd intact", async () => {
+  // Not the brief's literal claim that this input is "malformed XML" -- fast-xml-parser parses it
+  // fine (verified directly against extractSpecialization). It fails a downstream structural check
+  // instead: no top-level element joins the flexContainer substitution group or extends the base
+  // type. What matters for this test is only that buildRegistry does not catch and reword whatever
+  // extractSpecialization throws -- the cnd and the original message both have to survive.
+  const dir = makeManifestDir([
+    { cnd: "urn:example:not-a-specialization", xsd: "./bad.xsd" },
+  ], { "bad.xsd": "<xs:schema><nonsense/></xs:schema>" });
+  const entries = readManifest(path.join(dir, "manifest.json"));
+
+  await assert.rejects(
+    () => buildRegistry(entries, dir),
+    /urn:example:not-a-specialization: no top-level element is a <flexContainer> specialization/
+  );
+});
