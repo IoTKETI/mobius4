@@ -142,8 +142,19 @@ function namespacePrefixOf(schema, xsdText, cnd) {
   const target = schema["@_targetNamespace"];
   if (!target) throw new Error(`${cnd}: the schema has no targetNamespace`);
 
+  // Not dead code, even though parseXsd has already proved a <schema> root exists: that proof comes
+  // from the parser, this match from the raw text, and the two disagree on what a prefix may look
+  // like. [\w.-] is ASCII, while an XML NCName may hold any Unicode letter -- so a root written as
+  // <é:schema> parses (removeNSPrefix strips the prefix) and then matches nothing here. Reported as
+  // the prefix problem it is rather than as a missing root element, which parseXsd would have
+  // caught first.
   const tags = stripXmlComments(xsdText).match(/<[\w.-]*:?schema\b[^>]*>/g) ?? [];
-  if (tags.length === 0) throw new Error(`${cnd}: no <xs:schema> root element`);
+  if (tags.length === 0) {
+    throw new Error(
+      `${cnd}: the <xs:schema> root element could not be located in the source text — its namespace ` +
+      `prefix is outside the ASCII letters, digits, '.', '-' and '_' this reader handles`
+    );
+  }
   // The tag that actually declares this targetNamespace, not merely the first one that looks like
   // a schema element.
   const rootTag = tags.find((tag) => attrValue(tag, "targetNamespace") === target) ?? tags[0];

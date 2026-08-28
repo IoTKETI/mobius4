@@ -547,9 +547,9 @@ test("childResource directly under the extension is structure too, not an array 
 });
 
 // ---------------------------------------------------------------------------------------------
-// Task 2: refusal paths the file above did not yet pin (BACKLOG-024 task-2-brief.md). Verified
-// against the current implementation by running it, not against the brief's original regexes --
-// several of those were written against Task 1's first cut and no longer match.
+// Refusal paths the block above did not yet pin. Each one is asserted against the message
+// scripts/lib/xsd-specialization.js actually produces, confirmed by running it -- not against a
+// message written from the implementation's first cut, several of which no longer match.
 // ---------------------------------------------------------------------------------------------
 
 test("an extension that redeclares an inherited attribute is refused", () => {

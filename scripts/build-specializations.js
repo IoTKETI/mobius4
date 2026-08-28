@@ -33,9 +33,12 @@ const DEFAULT_OUT = path.join(REPO_ROOT, "config", "specializations.json");
 // memory at once -- fetchXsd counts bytes as they stream in and aborts as soon as the running total
 // crosses the cap, so a misbehaving host serving an arbitrarily large response is never buffered in
 // full before the cap can fire.
+//
+// Redirects are not one of the bounds: fetchXsd passes redirect: "follow" and leaves the limit to
+// fetch's own default. There is deliberately no constant for it -- a named limit that nothing
+// enforces reads like a guarantee this file does not make.
 const FETCH_TIMEOUT_MS = 10000;
 const MAX_XSD_BYTES = 1024 * 1024;
-const MAX_REDIRECTS = 3;
 
 function readManifest(manifestPath) {
   let raw;
@@ -118,7 +121,11 @@ async function resolveSource(entry, manifestDir) {
 }
 
 async function buildRegistry(entries, manifestDir) {
-  const registry = {};
+  // Null prototype, for the same reason extractSpecialization uses one for the attribute map: a cnd
+  // of __proto__ would rewrite the prototype instead of adding a key, so the specialization would
+  // vanish from Object.keys() while `cnd in registry` still answered true for every inherited name
+  // -- checkNoSilentDeletion would then read a removal as present and drop it silently.
+  const registry = Object.create(null);
   for (const entry of entries) {
     const xsdText = await resolveSource(entry, manifestDir);
     registry[entry.cnd] = extractSpecialization(xsdText, { cnd: entry.cnd });
@@ -266,5 +273,5 @@ if (require.main === module) {
 module.exports = {
   readManifest, resolveSource, buildRegistry, checkNoSilentDeletion, writeAtomically,
   parseArgs, main,
-  DEFAULT_MANIFEST, DEFAULT_OUT, MAX_REDIRECTS, MAX_XSD_BYTES,
+  DEFAULT_MANIFEST, DEFAULT_OUT, MAX_XSD_BYTES,
 };

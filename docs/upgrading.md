@@ -32,9 +32,11 @@ move each entry into the manifest before the first build — point `xsd` at the 
 The build refuses to drop a `cnd` that the old registry had, so a first run that would lose one
 stops and names it rather than deleting it. Nothing is written when it stops.
 
-The build runs on the host, in a checkout of this repository; it is not in the deployment image.
-A Docker deployment builds the registry here and rebuilds its image, which copies `config/` in.
-See [docs/examples/specializations/](examples/specializations/).
+The build does **not** need a Node toolchain on the host — the deployment image carries the script.
+A Docker deployment runs it in a throwaway container with this checkout's `config/` mounted over the
+image's, so the generated registry lands in the checkout; then rebuild the image and restart, which
+copies `config/` back in. The command, and the ownership check to make first on Linux, are in
+[docs/examples/specializations/](examples/specializations/#under-docker).
 
 **One entry changed in this repository's own registry.** The `parkingBlock` example's attribute list
 now comes from `docs/examples/specializations/parkingBlock.xsd` rather than from the hand-written
