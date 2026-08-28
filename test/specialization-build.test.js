@@ -632,6 +632,7 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   readManifest, buildRegistry, checkNoSilentDeletion, writeAtomically, resolveSource, MAX_XSD_BYTES,
+  main, parseArgs, DEFAULT_OUT,
 } = require("../scripts/build-specializations");
 
 // A throwaway directory holding a manifest and its XSD, so the manifest's relative paths are
@@ -645,6 +646,18 @@ function makeManifestDir(entries, files = {}) {
   }
   return dir;
 }
+
+// What SAMPLE_XSD declares, as it survives a JSON round trip: JSON.parse yields ordinary
+// Object.prototype objects, so this is a plain literal rather than the null-prototype `bare()`
+// the extraction tests above compare against.
+const SAMPLE_ATTRIBUTES = {
+  type: { type: "string" },
+  name: { type: "string" },
+  category: { type: "array" },
+  availableSpotNumber: { type: "integer" },
+  totalSpotNumber: { type: "integer" },
+  refParkingSpot: { type: "array" },
+};
 
 test("a manifest entry resolves a relative XSD path and produces a registry keyed by cnd", async () => {
   const dir = makeManifestDir(
@@ -839,14 +852,263 @@ test("the written registry is what cse/specialization.js reads back", async () =
   const written = JSON.parse(fs.readFileSync(out, "utf8"));
   const entry = written["urn:example:roundtrip"];
 
-  // The three things cse/specialization.js's lookup(), expected_envelope_key() and
-  // validate_custom() require of an entry.
-  assert.equal(typeof entry.typeName, "string");
-  assert.equal(typeof entry.namespacePrefix, "string");
-  assert.equal(typeof entry.attributes, "object");
+  // What cse/specialization.js's lookup(), expected_envelope_key() and validate_custom() require
+  // of an entry -- asserted as exact values, not as shapes. The earlier version of this test only
+  // checked that whatever happened to be present looked plausible, and every one of those checks
+  // holds vacuously for an entry whose attributes are {}: Object.values({}) iterates nothing, and
+  // typeof null === "object". Emptying the registry entry is precisely the regression that matters
+  // -- validate_custom does `key in declared`, so an entry with no attribute names rejects every
+  // custom attribute a client can send with "is not declared by specialization".
+  //
+  // lookup() keys the registry by cnd, and returns null (-> 4125) for anything it does not hold.
+  assert.deepEqual(Object.keys(written), ["urn:example:roundtrip"]);
+  // expected_envelope_key() concatenates these two, so both must be the exact strings the XSD gave.
+  assert.equal(entry.namespacePrefix, "sc");
+  assert.equal(entry.typeName, "parkingBlock");
   assert.equal(`${entry.namespacePrefix}:${entry.typeName}`, "sc:parkingBlock");
-  for (const decl of Object.values(entry.attributes)) {
+  // validate_custom() matches wire names against these keys, so the names are the contract.
+  assert.deepEqual(entry.attributes, SAMPLE_ATTRIBUTES);
+  assert.deepEqual(Object.keys(entry.attributes), Object.keys(SAMPLE_ATTRIBUTES));
+  for (const [name, decl] of Object.entries(SAMPLE_ATTRIBUTES)) {
+    assert.ok(name in entry.attributes, `${name} must be declared, or every payload carrying it is refused`);
+    assert.equal(entry.attributes[name].type, decl.type);
+    // type_matches() understands exactly these six and returns true for anything else, which would
+    // switch that attribute's validation off silently.
     assert.ok(["string", "integer", "number", "boolean", "array", "object"].includes(decl.type),
       `type_matches only understands six types, got ${decl.type}`);
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// main(): the CLI itself. Everything above exercises the pieces; nothing exercised the operator's
+// actual entry point, so the order it runs them in -- build, then check for removals, then write --
+// was guaranteed by reading the code alone.
+//
+// Every test here points --manifest and --out at a throwaway directory. The real
+// config/specializations.json is never a target: the parseArgs interlock in the --out= test below
+// exists so that a regression in argument parsing fails the assertion instead of rewriting it.
+// ---------------------------------------------------------------------------------------------
+
+// main() prints a summary for the operator. These tests care about what it writes, not what it
+// says, and a silent suite is easier to read.
+async function runMain(argv) {
+  const realLog = console.log;
+  console.log = () => {};
+  try {
+    return await main(argv);
+  } finally {
+    console.log = realLog;
+  }
+}
+
+test("main builds the manifest and writes the registry to --out", async () => {
+  const dir = makeManifestDir(
+    [{ cnd: "urn:example:main", xsd: "./x.xsd" }],
+    { "x.xsd": SAMPLE_XSD }
+  );
+  const out = path.join(dir, "specializations.json");
+
+  await runMain(["--manifest", path.join(dir, "manifest.json"), "--out", out]);
+
+  const written = JSON.parse(fs.readFileSync(out, "utf8"));
+  assert.deepEqual(Object.keys(written), ["urn:example:main"]);
+  assert.equal(written["urn:example:main"].typeName, "parkingBlock");
+  assert.equal(written["urn:example:main"].namespacePrefix, "sc");
+  assert.deepEqual(written["urn:example:main"].attributes, SAMPLE_ATTRIBUTES);
+});
+
+test("main leaves an existing registry byte-for-byte unchanged when one manifest entry fails", async () => {
+  // The headline property, through the CLI rather than through buildRegistry directly: an operator
+  // adding five specializations must not end up with three of them applied -- or, worse, with the
+  // registry replaced by an empty one because the write happened before the build.
+  const dir = makeManifestDir(
+    [
+      { cnd: "urn:example:good", xsd: "./good.xsd" },
+      { cnd: "urn:example:bad", xsd: "./bad.xsd" },
+    ],
+    { "good.xsd": SAMPLE_XSD, "bad.xsd": "<xs:schema><nonsense/></xs:schema>" }
+  );
+  const out = path.join(dir, "specializations.json");
+  const before = JSON.stringify({
+    "urn:example:old": { typeName: "old", namespacePrefix: "sc", attributes: {} },
+  });
+  fs.writeFileSync(out, before);
+
+  await assert.rejects(
+    () => runMain(["--manifest", path.join(dir, "manifest.json"), "--out", out]),
+    /urn:example:bad/
+  );
+
+  assert.equal(fs.readFileSync(out, "utf8"), before, "a failed build may not touch the registry");
+});
+
+test("main stops on a cnd the manifest would drop, and --allow-removals lets it through", async () => {
+  const dir = makeManifestDir(
+    [{ cnd: "urn:example:kept", xsd: "./x.xsd" }],
+    { "x.xsd": SAMPLE_XSD }
+  );
+  const out = path.join(dir, "specializations.json");
+  const before = JSON.stringify({
+    "urn:example:kept": { typeName: "a", namespacePrefix: "sc", attributes: {} },
+    "urn:example:about-to-vanish": { typeName: "b", namespacePrefix: "sc", attributes: {} },
+  });
+  fs.writeFileSync(out, before);
+  const argv = ["--manifest", path.join(dir, "manifest.json"), "--out", out];
+
+  await assert.rejects(() => runMain(argv), /urn:example:about-to-vanish/);
+  assert.equal(fs.readFileSync(out, "utf8"), before, "the refusal must not have written anything");
+
+  await runMain([...argv, "--allow-removals"]);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(out, "utf8"))), ["urn:example:kept"]);
+});
+
+test("main honours --out=<path> instead of falling back to the production registry", async () => {
+  // The dangerous form. `--out=/tmp/o.json` used to be an unrecognised token that the parser
+  // ignored, so a rehearsal on temporary paths exited 0, printed a success summary, and rewrote
+  // config/specializations.json.
+  const dir = makeManifestDir(
+    [{ cnd: "urn:example:equals", xsd: "./x.xsd" }],
+    { "x.xsd": SAMPLE_XSD }
+  );
+  const out = path.join(dir, "specializations.json");
+
+  // Interlock, deliberately before main() runs: if --out= ever resolves to DEFAULT_OUT again this
+  // fails here, rather than proving the point by overwriting the real registry.
+  assert.equal(parseArgs([`--out=${out}`]).outPath, out);
+  assert.notEqual(parseArgs([`--out=${out}`]).outPath, DEFAULT_OUT);
+
+  await runMain([`--manifest=${path.join(dir, "manifest.json")}`, `--out=${out}`]);
+
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(out, "utf8"))), ["urn:example:equals"]);
+});
+
+test("parseArgs reads --flag=value and --flag value the same way", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  const manifest = path.join(dir, "manifest.json");
+  const out = path.join(dir, "out.json");
+
+  const equalsForm = parseArgs([`--manifest=${manifest}`, `--out=${out}`, "--allow-removals"]);
+  const spacedForm = parseArgs(["--manifest", manifest, "--out", out, "--allow-removals"]);
+
+  assert.deepEqual(equalsForm, spacedForm);
+  assert.equal(equalsForm.manifestPath, manifest);
+  assert.equal(equalsForm.outPath, out);
+  assert.equal(equalsForm.allowRemovals, true);
+  assert.notEqual(equalsForm.outPath, DEFAULT_OUT);
+});
+
+test("parseArgs refuses a flag whose value is missing, rather than falling back to the default", () => {
+  // Falling back is what makes this dangerous rather than merely wrong: the fallback is the real
+  // config/specializations.json, and the operator is told the build succeeded.
+  for (const argv of [["--out"], ["--manifest"], ["--out", "--allow-removals"], ["--out="], ["--manifest="]]) {
+    assert.throws(
+      () => parseArgs(argv),
+      (err) => {
+        assert.match(err.message, /--(out|manifest)/);
+        return true;
+      },
+      `${JSON.stringify(argv)} must be refused`
+    );
+  }
+});
+
+test("parseArgs refuses an unrecognised argument, naming it", () => {
+  assert.throws(() => parseArgs(["--output", "/tmp/o.json"]), /--output/);
+  assert.throws(() => parseArgs(["--allow-removal"]), /--allow-removal/);
+  assert.throws(() => parseArgs(["specializations.manifest.json"]), /specializations\.manifest\.json/);
+  assert.throws(() => parseArgs(["--allow-removals=yes"]), /--allow-removals/);
+});
+
+test("parseArgs with no arguments is the documented default run", () => {
+  // The one case where falling back to the production paths is correct: the operator supplied
+  // nothing, so nothing can have been misread.
+  assert.deepEqual(parseArgs([]), {
+    manifestPath: require("../scripts/build-specializations").DEFAULT_MANIFEST,
+    outPath: DEFAULT_OUT,
+    allowRemovals: false,
+  });
+});
+
+// --- checkNoSilentDeletion: only a missing registry is safe to skip over ---
+
+test("no previous registry at all is not an error -- nothing can be lost", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  checkNoSilentDeletion({ "urn:example:new": {} }, path.join(dir, "specializations.json"));
+});
+
+test("a previous registry that cannot be parsed stops the build instead of skipping the check", () => {
+  // "There is no previous registry" and "there is one and I could not read it" are opposite
+  // situations: the first loses nothing, the second overwrites a file whose contents were never
+  // compared. Both used to take the same silent early return.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  const out = path.join(dir, "specializations.json");
+  fs.writeFileSync(out, '{"urn:example:kept": {"typeName": "a", "namespaceP');
+
+  assert.throws(() => checkNoSilentDeletion({}, out), (err) => {
+    assert.match(err.message, /specializations\.json/);
+    assert.match(err.message, /JSON/i);
+    return true;
+  });
+});
+
+test("a previous registry that is not a JSON object stops the build, saying what was found", () => {
+  // JSON.parse("null") succeeds and Object.keys(null) then throws a TypeError that names neither
+  // the file nor the problem; a scalar like 5 or true has no keys, so the removal check passed
+  // over a file it had not understood.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  for (const [raw, expected] of [
+    ["null", /null/],
+    ["5", /number/],
+    ["true", /boolean/],
+    ['"a string"', /string/],
+    ['["urn:example:kept"]', /array/],
+  ]) {
+    const out = path.join(dir, `registry-${Buffer.from(raw).toString("hex")}.json`);
+    fs.writeFileSync(out, raw);
+
+    assert.throws(() => checkNoSilentDeletion({}, out), (err) => {
+      assert.match(err.message, /registry-/);
+      assert.match(err.message, expected);
+      return true;
+    }, `a previous registry of ${raw} must be refused`);
+  }
+});
+
+test("a previous registry that exists but cannot be read stops the build", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  const out = path.join(dir, "specializations.json");
+  fs.writeFileSync(out, JSON.stringify({ "urn:example:kept": {} }));
+  fs.chmodSync(out, 0o000);
+
+  let readable = true;
+  try {
+    fs.readFileSync(out, "utf8");
+  } catch {
+    readable = false;
+  }
+  // Running as root ignores the mode bits, so there is nothing to assert there.
+  if (readable) return;
+
+  assert.throws(() => checkNoSilentDeletion({}, out), (err) => {
+    assert.match(err.message, /specializations\.json/);
+    assert.match(err.message, /EACCES|permission denied/i);
+    return true;
+  });
+  fs.chmodSync(out, 0o600);
+});
+
+// --- writeAtomically: the temp file is an implementation detail and must not outlive the call ---
+
+test("a write that fails leaves no temp file beside the registry", () => {
+  // A directory at the target path makes the rename throw EISDIR after the temp file is already
+  // written. The stray file then sits next to the real registry, where the next operator finds a
+  // specializations.json.tmp-8167 and has to work out whether it matters.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "spec-build-"));
+  const out = path.join(dir, "specializations.json");
+  fs.mkdirSync(out);
+
+  assert.throws(() => writeAtomically({ "urn:example:x": { typeName: "x" } }, out));
+
+  assert.deepEqual(fs.readdirSync(dir), ["specializations.json"],
+    "the temp file must be removed even when the write or the rename throws");
 });

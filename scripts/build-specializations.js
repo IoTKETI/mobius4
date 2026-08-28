@@ -9,7 +9,10 @@
 // from the cnd; it has to be declared, and this file is where.
 //
 // Run by an operator, not on any request path:
-//   node scripts/build-specializations.js [--manifest <path>] [--out <path>]
+//   node scripts/build-specializations.js [--manifest <path>] [--out <path>] [--allow-removals]
+//
+// Both --flag value and --flag=value are accepted. Anything else is refused rather than ignored:
+// the defaults are the production paths, so a silently dropped argument rewrites the real registry.
 //
 // The registry is read once at startup (cse/specialization.js), so a rebuild takes effect on the
 // next restart. That is the whole reason this is a build step and not an API: restarting mobius4
@@ -128,12 +131,35 @@ async function buildRegistry(entries, manifestDir) {
 // runs this for the first time without having moved the hand-written entries across, and losing a
 // specialization means every <flexContainer> using it starts answering 4125.
 function checkNoSilentDeletion(registry, outPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(outPath, "utf8");
+  } catch (err) {
+    // ENOENT is the only read failure that is safe to pass over: there is no previous registry, so
+    // nothing can be lost. Every other failure means a registry may well exist and could not be
+    // read -- returning here would skip the removal check and then overwrite a file whose contents
+    // were never compared, which is the exact loss this function exists to prevent.
+    if (err.code === "ENOENT") return;
+    throw new Error(`cannot read the existing registry at ${outPath} — ${err.message}`);
+  }
+
   let previous;
   try {
-    previous = JSON.parse(fs.readFileSync(outPath, "utf8"));
-  } catch {
-    return; // no previous registry, or it is unreadable: nothing can be lost
+    previous = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`the existing registry at ${outPath} is not valid JSON — ${err.message}`);
   }
+
+  // JSON.parse accepts a bare scalar, so `null`, `5` and `true` all parse. Object.keys(null) then
+  // throws a TypeError that names neither the file nor the problem, and a scalar simply has no
+  // keys -- so the removal check passed silently over a file it had not understood.
+  if (previous === null || typeof previous !== "object" || Array.isArray(previous)) {
+    const found = previous === null ? "null" : Array.isArray(previous) ? "an array" : `a ${typeof previous}`;
+    throw new Error(
+      `the existing registry at ${outPath} is not a JSON object of containerDefinitions — found ${found}`
+    );
+  }
+
   const removed = Object.keys(previous).filter((cnd) => !(cnd in registry));
   if (removed.length === 0) return;
   throw new Error(
@@ -149,18 +175,71 @@ function checkNoSilentDeletion(registry, outPath) {
 // containerDefinition is refused.
 function writeAtomically(registry, outPath) {
   const tmp = `${outPath}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(registry, null, 4)}\n`, "utf8");
-  fs.renameSync(tmp, outPath);
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(registry, null, 4)}\n`, "utf8");
+    fs.renameSync(tmp, outPath);
+  } finally {
+    // The temp file is an implementation detail of the rename and must not outlive this call. If
+    // the write or the rename throws it is otherwise left beside the real registry, where the next
+    // operator finds a specializations.json.tmp-8167 and has to work out whether it matters. After
+    // a successful rename there is nothing at this path, which is what `force` covers.
+    fs.rmSync(tmp, { force: true });
+  }
+}
+
+// Flags that take a value, mapped to the field each one sets.
+const VALUE_FLAGS = { "--manifest": "manifestPath", "--out": "outPath" };
+const BOOLEAN_FLAGS = { "--allow-removals": "allowRemovals" };
+const USAGE = "usage: node scripts/build-specializations.js [--manifest <path>] [--out <path>] [--allow-removals]";
+
+// Both `--flag value` and `--flag=value` are accepted; anything else -- an unrecognised token, a
+// flag whose value is missing, a value on a boolean flag -- is a hard error naming the argument.
+//
+// Strict on purpose. The defaults are the production paths, so a parser that ignores what it does
+// not understand turns a rehearsal on temporary paths into a rewrite of the real registry: the
+// equals form used to be an unrecognised token, and `--out` with nothing after it used to be a
+// silent fallback. Both exited 0 and printed a success summary. Falling back is only right when
+// the operator supplied nothing at all, which is the argv.length === 0 case below.
+function parseArgs(argv) {
+  const parsed = { manifestPath: DEFAULT_MANIFEST, outPath: DEFAULT_OUT, allowRemovals: false };
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    const eq = token.indexOf("=");
+    const name = eq === -1 ? token : token.slice(0, eq);
+
+    if (Object.hasOwn(BOOLEAN_FLAGS, name)) {
+      if (eq !== -1) throw new Error(`${name} takes no value, but got ${token}\n${USAGE}`);
+      parsed[BOOLEAN_FLAGS[name]] = true;
+      continue;
+    }
+    if (!Object.hasOwn(VALUE_FLAGS, name)) {
+      throw new Error(`unrecognised argument: ${token}\n${USAGE}`);
+    }
+
+    let value;
+    if (eq !== -1) {
+      value = token.slice(eq + 1);
+    } else {
+      value = argv[i + 1];
+      i += 1;
+      // A following token that is itself a flag is a missing value, not a path: `--out
+      // --allow-removals` means the operator dropped the path.
+      if (typeof value === "string" && value.startsWith("--")) value = "";
+    }
+    if (!value) {
+      throw new Error(`${name} needs a path — it was given none\n${USAGE}`);
+    }
+    parsed[VALUE_FLAGS[name]] = value;
+  }
+
+  parsed.manifestPath = path.resolve(parsed.manifestPath);
+  parsed.outPath = path.resolve(parsed.outPath);
+  return parsed;
 }
 
 async function main(argv) {
-  const arg = (name, fallback) => {
-    const i = argv.indexOf(name);
-    return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
-  };
-  const manifestPath = path.resolve(arg("--manifest", DEFAULT_MANIFEST));
-  const outPath = path.resolve(arg("--out", DEFAULT_OUT));
-  const allowRemovals = argv.includes("--allow-removals");
+  const { manifestPath, outPath, allowRemovals } = parseArgs(argv);
 
   const entries = readManifest(manifestPath);
   const registry = await buildRegistry(entries, path.dirname(manifestPath));
@@ -186,5 +265,6 @@ if (require.main === module) {
 
 module.exports = {
   readManifest, resolveSource, buildRegistry, checkNoSilentDeletion, writeAtomically,
+  parseArgs, main,
   DEFAULT_MANIFEST, DEFAULT_OUT, MAX_REDIRECTS, MAX_XSD_BYTES,
 };
