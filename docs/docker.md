@@ -51,7 +51,7 @@ settings you actually want to change.
 
 The full list of keys and what they do is in [.env.example](../.env.example); the
 underlying settings are in [configuration.md](configuration.md). Two are worth
-calling out here.
+calling out here, and one thing is configured outside `.env` entirely.
 
 **`CSE_POA`** — the address this CSE advertises about itself, used by other CSEs and
 by notification delivery. The default (`http://localhost:7599`) means "localhost" as
@@ -61,6 +61,14 @@ an address that resolves from outside the container.
 **`HELMET_ENABLED` and `RATELIMIT_ENABLED`** default to `true` here and to `false` in
 `config/default.json`. The defaults there suit a developer running from source. Turn
 them off only if something in front of Mobius4 is doing the same job.
+
+**`<flexContainer>` specializations** are not an `.env` setting. The registry the CSE reads
+at startup, `config/specializations.json`, is generated from `config/specializations.manifest.json`
+by a script the image carries — so adding a specialization needs no Node on the host. You run it in
+a throwaway container with your checkout's `config/` mounted over the image's, so the registry lands
+in the checkout, then rebuild and restart to carry it back in. The command, what the manifest holds
+and the ownership check to make first on Linux are in
+[docs/examples/specializations/](examples/specializations/#under-docker).
 
 ---
 

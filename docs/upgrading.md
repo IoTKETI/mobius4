@@ -21,31 +21,31 @@ answers "what do I have to *do* about it."
 
 ---
 
-## [Unreleased]
+## v4.18.0
 
-### Nothing required: the administrator bypasses access control again
+### Required only if you added `<flexContainer>` specializations by hand
 
-The short-circuit removed in [§ v4.6.0 below](#v460) is back. `cse.admin` is granted every
-operation before any `<accessControlPolicy>` is read, on every resource regardless of policy,
-creator or `acpi`.
+`config/specializations.json` is now generated from `config/specializations.manifest.json` by
+`node scripts/build-specializations.js`, and the build **overwrites** it. If you edited it by hand,
+move each entry into the manifest before the first build — point `xsd` at the XSD that defines it.
 
-**No migration, no configuration change.** The admin `<accessControlPolicy>` is still created
-at startup and still evaluated for anyone else it names, so a deployment that did the v4.6.0
-migration keeps working exactly as it did.
+The build refuses to drop a `cnd` that the old registry had, so a first run that would lose one
+stops and names it rather than deleting it. Nothing is written when it stops.
 
-Two things you may now be able to undo:
+The build does **not** need a Node toolchain on the host — the deployment image carries the script.
+A Docker deployment runs it in a throwaway container with this checkout's `config/` mounted over the
+image's, so the generated registry lands in the checkout; then rebuild the image and restart, which
+copies `config/` back in. The command, and the ownership check to make first on Linux, are in
+[docs/examples/specializations/](examples/specializations/#under-docker).
 
-- If you named `cb_admin_acp` in every resource's `accessControlPolicyIDs` to keep the
-  administrator's reach, you no longer have to. Removing it is optional and changes nothing for
-  the administrator either way.
-- If you were writing to the `acpi` column in PostgreSQL by hand to recover resources the
-  administrator had been locked out of — resources created with no `acpi`, which no request
-  could repair — that is what this change exists to end.
+**One entry changed in this repository's own registry.** The `parkingBlock` example's attribute list
+now comes from `docs/examples/specializations/parkingBlock.xsd` rather than from the hand-written
+JSON. The XSD at `http://developers.iotocean.org/schema/parkingBlock.xsd` is not in the repository
+and could not be reproduced, so the example XSD stands in for it. If you rely on that `cnd`, put
+your own XSD in the manifest.
 
-One thing to check instead: **`cse.admin` is now a full bypass, so its blast radius is wider
-than the admin policy's was.** If you had come to rely on the policy bounding what the identity
-could do, it no longer does. Everything [§ v4.6.0 below](#v460) says about treating the value
-as a credential applies with more force.
+Nothing else changes: the registry format is the same and `cse/specialization.js` is untouched, so
+a deployment that does not use `<flexContainer>` has nothing to do.
 
 ---
 
@@ -212,6 +212,30 @@ None of that needs anything from you.
 CREATE can now reject a deployment whose model is incompatible with the target — it could not
 before, because the two descriptor attributes it compares did not exist. A deployment that never
 sets them sees no change.
+
+### Nothing required: the administrator bypasses access control again
+
+The short-circuit removed in [§ v4.6.0 below](#v460) is back. `cse.admin` is granted every
+operation before any `<accessControlPolicy>` is read, on every resource regardless of policy,
+creator or `acpi`.
+
+**No migration, no configuration change.** The admin `<accessControlPolicy>` is still created
+at startup and still evaluated for anyone else it names, so a deployment that did the v4.6.0
+migration keeps working exactly as it did.
+
+Two things you may now be able to undo:
+
+- If you named `cb_admin_acp` in every resource's `accessControlPolicyIDs` to keep the
+  administrator's reach, you no longer have to. Removing it is optional and changes nothing for
+  the administrator either way.
+- If you were writing to the `acpi` column in PostgreSQL by hand to recover resources the
+  administrator had been locked out of — resources created with no `acpi`, which no request
+  could repair — that is what this change exists to end.
+
+One thing to check instead: **`cse.admin` is now a full bypass, so its blast radius is wider
+than the admin policy's was.** If you had come to rely on the policy bounding what the identity
+could do, it no longer does. Everything [§ v4.6.0 below](#v460) says about treating the value
+as a credential applies with more force.
 
 ---
 

@@ -14,6 +14,11 @@ logs/
 .gitignore
 test/
 docs/
+# ...except the one XSD the shipped config/specializations.manifest.json points at. The Dockerfile
+# copies it so that `node scripts/build-specializations.js` runs inside the image against the
+# manifest as shipped. A later pattern wins over an earlier one, so this line has to stay below
+# `docs/`.
+!docs/examples/specializations/parkingBlock.xsd
 *.md
 .claude/
 .superpowers/

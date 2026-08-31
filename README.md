@@ -110,6 +110,17 @@ Since Mobius4 is developed with Node.js and PostgreSQL, any operating system tha
 - PostGIS v3.6 — **required, not optional.** `db/init.js` declares `GEOMETRY(GEOMETRY, 4326)` columns on the resource tables, so schema creation fails without the extension even if you never issue a geo-query. Developed on 3.6.4; CI runs the `postgis/postgis:17-3.6-alpine` image. 3.x releases below 3.6 are expected to work but are not tested here. Enable it per database with `CREATE EXTENSION postgis;`.
 - MQTT broker (e.g. Mosquitto)
 
+Node dependencies come with `npm install` and are not on the list above, with one worth naming:
+
+- `fast-xml-parser` — reads specialization XSDs in `scripts/build-specializations.js`. Nothing on a
+  request path uses it; the script is an operator command, run when a `<flexContainer>`
+  specialization is added. It is a runtime dependency rather than a development one because the
+  deployment image carries the script, so a Docker operator can build the registry in a container
+  instead of installing Node on the host:
+  `docker compose run --rm --no-deps --entrypoint node -v "$PWD/config:/app/config" mobius4 scripts/build-specializations.js`.
+  See [docs/examples/specializations/](docs/examples/specializations/) for what the script is for
+  and why the command looks like that.
+
 **With Docker, there is nothing on this list to install** and no database to create by hand —
 see [Installation → With Docker Compose](#with-docker-compose) below.
 
@@ -243,3 +254,4 @@ upgrade problems. A clean install needs none of it.
 | 4.16.2 | 2026-08-24 | `<latest>`, `<oldest>` and `<fanOutPoint>` could not be reached under a parent whose `resourceName` starts with `la`, `ol` or `fopt` — a container named `lamp` answered 404 for `lamp/la`. The virtual resource name is now matched as a whole path segment. No change for a deployment whose resource names do not begin with those three | — |
 | 4.17.0 | 2026-08-26 | The **MQTT registration topic** `TS-0010:6.4.4` defines (`/oneM2M/reg_req` and `/oneM2M/reg_resp`) is now served — an Originator that does not yet know its AE-ID can register there, where before the CSE did not subscribe and sent no answer at all. It accepts `<AE>` and `<remoteCSE>` creation only, and it authenticates nothing: the Credential-ID segment is an opaque string. Registration over the ordinary `/oneM2M/req` topic is unchanged | [nothing required, but read the caveat](docs/upgrading.md#v4170) |
 | 4.17.1 | 2026-08-27 | Six answers the CSE did not mean. An unimplemented resource type says **5001 NOT_IMPLEMENTED** rather than 5000, which meant "the server broke"; a `<container>`'s `mni`/`mbs`/`mia`/`acpi`/`lbl`/`loc` **can now be cleared with `null`** as oneM2M intends, having been refused 4000; MQTT `xml`/`cbor` requests are refused instead of vanishing; and a CSE-created `<dataset>` notifies subscribers as `<datasetFragment>` already did. **Breaking for anyone creating `<dataset>`/`<datasetFragment>` directly** — `TR-0071` defines no such API and it is now refused | [**only if you create datasets directly**](docs/upgrading.md#v4171) |
+| 4.18.0 | 2026-08-28 | `node scripts/build-specializations.js` builds `config/specializations.json` from a manifest, reading each `<flexContainer>` specialization's custom attributes out of its XSD instead of having them transcribed by hand. A failure names the `cnd` and leaves the existing registry byte-for-byte unchanged, and a `cnd` the manifest no longer lists stops the build rather than vanishing from it. Nothing the CSE answers changes: same registry format, still read once at startup, `cse/` untouched. **The build overwrites the registry**, so entries added by hand have to move into the manifest first | [only if you edited `config/specializations.json` by hand](docs/upgrading.md#v4180) |

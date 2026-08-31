@@ -302,10 +302,15 @@ short-name tables to oneM2M-defined names and a third-party specialization has n
 All custom attributes are optional (TS-0004:7.4.37.1 lists `[customAttribute]` as O/O). A
 name that is not declared, or a declared name carrying the wrong type, is rejected with 4000.
 
-Adding a specialization means editing `config/specializations.json` and restarting the CSE; the
-file is read once at startup. If it is missing or unparseable the CSE still starts, logs a
-warning, and answers every `cnd` with 4125 — a deployment that uses no `<flexContainer>` does
-not need the file at all.
+`config/specializations.json` is **generated**, not hand-edited: `node
+scripts/build-specializations.js` builds it from `config/specializations.manifest.json`, and the
+build **overwrites** the file — a hand edit survives only until the next build. The registry is
+read once at startup, so restart the CSE after a build for the change to take effect. If the file
+is missing or unparseable the CSE still starts, logs a warning, and answers every `cnd` with 4125
+— a deployment that uses no `<flexContainer>` does not need it at all.
+
+For the manifest format and the build workflow, see
+[docs/examples/specializations/](examples/specializations/README.md).
 
 For a walkthrough of registering a specialization and then creating, updating, discovering and
 deleting resources against it, see

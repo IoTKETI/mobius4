@@ -285,11 +285,17 @@ registry, keyed by `cnd` URI:
 }
 ```
 
-Add your own entries to that file — it is separate from `config/default.json` and is read
-directly rather than through the `config` package, so `local.json` layering does not apply.
-The full key reference is in
+That file is **generated, not hand-edited**. `node scripts/build-specializations.js` builds it
+from `config/specializations.manifest.json`, which pairs each `cnd` with the XSD its attributes
+are read from, and the build **overwrites** the registry — a hand edit survives only until the
+next build. So you add a specialization by adding a manifest entry and running the build; the
+manifest format, the rules an XSD has to follow and the Docker form of the command are all in
+[docs/examples/specializations/](examples/specializations/README.md).
+
+The registry is separate from `config/default.json` and is read directly rather than through the
+`config` package, so `local.json` layering does not apply. The full key reference is in
 [Configuration](configuration.md#flexcontainer-specializations). **The CSE reads this at
-startup, so restart after editing.**
+startup, so restart after a build.**
 
 > **`cnd` is an identifier, not something the CSE fetches.** It is typed `xs:anyURI`, and
 > nothing in oneM2M requires it to be dereferenceable. The official conformance suite uses

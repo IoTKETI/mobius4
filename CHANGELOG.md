@@ -21,6 +21,44 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.18.0 (2026-08-28)
+
+**Why MINOR**: nothing the CSE answers changes — `cse/` is untouched, the registry format is the
+same, `probe-capabilities --check` reports no drift, and there is no schema change and no
+migration. The PATCH row of the table above covers a bug fix, performance, docs or tests, and this
+is none of them: it **adds** an operator-facing tool and a new runtime dependency that ships in the
+image. That is the same shape as v4.8.0 (`docker compose up`), which added a deployment capability
+with no change to an existing source deployment and was MINOR. Nothing breaks for a deployment that
+upgrades and never runs the new command.
+
+### Added: specialization registries are built from XSDs instead of written by hand
+
+`node scripts/build-specializations.js` reads `config/specializations.manifest.json`, resolves each
+XSD from a path or an `http(s)` URL, and writes `config/specializations.json`. The runtime is
+untouched — `cse/specialization.js` reads the same format it always did, once at startup, so a
+rebuild takes effect on the next restart.
+
+The manifest keeps `cnd` and `xsd` as separate fields because `containerDefinition` is an
+identifier, not a location: `TS-0023:6.4.1` calls it "a unique identifier" and the values the
+standard assigns (`org.onem2m.common.moduleclass.alarmSpeaker`, `TS-0023:6.4.3`) point nowhere,
+though its type `xs:anyURI` would permit a URL.
+
+Failures name the `cnd` and leave the existing registry byte-for-byte unchanged, and a `cnd` that
+the manifest no longer lists stops the build rather than disappearing — the tool is for adding
+several at once, where half-applied is the worst outcome.
+
+See `docs/examples/specializations/` for a sample XSD and manifest.
+
+**New dependency**: `fast-xml-parser`, in `dependencies` rather than `devDependencies` so a Docker
+deployment can run the script.
+
+The image carries the build accordingly: `scripts/build-specializations.js`,
+`scripts/lib/xsd-specialization.js` and the one XSD the shipped manifest resolves to. `/app/config`
+stays root-owned and unwritable by the user the CSE runs as, so the registry is not written in
+place: the documented invocation mounts the host's `config/` over it, and the result lands in the
+checkout for the next image build to carry in. `docs/examples/specializations/README.md` has the
+command and the three things that decide its shape.
+
 ## v4.17.1 (2026-08-27)
 
 **Why PATCH**: seven bug fixes, no new capability and no schema change. Each replaces an answer the

@@ -1,0 +1,7 @@
+[
+  {
+    "cnd": "http://developers.iotocean.org/schema/parkingBlock.xsd",
+    "xsd": "../docs/examples/specializations/parkingBlock.xsd",
+    "description": "Carried over from the hand-written registry. The XSD at this URL is not in the repository, so the example XSD stands in for it — see docs/examples/specializations/README.md."
+  }
+]

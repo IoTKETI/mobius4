@@ -24,9 +24,29 @@ COPY bindings ./bindings
 COPY cse ./cse
 COPY db ./db
 COPY models ./models
-COPY config ./config
 COPY docker ./docker
 COPY logger.js metrics.js ./
+
+# Root-owned and read-only to the app user, like every other COPY here. Do not add --chown: nothing
+# writes into the image's config/ at runtime, and neither documented way of running the
+# specialization build needs to either -- the operator's form bind-mounts the host checkout's
+# config/ over this directory (host ownership then applies), and the rehearsal writes to /tmp via
+# --out. See docs/examples/specializations/README.md. config/enums.js and config/validate.js are
+# require()d on every request path, so leaving them unwritable by the uid the CSE runs as is what
+# stops an arbitrary-write bug from becoming code that survives a restart.
+COPY config ./config
+
+# The specialization registry build. It is here so that a Docker deployment can add a
+# <flexContainer> specialization without a Node toolchain on the host -- which is also why
+# fast-xml-parser is a runtime dependency rather than a dev one. Named files rather than
+# `COPY scripts ./scripts`: probe-capabilities.js and reset-test-db.js are development tools.
+COPY scripts/build-specializations.js ./scripts/
+COPY scripts/lib/xsd-specialization.js ./scripts/lib/
+
+# The XSD that the shipped config/specializations.manifest.json resolves to. .dockerignore excludes
+# docs/ wholesale and re-admits this one file, so that the manifest as shipped builds inside the
+# image rather than failing on a path that is not there.
+COPY docs/examples/specializations/parkingBlock.xsd ./docs/examples/specializations/
 
 # Copying paths one by one rather than `COPY . .` plus .dockerignore. Both work; this way the
 # image contains what someone chose to put there, and a new directory in the repository does not
