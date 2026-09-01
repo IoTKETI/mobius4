@@ -433,6 +433,9 @@ const grp_update_schema = Joi.object().keys({
     gn: Joi.string().optional(),
 });
 
+// m2m:timestamp as used by the eventNotificationCriteria comparison conditions.
+const TIMESTAMP_CONDITION = Joi.string().regex(/^[0-9]{8}T[0-9]{6}(,[0-9]{1,6})?$/);
+
 const sub_create_schema = Joi.object().keys({
     ...create_universal_attr,
 
@@ -453,10 +456,30 @@ const sub_create_schema = Joi.object().keys({
         // TS-0001:9.6.8 table 9.6.8-3. m2m:attributeList is an xs:list of xs:NCName carrying
         // xs:minLength 1 (CDT-commonTypes.xsd:383), so an empty list is not a valid value and is
         // refused here rather than being read as "no condition".
-        atr: Joi.array().min(1).items(Joi.string())
+        atr: Joi.array().min(1).items(Joi.string()),
         // om (operationMonitor) is deliberately absent. It was accepted as Joi.any() and then read
         // by nothing: a subscriber who asked to be notified only about, say, DELETEs from one
         // Originator was answered 2001 and notified about everything. Refusing it says so.
+        // The ten value-comparison conditions of TS-0001:9.6.8 table 9.6.8-3, combined by fo.
+        // Types are TS-0004:6.3.5.7 table 6.3.5.7-1; the positiveInteger/nonNegativeInteger split
+        // is not symmetric and is deliberate -- stateTagSmaller: 0 and sizeBelow: 0 can never be
+        // satisfied, so the schema forbids them, while stateTagBigger: 0 and sizeAbove: 0 can.
+        // m2m:timestamp is YYYYMMDDThhmmss with an optional comma and up to six fractional digits
+        // and no timezone suffix (CDT-commonTypes.xsd:213); the fraction is accepted because the
+        // spec permits it, even though nothing this CSE stores carries one.
+        crb: TIMESTAMP_CONDITION,
+        cra: TIMESTAMP_CONDITION,
+        ms: TIMESTAMP_CONDITION,
+        us: TIMESTAMP_CONDITION,
+        exb: TIMESTAMP_CONDITION,
+        exa: TIMESTAMP_CONDITION,
+        sts: Joi.number().integer().min(1),
+        stb: Joi.number().integer().min(0),
+        sza: Joi.number().integer().min(0),
+        szb: Joi.number().integer().min(1),
+        // m2m:filterOperation: 1 AND, 2 OR, 3 XOR (CDT-enumerationTypes.xsd:1366). Absent means
+        // AND. A single scalar, matching "No mixed AND/OR/XOR filter operation will be supported".
+        fo: Joi.number().integer().min(1).max(3)
     }),
     exc: Joi.number().integer().min(1),
     nct: Joi.number().integer().min(1),
@@ -478,7 +501,27 @@ const sub_update_schema = Joi.object().keys({
     enc: Joi.object().optional().keys({
         net: Joi.array().items(Joi.number().integer().min(1).max(8)),
         chty: Joi.array().items(Joi.number().integer()),
-        atr: Joi.array().min(1).items(Joi.string())
+        atr: Joi.array().min(1).items(Joi.string()),
+        // The ten value-comparison conditions of TS-0001:9.6.8 table 9.6.8-3, combined by fo.
+        // Types are TS-0004:6.3.5.7 table 6.3.5.7-1; the positiveInteger/nonNegativeInteger split
+        // is not symmetric and is deliberate -- stateTagSmaller: 0 and sizeBelow: 0 can never be
+        // satisfied, so the schema forbids them, while stateTagBigger: 0 and sizeAbove: 0 can.
+        // m2m:timestamp is YYYYMMDDThhmmss with an optional comma and up to six fractional digits
+        // and no timezone suffix (CDT-commonTypes.xsd:213); the fraction is accepted because the
+        // spec permits it, even though nothing this CSE stores carries one.
+        crb: TIMESTAMP_CONDITION,
+        cra: TIMESTAMP_CONDITION,
+        ms: TIMESTAMP_CONDITION,
+        us: TIMESTAMP_CONDITION,
+        exb: TIMESTAMP_CONDITION,
+        exa: TIMESTAMP_CONDITION,
+        sts: Joi.number().integer().min(1),
+        stb: Joi.number().integer().min(0),
+        sza: Joi.number().integer().min(0),
+        szb: Joi.number().integer().min(1),
+        // m2m:filterOperation: 1 AND, 2 OR, 3 XOR (CDT-enumerationTypes.xsd:1366). Absent means
+        // AND. A single scalar, matching "No mixed AND/OR/XOR filter operation will be supported".
+        fo: Joi.number().integer().min(1).max(3)
     }),
     exc: Joi.number().integer().min(1),
     nct: Joi.number().integer().min(1),

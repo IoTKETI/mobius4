@@ -8,6 +8,7 @@ const SUB = require('../models/sub-model');
 const AE = require('../models/ae-model');
 const Lookup = require('../models/lookup-model');
 const { not_obsolete_where } = require('./utils');
+const { comparison_conditions_match, resource_of } = require('./enc-conditions');
 
 
 // supported notificationEventType (net) = {
@@ -94,8 +95,22 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
     // pre-fetch all AE poa values in one batch to avoid N+1 queries
     const ae_poa_map = await prefetch_ae_poa(sub_res);
 
+    // The resource the comparison conditions are measured against. TS-0001:9.6.8 table 9.6.8-3
+    // scopes the other conditions to the selected notificationEventType -- for net=3 that is the
+    // created child, which is what resp_prim.pc holds on the create path, and for net=1/2 the
+    // subscribed-to resource, which is what it holds on the update and delete paths. In every case
+    // it is the same object the notification carries as nev.rep.
+    //
+    // Deliberately not req_prim.pc, even for an nct=2 subscription. req_prim.pc is the UPDATE
+    // request body, and ct/lt/st/cs are server-assigned -- they can never appear in it. Evaluating
+    // the comparison conditions against it would silently make every one of them false, so nct
+    // governs only what is sent, not what is judged.
+    const event_res = resource_of(resp_prim.pc);
+
     await Promise.all(sub_res.map(async (sub) => {
         if (!sub.enc) sub.enc = { net: [1] };
+
+        if (!comparison_conditions_match(sub.enc, event_res)) return;
 
         if (sub.enc.net.includes(3) && event_type === 'create') {
             const this_ty = req_prim.ty;
@@ -140,6 +155,7 @@ async function notify_parent_of_child_deletion(deleted_pc, deleted_ty) {
         if (!sub.enc || !Array.isArray(sub.enc.net) || !sub.enc.net.includes(4)) return false;
         // When chty is present, fire only if the deleted child's type is in the list. When it
         // is absent, fire for every child type (same clause Step 1.0 — the rule net=3 follows).
+        if (!comparison_conditions_match(sub.enc, resource_of(deleted_pc))) return false;
         return !sub.enc.chty || sub.enc.chty.includes(deleted_ty);
     });
     if (targets.length === 0) return false;
