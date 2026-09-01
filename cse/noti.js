@@ -17,6 +17,39 @@ const { not_obsolete_where } = require('./utils');
 //     4: Delete of Direct Child Resource
 // }
 
+// The attribute names an UPDATE request actually carries. req_prim.pc holds the update
+// representation inside its envelope ({"m2m:cnt": {lbl: [...]}}), so the inner keys are exactly
+// the attributes the Originator asked to change. This is the same source nct=2 ("modified
+// attributes") already sends as notification content, which is why no separate diff is needed.
+function updated_attribute_names(req_prim) {
+    const pc = req_prim.pc;
+    if (!pc || typeof pc !== 'object') return [];
+    const envelope_key = Object.keys(pc)[0];
+    const body = envelope_key === undefined ? null : pc[envelope_key];
+    if (!body || typeof body !== 'object') return [];
+    return Object.keys(body);
+}
+
+// The "attribute" condition of eventNotificationCriteria (TS-0001:9.6.8 table 9.6.8-3): when the
+// list is present it names the subset of the subscribed-to resource's attributes whose update
+// generates a notification -- "If an attribute that is not specified in this list is updated, then
+// a notification shall not be generated". When absent, the default is the full attribute set.
+//
+// The clause scopes the list to notificationEventType "Update to attributes of the subscribed-to
+// resource" (net=1) and to its blocking variant (net=7, which mobius4 does not implement), so the
+// net=2/3/4 branches are deliberately left alone.
+//
+// Names are compared as they arrive on the wire (short names). No long/short translation is done:
+// the update representation and the condition list are both written by the same Originator in the
+// same naming, and translating one side only would make them stop matching.
+function attribute_condition_matches(enc, req_prim) {
+    // An empty list cannot arrive through the API -- the create/update schema requires min(1),
+    // because m2m:attributeList carries xs:minLength 1. Treating a hand-edited empty row as "no
+    // condition" keeps it from silencing a subscription outright.
+    if (!Array.isArray(enc.atr) || enc.atr.length === 0) return true;
+    return updated_attribute_names(req_prim).some(name => enc.atr.includes(name));
+}
+
 async function check_and_send_noti(req_prim, resp_prim, event_type) {
     const sub_res_pi = req_prim.ri;
 
@@ -70,8 +103,10 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
                 await send_a_noti(sub, resp_prim.pc, 3, ae_poa_map);
             }
         } else if (sub.enc.net.includes(1) && event_type === 'update') {
-            const pc = sub.nct === 2 ? req_prim.pc : resp_prim.pc;
-            await send_a_noti(sub, pc, 1, ae_poa_map);
+            if (attribute_condition_matches(sub.enc, req_prim)) {
+                const pc = sub.nct === 2 ? req_prim.pc : resp_prim.pc;
+                await send_a_noti(sub, pc, 1, ae_poa_map);
+            }
         } else if (sub.enc.net.includes(2) && event_type === 'delete') {
             await send_a_noti(sub, resp_prim.pc, 2, ae_poa_map);
         }

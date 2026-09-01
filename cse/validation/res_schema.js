@@ -445,6 +445,11 @@ const sub_create_schema = Joi.object().keys({
     enc: Joi.object().optional().keys({
         net: Joi.array().items(Joi.number().integer()),
         chty: Joi.array().items(Joi.number().integer()),
+        // atr (attribute) restricts which attribute updates fire a net=1 notification --
+        // TS-0001:9.6.8 table 9.6.8-3. m2m:attributeList is an xs:list of xs:NCName carrying
+        // xs:minLength 1 (CDT-commonTypes.xsd:383), so an empty list is not a valid value and is
+        // refused here rather than being read as "no condition".
+        atr: Joi.array().min(1).items(Joi.string()),
         om: Joi.any()
     }),
     exc: Joi.number().integer().min(1),
@@ -463,7 +468,11 @@ const sub_update_schema = Joi.object().keys({
     nu: Joi.array().optional().items(Joi.string()),
     enc: Joi.object().optional().keys({
         net: Joi.array().items(Joi.number().integer()),
-        chty: Joi.array().items(Joi.number().integer())
+        chty: Joi.array().items(Joi.number().integer()),
+        // Same condition as on create -- a subscriber that can set atr at creation must be able to
+        // change it afterwards, since enc is RW (TS-0001 table 9.6.8-2). om is still missing here
+        // and that asymmetry predates this change; it is tracked separately.
+        atr: Joi.array().min(1).items(Joi.string())
     }),
     exc: Joi.number().integer().min(1),
     nct: Joi.number().integer().min(1),
