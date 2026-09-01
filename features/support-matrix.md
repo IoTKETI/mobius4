@@ -42,9 +42,9 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | 3GPP interworking (3GPP) | ❌ none | 0 / 1 | — |
 | Announcement (ANNC) | ❌ none | 0 / 23 | — |
 | Device automation (DAU) | ❌ none | 0 / 1 | — |
-| Discovery (DIS) | ⚠️ partial | 0 / 1 | — |
+| Discovery (DIS) | ⚠️ partial | 0 / 1 | 4 |
 | Data management and repository (DMR) | ⚠️ partial | 24 / 39 | 9 |
-| flexContainer (FLXC) | ⚠️ partial | 0 / 2 | — |
+| flexContainer (FLXC) | ⚠️ partial | 0 / 2 | 1 |
 | General capability (GEN) | ⚠️ partial | 4 / 8 | — |
 | Group management (GMG) | ⚠️ partial | 3 / 4 | 21 |
 | Inter-service provider (ISP) | ❌ none | 0 / 1 | — |
@@ -64,7 +64,7 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Subscription and notification (SUB) | ⚠️ partial | 2 / 7 | 13 |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
 | Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
-| **total** | | **38 / 112** | **91** |
+| **total** | | **38 / 112** | **96** |
 
 ## Resource types
 
@@ -83,7 +83,7 @@ the operations this inventory tracks for the type, not the ones the standard def
 | `<AE>` (ae) | ✅ full | 4 / 0 / 0 | CREATE, RETRIEVE, UPDATE | 11 |
 | `<container>` (cnt) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | 3 |
 | `<contentInstance>` (cin) | ⚠️ partial | 4 / 0 / 2 | CREATE, DELETE, RETRIEVE | 2 |
-| `<flexContainer>` | ⚠️ partial | 0 / 2 / 0 | CREATE, UPDATE | — |
+| `<flexContainer>` | ⚠️ partial | 0 / 2 / 0 | CREATE, UPDATE | 1 |
 | `<group>` (grp) | ⚠️ partial | 4 / 0 / 4 | CREATE, DELETE, RETRIEVE, UPDATE | — |
 | `<node>` (nod) | ❌ none | 0 / 0 / 3 | CREATE, RETRIEVE, UPDATE | — |
 | `<remoteCSE>` (csr) | ✅ full | 6 / 0 / 0 | CREATE, DELETE, RETRIEVE, UPDATE | — |

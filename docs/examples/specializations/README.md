@@ -35,6 +35,27 @@ without it the schema fails to compile. `parkingBlock.xsd` carries the import wi
 `schemaLocation="CDT-commonTypes.xsd"` — oneM2M's schemas are not redistributed here, so point that
 at your own copy of the TS-0004 schema set.
 
+### Mandatory attributes
+
+**An attribute is mandatory unless it says `minOccurs="0"`.** XSD's default for an omitted
+`minOccurs` is 1, so writing nothing makes the attribute required:
+
+```xml
+<xs:element name="totalSpotNumber" type="xs:integer"/>                 <!-- mandatory -->
+<xs:element name="totalSpotNumber" type="xs:integer" minOccurs="1"/>   <!-- mandatory, spelled out -->
+<xs:element name="name"            type="xs:string"  minOccurs="0"/>   <!-- optional -->
+```
+
+This is how oneM2M's own specializations mark it — none of them writes a literal `minOccurs="1"` on
+a custom attribute; `CDT-allJoynSvcObject.xsd` declares `objectPath` and `enable` with no
+`minOccurs` at all, and marks only its optional attributes. `parkingBlock.xsd` here declares all
+six `minOccurs="0"`, so nothing in it is mandatory.
+
+A CREATE that omits a mandatory attribute is rejected with 4000, and a mandatory attribute cannot
+be deleted by sending `null` on UPDATE. Enforcement arrives when you rebuild the registry: an entry
+with no mandatory flag is read as declaring nothing mandatory, so an existing deployment keeps
+behaving as it did until you rebuild.
+
 Attribute types must be XSD built-ins that map onto the six the registry understands:
 
 | XSD | registry |

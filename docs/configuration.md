@@ -292,15 +292,25 @@ settings, and it grows one entry per specialization. Adding one therefore never 
 | `<cnd URI>` | The exact `cnd` value clients will send. An unregistered value is rejected with 4125 |
 | `typeName` | Local name of the specialization, e.g. `parkingBlock` |
 | `namespacePrefix` | Namespace prefix of the envelope key. TS-0004:7.4.37.1 allows a specialization to use a targetNamespace other than `m2m:` |
-| `attributes` | Allowed `[customAttribute]` names and their types. Supported types: `string`, `integer`, `number`, `boolean`, `array`, `object` |
+| `attributes` | Allowed `[customAttribute]` names, their types, and whether they are mandatory. Supported types: `string`, `integer`, `number`, `boolean`, `array`, `object`. An entry carries `"required": true` when the XSD declares the attribute mandatory |
 
 The envelope key of a request must be exactly `namespacePrefix:typeName` — for the entry
 above, `{"sc:parkingBlock": {...}}`. Custom attribute names are matched **as they appear on
 the wire**; no long-name/short-name translation is applied, because TS-0004:8.2.1 confines the
 short-name tables to oneM2M-defined names and a third-party specialization has none.
 
-All custom attributes are optional (TS-0004:7.4.37.1 lists `[customAttribute]` as O/O). A
-name that is not declared, or a declared name carrying the wrong type, is rejected with 4000.
+A name that is not declared, or a declared name carrying the wrong type, is rejected with 4000.
+
+**Whether a custom attribute is mandatory comes from the specialization's XSD**, not from oneM2M:
+`TS-0004:7.4.37.1` lists `[customAttribute]` as O/O because the standard cannot know what a
+third-party specialization requires. The XSD does — an element is mandatory unless it says
+`minOccurs="0"`, since XSD's default for an omitted `minOccurs` is 1. A CREATE that omits a
+mandatory attribute is rejected with 4000, and a mandatory attribute cannot be deleted by sending
+`null` on UPDATE.
+
+Enforcement follows the registry, not the release: an entry with no `required` flag — one written
+by hand, or built before v4.19.0 — is read as declaring nothing mandatory. Rebuild the registry
+from the manifest to turn it on.
 
 `config/specializations.json` is **generated**, not hand-edited: `node
 scripts/build-specializations.js` builds it from `config/specializations.manifest.json`, and the

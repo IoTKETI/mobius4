@@ -27,6 +27,57 @@ For the following subscription resource (partial) example, Mobius4 sends notific
 ```
 
 
+#### Narrowing what wakes a subscription
+
+`eventNotificationCriteria` (`enc`) carries more than `net` and `chty`. Everything below is
+optional; a subscription that sets none of it notifies on every event its `net` selects.
+
+**`atr` — only these attributes.** With `net=1` (update of the subscribed-to resource), name the
+attributes whose change should notify. An update touching anything else is silent. Without `atr`,
+every attribute update notifies.
+
+```json
+{"m2m:sub": {"rn": "sub1", "nu": ["http://ipe:8000/notify"],
+             "enc": {"net": [1], "atr": ["lbl"]}, "nct": 1}}
+```
+
+This is what keeps an IPE from waking itself: if it writes a response attribute back to the same
+resource, an unfiltered `net=1` subscription fires on its own write.
+
+**Value comparisons.** Ten conditions compare one attribute of the resource against a value:
+
+| | matches when |
+| :--- | :--- |
+| `crb` / `cra` | `creationTime` is before / after the value |
+| `ms` / `us` | `lastModifiedTime` is **after** / **before** the value |
+| `exb` / `exa` | `expirationTime` is before / after the value |
+| `sts` / `stb` | `stateTag` is smaller / bigger than the value |
+| `sza` / `szb` | `contentSize` is **at least** / smaller than the value |
+
+`ms` and `us` read backwards against their names — `modifiedSince` matches something modified
+*after* the given time. `sza` is the only inclusive one. Timestamps are `YYYYMMDDThhmmss`, UTC, no
+timezone suffix.
+
+A resource that does not carry the compared attribute never matches: a `<container>` has no
+`contentSize`, so `sza` never selects one.
+
+**`fo` — how the comparisons combine.** `1` AND (the default), `2` OR, `3` XOR. XOR is odd parity:
+three true conditions is true, not false.
+
+```json
+{"m2m:sub": {"rn": "big-and-recent", "nu": ["http://ipe:8000/notify"],
+             "enc": {"net": [3], "chty": [4], "sza": 1024, "cra": "20260101T000000", "fo": 1},
+             "nct": 1}}
+```
+
+That one notifies on a `<contentInstance>` created under the subscribed-to `<container>` only when
+it is at least 1024 bytes **and** created after the start of 2026.
+
+**What is refused.** `om` (`operationMonitor`) is not implemented and is rejected with 4000 rather
+than accepted and ignored. `net` values 5–8 are defined by oneM2M but not implemented here and are
+rejected with 5001; anything outside 1–8 is 4000. `md` (`missingData`, which pairs with `net=8`) is
+not implemented.
+
 ### Group fan-out
 
 Group feature with `group` and `fanOutPoint` resource type in the oneM2M specification provides request fan-out which is basically the batch resource access (CRUD) feature. One use case is that retrieving  `contentInstance` resources of multiple `container` resources that represent different sensor readings.
@@ -378,7 +429,8 @@ single JSONB value, which does not preserve key order. Read them by name, not by
 #### 3. Update
 
 Send only what changes. Attributes you omit are left alone; sending `null` removes an optional
-one.
+one. A **mandatory** custom attribute cannot be removed that way — the specialization's XSD decides
+which are mandatory, and `null` on one of those is rejected with 4000.
 
 ```curl
 curl -X PUT http://127.0.0.1:7599/Mobius/flx1 \
@@ -428,6 +480,8 @@ match any of them. `?fu=1&ty=28` returns every flexContainer regardless of speci
 | Envelope key is not `prefix:typeName` from the entry | 4000 | 400 |
 | Custom attribute not declared in `attributes` | 4000 | 400 |
 | Declared custom attribute with the wrong type | 4000 | 400 |
+| Mandatory custom attribute missing on CREATE | 4000 | 400 |
+| Mandatory custom attribute set to `null` on UPDATE | 4000 | 400 |
 | `cnd` included in an UPDATE | 4000 | 400 |
 | Parent is not one of the allowed types | 4108 | 403 |
 | `mni`, `mbs` or `mia` with a non-zero value | 5001 `NOT_IMPLEMENTED` | 501 |
