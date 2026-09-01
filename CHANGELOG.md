@@ -21,6 +21,43 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.19.0 (2026-09-01)
+
+**Why MINOR**: it adds a oneM2M capability. The MINOR row of the table above names notification
+criteria among them, and `attribute` is a condition tag of `eventNotificationCriteria`
+(`TS-0004:6.3.5.7`). A request that carried it used to be refused; it is now accepted and honoured.
+No migration, no schema change, and nothing an existing subscription does changes: the condition
+only applies to subscriptions that set it.
+
+### Added: the `attribute` condition of `eventNotificationCriteria`
+
+A `<subscription>` may now name the attributes whose update should generate a notification:
+
+```json
+{"m2m:sub": {"nu": ["..."], "enc": {"net": [1], "atr": ["lbl"]}}}
+```
+
+`net=1` then fires only when the UPDATE touches one of the named attributes. `TS-0001:9.6.8` table
+9.6.8-3: "If ANY attribute specified on this list is updated, then a notification shall be
+generated. If an attribute that is not specified in this list is updated, then a notification shall
+not be generated." A subscription with no `atr` keeps the previous behaviour — every attribute
+update notifies.
+
+Before this, `atr` was not declared in the create or update schema and the request was answered
+`4000` with `enc => atr is not allowed`. The name appeared nowhere in `cse/`, so there was neither
+storage nor filtering.
+
+The condition is scoped to `net=1` and to its blocking variant `net=7`, which this CSE does not
+implement; `net=2`, `net=3` and `net=4` are unaffected. An empty list is refused —
+`m2m:attributeList` is an `xs:list` of `xs:NCName` with `xs:minLength 1`, and the two readings of
+`[]` are opposite behaviours.
+
+Reported by a TR-0079 oneM2M–ROS 2 integration PoC, whose IPE was woken by its own responses
+because `net=1` fired for every attribute update, and which worked around it by polling.
+
+**Still missing**: `eventNotificationCriteria` has 16 members in `TS-0004:6.3.5.7` and this CSE
+accepts four of them (`net`, `chty`, `om`, `atr`). The rest are still refused.
+
 ## v4.18.0 (2026-08-28)
 
 **Why MINOR**: nothing the CSE answers changes — `cse/` is untouched, the registry format is the

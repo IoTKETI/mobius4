@@ -21,6 +21,16 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.19.0
+
+**Nothing to do.** The `attribute` (`atr`) condition of `eventNotificationCriteria` is new, and it
+changes behaviour only for subscriptions that set it. Existing `<subscription>` resources have no
+`atr`, and the default for a missing list is the full attribute set — the same notifications they
+received before.
+
+If you had worked around the old `4000` refusal by polling, you can replace that with a
+subscription now. There is no migration and no schema change.
+
 ## v4.18.0
 
 ### Required only if you added `<flexContainer>` specializations by hand
