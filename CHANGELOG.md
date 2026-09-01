@@ -93,6 +93,23 @@ asked to be notified only about particular operations or Originators was answere
 notified about everything instead. There is no plan to implement it; refusing says so rather than
 pretending. Requests carrying it now get `4000`.
 
+### Fixed: discovery answered the opposite set for `modifiedSince`, and 5000 for `stateTag`
+
+The same ten comparisons exist in `filterCriteria`. The discovery copy had drifted four ways, and
+only `cra`/`crb` had a test:
+
+- **`ms` and `us` were swapped.** A discovery asking for resources modified since a date returned
+  exactly the ones that were not — RSC 2000, with nothing to indicate the answer was inverted.
+- **`sts`/`stb` answered 5000.** The condition was sent to every table in the query, including the
+  ones with no `stateTag` column. It now restricts the query to the types that carry it.
+- **`sza`/`szb` never worked.** They filtered on a column named `sz` that no model has, and the
+  request schema refused them with `4000` before that code could run. Both are now declared and
+  filter on `cs`.
+- **`sza` was exclusive** where the clause says "equal to or greater than".
+
+Directions now come from one shared table, so discovery and notification gating cannot disagree
+about the same tag again.
+
 **Where this leaves `eventNotificationCriteria`**: of the 16 members in `TS-0004:6.3.5.7`, 14 are
 now evaluated. `om` is refused deliberately. `missingData` (`md`) remains unimplemented -- it is
 `<timeSeries>`-only and pairs with `net=8`.
