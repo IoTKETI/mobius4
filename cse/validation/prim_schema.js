@@ -33,6 +33,13 @@ const req_prim_schema = Joi.object().keys({
         stb: Joi.number().integer().min(0),
         exb: Joi.string().optional().regex(/^[0-9]{8}T[0-9]{6}$/),
         exa: Joi.string().optional().regex(/^[0-9]{8}T[0-9]{6}$/),
+        // sizeAbove / sizeBelow. Declared here for the first time: the discovery path had built a
+        // where-clause for them since it was written, but this schema refused them before it ever
+        // ran, so that code had never executed. Bounds are TS-0004's -- sizeAbove is
+        // xs:nonNegativeInteger and sizeBelow xs:positiveInteger, because sizeBelow: 0 can never
+        // be satisfied.
+        sza: Joi.number().integer().min(0),
+        szb: Joi.number().integer().min(1),
         rn: Joi.string().optional(),
         cr: Joi.string().optional(),
         lbl: Joi.array().items(Joi.string()).optional(),

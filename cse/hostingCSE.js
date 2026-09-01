@@ -10,6 +10,7 @@ const moment = require('moment');
 const metrics = require('../metrics');
 const { Op, Sequelize } = require('sequelize');
 const { not_obsolete_where } = require('./utils');
+const { COMPARISON_TAGS } = require('./enc-conditions');
 const Lookup = require('../models/lookup-model');
 // oneM2M standard resources
 const ACP = require('../models/acp-model');
@@ -1223,18 +1224,8 @@ function set_where_clause(req_prim) {
 	//
 
 	// singleton filter conditions
-	const cra = req_prim.fc.cra; // created after
-	const crb = req_prim.fc.crb; // created before
-	const ms = req_prim.fc.ms; // modified since
-	const us = req_prim.fc.us; // umodified since
-	const exb = req_prim.fc.exb; // expire before
-	const exa = req_prim.fc.exa; // expire after
-	const stb = req_prim.fc.stb; // stateTag bigger
-	const sts = req_prim.fc.sts; // stateTag smaller
 	const lbl = req_prim.fc.lbl; // labels
 	const lvl = req_prim.fc.lvl; // level
-	const sza = req_prim.fc.sza; // size above
-	const szb = req_prim.fc.szb; // size below
 
 	// array filter condition
 	const cty_list = req_prim.fc.cty; // contentType
@@ -1307,35 +1298,46 @@ function set_where_clause(req_prim) {
 		}
 	}
 
-	// bigger than or smaller than
-	if (cra || crb) {
-		where.ct = {};
-		if (cra) where.ct[Op.gt] = cra;
-		if (crb) where.ct[Op.lt] = crb;
-	}
+	// The ten value comparisons. Directions come from COMPARISON_TAGS in cse/enc-conditions.js,
+	// which states TS-0001:9.6.8 table 9.6.8-3 once for both places that need it -- discovery here
+	// and notification gating in cse/noti.js. Written out by hand in each place, they had already
+	// drifted: ms and us were swapped (modifiedSince matches a lastModifiedTime *after* the value,
+	// unmodifiedSince one *before* it, and this returned exactly the opposite set), sizeAbove was
+	// exclusive where the clause says "equal to or greater than", and sizeAbove/sizeBelow named a
+	// column `sz` that no model has -- contentSize is `cs`. None of it was caught because only
+	// cra/crb had a test.
+	const OP_FOR = { lt: Op.lt, gt: Op.gt, gte: Op.gte };
 
-	if (ms || us) {
-		where.lt = {};
-		if (us) where.lt[Op.gt] = us;
-		if (ms) where.lt[Op.lt] = ms;
-	}
+	// stateTag and contentSize are columns only some tables have. Restricting the query to those
+	// types is the same treatment lvl and cnd already get above: a type without the column cannot
+	// satisfy the filter, and sending the condition to its table is what made sts answer 5000.
+	const TYPES_WITH = { st: [3, 4, 28], cs: [4, 28, 30] };
 
-	if (exa || exb) {
-		where.et = {};
-		if (exa) where.et[Op.gt] = exa;
-		if (exb) where.et[Op.lt] = exb;
-	}
+	for (const [tag, def] of Object.entries(COMPARISON_TAGS)) {
+		const value = req_prim.fc[tag];
+		if (value === undefined || value === null) continue;
 
-	if (stb || sts) {
-		where.st = {};
-		if (stb) where.st[Op.gt] = stb;
-		if (sts) where.st[Op.lt] = sts;
-	}
+		const condition = { [OP_FOR[def.op]]: value };
+		const limited_to = TYPES_WITH[def.attr];
 
-	if (sza || szb) {
-		where.sz = {};
-		if (sza) where.sz[Op.gt] = sza;
-		if (szb) where.sz[Op.lt] = szb;
+		if (!limited_to) {
+			where[def.attr] = { ...(where[def.attr] || {}), ...condition };
+			continue;
+		}
+
+		// Intersect with whatever per-type restriction is already in force, so combining two
+		// column-restricted filters keeps only the types that can carry both.
+		const already = Object.keys(where_per_ty).map(Number);
+		if (already.length === 0) {
+			for (const ty of limited_to) where_per_ty[ty] = {};
+		} else {
+			for (const ty of already) {
+				if (!limited_to.includes(ty)) delete where_per_ty[ty];
+			}
+		}
+		for (const ty of Object.keys(where_per_ty).map(Number)) {
+			where_per_ty[ty][def.attr] = { ...(where_per_ty[ty][def.attr] || {}), ...condition };
+		}
 	}
 
 	// text match (full or partial)
