@@ -1,4 +1,5 @@
 const { sub_create_schema, sub_update_schema } = require('../validation/res_schema');
+const { unimplemented_net } = require('../notification-event-types');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const sequelize = require('../../db/sequelize');
@@ -85,6 +86,17 @@ async function create_a_sub(req_prim, resp_prim) {
     resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
     resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
     return;
+  }
+
+  // A net value oneM2M defines but this CSE does not act on. The schema above already refused
+  // anything outside the enumeration as BAD_REQUEST; this is the other half -- a valid request for
+  // a capability that is absent, which is NOT_IMPLEMENTED. Left unchecked the <subscription> was
+  // created, answered 2001, and then never fired.
+  const unimpl_net = unimplemented_net(prim_res.enc);
+  if (unimpl_net.length > 0) {
+    resp_prim.rsc = enums.rsc_str['NOT_IMPLEMENTED'];
+    resp_prim.pc = { 'm2m:dbg': 'notificationEventType ' + unimpl_net.join(', ') + ' is not implemented' };
+    return resp_prim;
   }
 
   if (prim_res.nu.length === 0) {
@@ -231,6 +243,17 @@ async function update_a_sub(req_prim, resp_prim) {
     const { message, path } = validated.error.details[0];
     resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
     resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
+    return;
+  }
+
+  // A net value oneM2M defines but this CSE does not act on. The schema above already refused
+  // anything outside the enumeration as BAD_REQUEST; this is the other half -- a valid request for
+  // a capability that is absent, which is NOT_IMPLEMENTED. Left unchecked the <subscription> was
+  // created, answered 2001, and then never fired.
+  const unimpl_net = unimplemented_net(prim_res.enc);
+  if (unimpl_net.length > 0) {
+    resp_prim.rsc = enums.rsc_str['NOT_IMPLEMENTED'];
+    resp_prim.pc = { 'm2m:dbg': 'notificationEventType ' + unimpl_net.join(', ') + ' is not implemented' };
     return;
   }
 

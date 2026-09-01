@@ -443,14 +443,20 @@ const sub_create_schema = Joi.object().keys({
 
     nu: Joi.array().required().items(Joi.string()),
     enc: Joi.object().optional().keys({
-        net: Joi.array().items(Joi.number().integer()),
+        // m2m:notificationEventType is an xs:integer restricted to eight enumerations
+        // (CDT-enumerationTypes.xsd:986). A value outside them is not a oneM2M value, so it is
+        // refused here as BAD_REQUEST; a defined value this CSE does not act on is caught after
+        // validation and answered NOT_IMPLEMENTED instead -- see cse/notification-event-types.js.
+        net: Joi.array().items(Joi.number().integer().min(1).max(8)),
         chty: Joi.array().items(Joi.number().integer()),
         // atr (attribute) restricts which attribute updates fire a net=1 notification --
         // TS-0001:9.6.8 table 9.6.8-3. m2m:attributeList is an xs:list of xs:NCName carrying
         // xs:minLength 1 (CDT-commonTypes.xsd:383), so an empty list is not a valid value and is
         // refused here rather than being read as "no condition".
-        atr: Joi.array().min(1).items(Joi.string()),
-        om: Joi.any()
+        atr: Joi.array().min(1).items(Joi.string())
+        // om (operationMonitor) is deliberately absent. It was accepted as Joi.any() and then read
+        // by nothing: a subscriber who asked to be notified only about, say, DELETEs from one
+        // Originator was answered 2001 and notified about everything. Refusing it says so.
     }),
     exc: Joi.number().integer().min(1),
     nct: Joi.number().integer().min(1),
@@ -466,12 +472,12 @@ const sub_update_schema = Joi.object().keys({
     cr: update_common_attr.cr,
 
     nu: Joi.array().optional().items(Joi.string()),
+    // enc is RW (TS-0001 table 9.6.8-2), so every condition that can be set at creation has to be
+    // changeable afterwards. The conditions here mirror the create schema exactly; letting the two
+    // drift is what left om acceptable on create and refused on update for as long as it did.
     enc: Joi.object().optional().keys({
-        net: Joi.array().items(Joi.number().integer()),
+        net: Joi.array().items(Joi.number().integer().min(1).max(8)),
         chty: Joi.array().items(Joi.number().integer()),
-        // Same condition as on create -- a subscriber that can set atr at creation must be able to
-        // change it afterwards, since enc is RW (TS-0001 table 9.6.8-2). om is still missing here
-        // and that asymmetry predates this change; it is tracked separately.
         atr: Joi.array().min(1).items(Joi.string())
     }),
     exc: Joi.number().integer().min(1),
