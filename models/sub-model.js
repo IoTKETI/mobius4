@@ -19,6 +19,11 @@ const SUB = sequelize.define('sub', {
   nct: { type: DataTypes.INTEGER },
   cr: { type: DataTypes.STRING },
   su: { type: DataTypes.STRING },
+  // Internal bookkeeping for the missingData condition (TS-0001:10.2.4.29), not oneM2M
+  // attributes: the detection time at which the current window closes, and the expected
+  // dataGenerationTime of each point counted in it. Never returned in a representation.
+  md_window_end: { type: DataTypes.STRING },
+  md_points: { type: DataTypes.ARRAY(DataTypes.STRING) },
 }, {
   tableName: 'sub',
   timestamps: false,

@@ -433,6 +433,18 @@ const grp_update_schema = Joi.object().keys({
     gn: Joi.string().optional(),
 });
 
+// xs:duration, the type of m2m:missingData's duration element (CDT-commonTypes.xsd:1049).
+// ISO 8601 basic duration: an optional sign, P, then at least one component, and if T is present
+// at least one time component after it. "P" and "PT" alone are not valid values.
+const XS_DURATION = /^-?P(?!$)(\d+Y)?(\d+M)?(\d+D)?(T(?!$)(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$/;
+
+// m2m:missingData (CDT-commonTypes.xsd:1046). Both members are minOccurs=1, so both are required
+// whenever the condition is present at all.
+const MISSING_DATA_CONDITION = Joi.object().keys({
+    num: Joi.number().integer().min(1).required(),
+    dur: Joi.string().regex(XS_DURATION).required(),
+});
+
 // m2m:timestamp as used by the eventNotificationCriteria comparison conditions.
 const TIMESTAMP_CONDITION = Joi.string().regex(/^[0-9]{8}T[0-9]{6}(,[0-9]{1,6})?$/);
 
@@ -480,10 +492,16 @@ const sub_create_schema = Joi.object().keys({
         szb: Joi.number().integer().min(1),
         // m2m:filterOperation: 1 AND, 2 OR, 3 XOR (CDT-enumerationTypes.xsd:1366). Absent means
         // AND. A single scalar, matching "No mixed AND/OR/XOR filter operation will be supported".
-        fo: Joi.number().integer().min(1).max(3)
+        fo: Joi.number().integer().min(1).max(3),
+        // Only meaningful with net=8; TS-0001:9.6.8 table 9.6.8-3 says it is *ignored* otherwise,
+        // so md without net=8 is accepted and simply never fires rather than being refused.
+        md: MISSING_DATA_CONDITION
     }),
     exc: Joi.number().integer().min(1),
-    nct: Joi.number().integer().min(1),
+    // m2m:notificationContentType is restricted to five enumerations
+    // (CDT-enumerationTypes.xsd:967). Only min(1) was checked before, so nct=99 was accepted and
+    // then ignored -- the same shape of hole net had.
+    nct: Joi.number().integer().min(1).max(5),
     su: Joi.string().optional(),
 });
 
@@ -522,10 +540,16 @@ const sub_update_schema = Joi.object().keys({
         szb: Joi.number().integer().min(1),
         // m2m:filterOperation: 1 AND, 2 OR, 3 XOR (CDT-enumerationTypes.xsd:1366). Absent means
         // AND. A single scalar, matching "No mixed AND/OR/XOR filter operation will be supported".
-        fo: Joi.number().integer().min(1).max(3)
+        fo: Joi.number().integer().min(1).max(3),
+        // Only meaningful with net=8; TS-0001:9.6.8 table 9.6.8-3 says it is *ignored* otherwise,
+        // so md without net=8 is accepted and simply never fires rather than being refused.
+        md: MISSING_DATA_CONDITION
     }),
     exc: Joi.number().integer().min(1),
-    nct: Joi.number().integer().min(1),
+    // m2m:notificationContentType is restricted to five enumerations
+    // (CDT-enumerationTypes.xsd:967). Only min(1) was checked before, so nct=99 was accepted and
+    // then ignored -- the same shape of hole net had.
+    nct: Joi.number().integer().min(1).max(5),
     su: Joi.string().optional(),
 });
 

@@ -440,5 +440,9 @@ function batch_noti_data(dsp_ri,data) {
 module.exports = { 
     check_and_send_noti, 
     send_sub_del_noti,
-    self_noti_handler 
+    self_noti_handler,
+    // Used by cse/missing-data-subscription.js, which is triggered by the sweep rather than by a
+    // resource CRUD event and so cannot go through check_and_send_noti.
+    send_a_noti,
+    prefetch_ae_poa,
 };

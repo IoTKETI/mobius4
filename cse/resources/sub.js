@@ -1,5 +1,5 @@
 const { sub_create_schema, sub_update_schema } = require('../validation/res_schema');
-const { undefined_net, unimplemented_net } = require('../notification-event-types');
+const { undefined_net, unimplemented_net, net_combination_error } = require('../notification-event-types');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const sequelize = require('../../db/sequelize');
@@ -103,6 +103,15 @@ async function create_a_sub(req_prim, resp_prim) {
   if (unimpl_net.length > 0) {
     resp_prim.rsc = enums.rsc_str['NOT_IMPLEMENTED'];
     resp_prim.pc = { 'm2m:dbg': 'notificationEventType ' + unimpl_net.join(', ') + ' is not implemented' };
+    return resp_prim;
+  }
+
+  // net=8's combination rules: it cannot share the list with another notificationEventType, it
+  // pins notificationContentType to 5, and the subscribed-to resource has to be a <timeSeries>.
+  const combo = net_combination_error(prim_res.enc, prim_res.nct, parent_ty);
+  if (combo) {
+    resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+    resp_prim.pc = { 'm2m:dbg': combo };
     return resp_prim;
   }
 
@@ -273,6 +282,25 @@ async function update_a_sub(req_prim, resp_prim) {
 
   try {
     db_res = await SUB.findByPk(ri);
+
+    // The combination rules are judged on the resource as it will be, not on the request alone:
+    // enc is replaced wholesale by an UPDATE that carries it, while an UPDATE that does not leaves
+    // the stored one in force. Checking only the request would let a subscriber reach a forbidden
+    // pair in two steps that it cannot reach in one.
+    const eff_enc = prim_res.enc !== undefined ? prim_res.enc : db_res.enc;
+    const eff_nct = prim_res.nct !== undefined ? prim_res.nct : db_res.nct;
+    let parent_ty_for_combo;
+    if (eff_enc && Array.isArray(eff_enc.net) && eff_enc.net.includes(8)) {
+      // Only looked up when it can matter -- every other UPDATE keeps its single query.
+      const parent = await Lookup.findByPk(db_res.pi, { attributes: ['ty'] });
+      parent_ty_for_combo = parent ? parent.ty : undefined;
+    }
+    const combo_err = net_combination_error(eff_enc, eff_nct, parent_ty_for_combo);
+    if (combo_err) {
+      resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+      resp_prim.pc = { 'm2m:dbg': combo_err };
+      return;
+    }
 
     db_res.lt = get_cur_time();
 

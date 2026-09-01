@@ -173,7 +173,9 @@ async function create_tables(client) {
                 exc INTEGER,
                 nu VARCHAR(${len.url})[],
                 nct INTEGER,
-                su VARCHAR(${len.str_token})
+                su VARCHAR(${len.str_token}),
+                md_window_end VARCHAR(${len.timestamp}),
+                md_points VARCHAR(${len.timestamp})[]
             );
         `);
 
