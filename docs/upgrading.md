@@ -35,6 +35,27 @@ now return `5001` instead of being accepted. Such a subscription never fired a n
 nothing that used to work stops working — but a client that ignored the response code and assumed
 success will now see the failure it was already experiencing.
 
+### Recommended if you use `<flexContainer>` specializations
+
+Mandatory attributes are now enforced on CREATE — but only for entries that say which attributes
+are mandatory, and a registry built before this release says nothing about it. **Rebuild the
+registry to turn enforcement on:**
+
+```bash
+node scripts/build-specializations.js
+```
+
+Nothing breaks if you do not: an old registry keeps behaving exactly as it did. Reading a missing
+mandatory flag as "everything is mandatory" would have refused resources that were valid a moment
+before the upgrade, so the absence means "nothing is mandatory" instead.
+
+After rebuilding, a CREATE that omits a mandatory attribute is refused `4000`, and a mandatory
+attribute can no longer be deleted with `null` on UPDATE. Check your XSDs before rebuilding:
+**an attribute is mandatory unless it says `minOccurs="0"`** — an omitted `minOccurs` means 1.
+
+The shipped `parkingBlock` example declares all six attributes `minOccurs="0"`, so rebuilding its
+registry changes nothing.
+
 ### Nothing to do otherwise
 
 The `attribute` (`atr`) condition, the ten value comparisons (`crb` `cra` `ms` `us` `sts` `stb`

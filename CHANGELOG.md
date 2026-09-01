@@ -93,6 +93,34 @@ asked to be notified only about particular operations or Originators was answere
 notified about everything instead. There is no plan to implement it; refusing says so rather than
 pretending. Requests carrying it now get `4000`.
 
+### Fixed: `<flexContainer>` specialization validation now enforces multiplicity
+
+A `<flexContainer>` missing every mandatory attribute of its specialization was created and answered
+`2001`. `TS-0004:7.4.37.2.1` requires the Hosting CSE to validate the representation against the
+schema the `containerDefinition` names and to answer `BAD_REQUEST` when it does not comply, and
+`TP/oneM2M/CSE/FLXC/CRE/001` tests exactly this. The validator only ever walked the attributes the
+*request* carried, so nothing looked at the declared set. This had been true since `<flexContainer>`
+arrived in v4.5.0.
+
+Two halves had to change. `scripts/build-specializations.js` now records which attributes are
+mandatory, and `cse/specialization.js` checks for them on CREATE.
+
+**The rule is "required unless `minOccurs="0"`", not "required if `minOccurs="1"`".** XSD's default
+for an omitted `minOccurs` is 1, and that default is how oneM2M's own specializations mark a
+required attribute — none of the fourteen flexContainer specialization XSDs in the corpus writes a
+literal `minOccurs="1"` on a custom attribute. Reading it the other way round would mark every
+attribute of every standard specialization optional.
+
+A mandatory attribute also can no longer be deleted by setting it to `null` on UPDATE, and an
+attribute named after an `Object` prototype member (`toString`, `constructor`, …) is now correctly
+undeclared rather than passing the declaration check and skipping the type check with it.
+
+**Enforcement arrives when you rebuild the registry, not when you upgrade.** A registry written by
+hand or built by v4.18.0 carries no mandatory flag, and its absence is read as "nothing is
+mandatory" — reading it as "everything is" would refuse resources that were valid a moment before.
+The shipped `parkingBlock` example declares all six of its attributes `minOccurs="0"`, so
+regenerating its registry produces a byte-for-byte identical file.
+
 ### Fixed: discovery answered the opposite set for `modifiedSince`, and 5000 for `stateTag`
 
 The same ten comparisons exist in `filterCriteria`. The discovery copy had drifted four ways, and

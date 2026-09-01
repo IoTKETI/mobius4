@@ -90,6 +90,25 @@ const PARTICLE_CONTAINERS = ["sequence", "all", "choice"];
 
 const XML_COMMENT = /<!--[\s\S]*?-->/g;
 
+// Whether an element declaration is mandatory.
+//
+// XSD says an omitted minOccurs is 1, and that default is how oneM2M's own specializations mark a
+// required attribute: none of the fourteen substitutionGroup="m2m:sg_flexContainerResource" XSDs in
+// the corpus writes a literal minOccurs="1" on a custom attribute -- CDT-allJoynSvcObject.xsd
+// declares `objectPath` and `enable` with no minOccurs at all, and CDT-allJoynMethodCall.xsd marks
+// its optional ones minOccurs="0".
+//
+// So the test is "not optional", not "says minOccurs=1". Reading it the other way round -- looking
+// for minOccurs="1" -- would mark every attribute of every standard specialization optional while
+// still passing against a hand-written XSD that spells the 1 out, which is a failure that only
+// shows up against the real corpus.
+function isRequired(el) {
+  const declared = el["@_minOccurs"];
+  if (declared === undefined || declared === null || declared === "") return true;
+  const n = Number(declared);
+  return Number.isFinite(n) && n >= 1;
+}
+
 function toArray(value) {
   if (Array.isArray(value)) return value;
   return value === undefined || value === null ? [] : [value];
@@ -405,6 +424,7 @@ function extractSpecialization(xsdText, { cnd }) {
       );
     }
     attributes[name] = { type: typeOf(el, cnd, name) };
+    if (isRequired(el)) attributes[name].required = true;
   }
 
   return { typeName, namespacePrefix: namespacePrefixOf(schema, xsdText, cnd), attributes };
