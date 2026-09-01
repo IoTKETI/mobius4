@@ -21,6 +21,48 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.20.0 (2026-09-01)
+
+**Why MINOR**: a oneM2M capability plus a backward-compatible DB migration — both named in the
+MINOR row of the table above. Two nullable columns are added to an existing table; nothing is
+altered or dropped, and a deployment that never creates a `net=8` subscription leaves them NULL.
+
+**A migration is required.** See [docs/upgrading.md](docs/upgrading.md#v4200).
+
+### Added: missing Time Series Data is reported to subscribers
+
+A `<subscription>` on a `<timeSeries>` can set the `missingData` condition with
+`notificationEventType` 8, and is notified when the number of missing data points reaches its
+threshold inside the window it asked for:
+
+```json
+{"m2m:sub": {"nu": ["..."], "nct": 5,
+             "enc": {"net": [8], "md": {"num": 3, "dur": "PT10M"}}}}
+```
+
+Detection has been recorded on the `<timeSeries>` resource since v4.16.0; this is the reporting
+half (`TS-0001:10.2.4.29`, `TS-0004:7.5.1.2.9`), which was answered `5001` until now.
+
+The notification carries an `m2m:tsn` — `missingDataList` and `missingDataCurrentNr` — which is the
+representation `notificationContentType` 5 selects. The count is what **this subscription** has
+seen since its own window opened, not the resource's attribute of the same name.
+
+The window is stored, not held as a live timer, so it survives a restart: an in-memory timer would
+reset every subscriber's window on every deployment. Expiry is judged against each point's own
+detection time rather than the clock when the sweep runs, so a late sweep cannot move a boundary.
+
+`net=8` cannot be combined with another `notificationEventType`, pins `notificationContentType` to
+5, and requires the subscribed-to resource to be a `<timeSeries>`.
+
+**Not implemented**: a final notification when the subscription is deleted. `TP/oneM2M/CSE/TS/005`
+asks for it, but the rule appears in neither cited clause and the TP's own reference points at a
+`TS-0001` clause number that is not in the current document. Recorded rather than guessed at.
+
+### Changed: `notificationContentType` is range-checked
+
+Only `min(1)` was enforced, so `nct=99` was accepted and then ignored. The enumeration is 1–5
+(`CDT-enumerationTypes.xsd:967`); anything else is now `4000`.
+
 ## v4.19.0 (2026-09-01)
 
 **Why MINOR**: it adds oneM2M capabilities. The MINOR row of the table above names notification
