@@ -23,13 +23,27 @@ answers "what do I have to *do* about it."
 
 ## v4.19.0
 
-**Nothing to do.** The `attribute` (`atr`) condition of `eventNotificationCriteria` is new, and it
-changes behaviour only for subscriptions that set it. Existing `<subscription>` resources have no
-`atr`, and the default for a missing list is the full attribute set — the same notifications they
-received before.
+### Required only if you create `<subscription>` resources with `enc.om`
 
-If you had worked around the old `4000` refusal by polling, you can replace that with a
-subscription now. There is no migration and no schema change.
+`operationMonitor` is now refused with `4000`. It was accepted before and read by nothing, so any
+filtering you believed it was doing was not happening — the subscription notified on everything.
+Remove `om` from the request. If you were relying on the filtering, there is no replacement: the
+condition is not implemented, and this release stops pretending otherwise.
+
+The same applies to `notificationEventType` values this CSE does not implement (5, 6, 7, 8), which
+now return `5001` instead of being accepted. Such a subscription never fired a notification, so
+nothing that used to work stops working — but a client that ignored the response code and assumed
+success will now see the failure it was already experiencing.
+
+### Nothing to do otherwise
+
+The `attribute` (`atr`) condition, the ten value comparisons (`crb` `cra` `ms` `us` `sts` `stb`
+`exb` `exa` `sza` `szb`) and `filterOperation` (`fo`) are all new, and each changes behaviour only
+for subscriptions that set it. Existing `<subscription>` resources carry none of them and receive
+exactly the notifications they received before. There is no migration and no DB schema change.
+
+If you had worked around the old `4000` refusals by polling, you can replace that with a
+subscription now.
 
 ## v4.18.0
 

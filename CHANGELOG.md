@@ -23,11 +23,12 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 ## v4.19.0 (2026-09-01)
 
-**Why MINOR**: it adds a oneM2M capability. The MINOR row of the table above names notification
-criteria among them, and `attribute` is a condition tag of `eventNotificationCriteria`
-(`TS-0004:6.3.5.7`). A request that carried it used to be refused; it is now accepted and honoured.
-No migration, no schema change, and nothing an existing subscription does changes: the condition
-only applies to subscriptions that set it.
+**Why MINOR**: it adds oneM2M capabilities. The MINOR row of the table above names notification
+criteria among them, and this release makes eleven condition tags of `eventNotificationCriteria`
+(`TS-0004:6.3.5.7`) work that used to be refused. No migration and no DB schema change. Existing
+subscriptions are unaffected: every new condition applies only to subscriptions that set it.
+
+**One behaviour is now refused that used to be accepted** -- `operationMonitor` (`om`). See below.
 
 ### Added: the `attribute` condition of `eventNotificationCriteria`
 
@@ -55,8 +56,46 @@ implement; `net=2`, `net=3` and `net=4` are unaffected. An empty list is refused
 Reported by a TR-0079 oneM2M–ROS 2 integration PoC, whose IPE was woken by its own responses
 because `net=1` fired for every attribute update, and which worked around it by polling.
 
-**Still missing**: `eventNotificationCriteria` has 16 members in `TS-0004:6.3.5.7` and this CSE
-accepts four of them (`net`, `chty`, `om`, `atr`). The rest are still refused.
+### Added: the ten value-comparison conditions, and `filterOperation`
+
+`crb`, `cra`, `ms`, `us`, `sts`, `stb`, `exb`, `exa`, `sza` and `szb` are stored and evaluated, and
+`fo` combines them:
+
+```json
+{"m2m:sub": {"nu": ["..."], "enc": {"net": [3], "sza": 1024, "cra": "20260101T000000", "fo": 2}}}
+```
+
+Directions are taken from `TS-0001:9.6.8` table 9.6.8-3 rather than from the names, because two of
+them read backwards: `modifiedSince` matches a `lastModifiedTime` **after** the value and
+`unmodifiedSince` one **before** it. `sizeAbove` is the only inclusive comparison ("equal to or
+greater than"); the other nine are strict.
+
+`fo` is `m2m:filterOperation` -- 1 AND, 2 OR, 3 XOR -- defaulting to AND. XOR is **odd parity**,
+not exactly-one: three true conditions is true. A value outside the three enumerations is refused
+rather than quietly treated as AND.
+
+Two points the spec leaves open, decided here: a resource that does not carry the compared
+attribute **fails** the condition (a `<container>` has no `contentSize` -- its `currentByteSize` is
+a different attribute and is not substituted), and an `enc` with no comparison tag behaves exactly
+as before.
+
+### Changed: `notificationEventType` values are checked
+
+A value outside the eight enumerations of `m2m:notificationEventType` is refused **4000**. A value
+inside them that this CSE does not act on -- 5, 6, 7, 8 -- is refused **5001 NOT_IMPLEMENTED**.
+Before, any integer was accepted: a `<subscription>` asking for `net=8` was created, answered
+`2001`, and then never fired, with no error and no notification.
+
+### Removed: `operationMonitor` (`om`) is refused
+
+**Breaking for anyone sending `enc.om`.** It was accepted and read by nothing, so a subscriber who
+asked to be notified only about particular operations or Originators was answered `2001` and
+notified about everything instead. There is no plan to implement it; refusing says so rather than
+pretending. Requests carrying it now get `4000`.
+
+**Where this leaves `eventNotificationCriteria`**: of the 16 members in `TS-0004:6.3.5.7`, 14 are
+now evaluated. `om` is refused deliberately. `missingData` (`md`) remains unimplemented -- it is
+`<timeSeries>`-only and pairs with `net=8`.
 
 ## v4.18.0 (2026-08-28)
 
