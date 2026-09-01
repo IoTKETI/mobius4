@@ -21,6 +21,127 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.19.0 (2026-09-01)
+
+**Why MINOR**: it adds oneM2M capabilities. The MINOR row of the table above names notification
+criteria among them, and this release makes eleven condition tags of `eventNotificationCriteria`
+(`TS-0004:6.3.5.7`) work that used to be refused. No migration and no DB schema change. Existing
+subscriptions are unaffected: every new condition applies only to subscriptions that set it.
+
+**One behaviour is now refused that used to be accepted** -- `operationMonitor` (`om`). See below.
+
+### Added: the `attribute` condition of `eventNotificationCriteria`
+
+A `<subscription>` may now name the attributes whose update should generate a notification:
+
+```json
+{"m2m:sub": {"nu": ["..."], "enc": {"net": [1], "atr": ["lbl"]}}}
+```
+
+`net=1` then fires only when the UPDATE touches one of the named attributes. `TS-0001:9.6.8` table
+9.6.8-3: "If ANY attribute specified on this list is updated, then a notification shall be
+generated. If an attribute that is not specified in this list is updated, then a notification shall
+not be generated." A subscription with no `atr` keeps the previous behaviour — every attribute
+update notifies.
+
+Before this, `atr` was not declared in the create or update schema and the request was answered
+`4000` with `enc => atr is not allowed`. The name appeared nowhere in `cse/`, so there was neither
+storage nor filtering.
+
+The condition is scoped to `net=1` and to its blocking variant `net=7`, which this CSE does not
+implement; `net=2`, `net=3` and `net=4` are unaffected. An empty list is refused —
+`m2m:attributeList` is an `xs:list` of `xs:NCName` with `xs:minLength 1`, and the two readings of
+`[]` are opposite behaviours.
+
+Reported by a TR-0079 oneM2M–ROS 2 integration PoC, whose IPE was woken by its own responses
+because `net=1` fired for every attribute update, and which worked around it by polling.
+
+### Added: the ten value-comparison conditions, and `filterOperation`
+
+`crb`, `cra`, `ms`, `us`, `sts`, `stb`, `exb`, `exa`, `sza` and `szb` are stored and evaluated, and
+`fo` combines them:
+
+```json
+{"m2m:sub": {"nu": ["..."], "enc": {"net": [3], "sza": 1024, "cra": "20260101T000000", "fo": 2}}}
+```
+
+Directions are taken from `TS-0001:9.6.8` table 9.6.8-3 rather than from the names, because two of
+them read backwards: `modifiedSince` matches a `lastModifiedTime` **after** the value and
+`unmodifiedSince` one **before** it. `sizeAbove` is the only inclusive comparison ("equal to or
+greater than"); the other nine are strict.
+
+`fo` is `m2m:filterOperation` -- 1 AND, 2 OR, 3 XOR -- defaulting to AND. XOR is **odd parity**,
+not exactly-one: three true conditions is true. A value outside the three enumerations is refused
+rather than quietly treated as AND.
+
+Two points the spec leaves open, decided here: a resource that does not carry the compared
+attribute **fails** the condition (a `<container>` has no `contentSize` -- its `currentByteSize` is
+a different attribute and is not substituted), and an `enc` with no comparison tag behaves exactly
+as before.
+
+### Changed: `notificationEventType` values are checked
+
+A value outside the eight enumerations of `m2m:notificationEventType` is refused **4000**. A value
+inside them that this CSE does not act on -- 5, 6, 7, 8 -- is refused **5001 NOT_IMPLEMENTED**.
+Before, any integer was accepted: a `<subscription>` asking for `net=8` was created, answered
+`2001`, and then never fired, with no error and no notification.
+
+### Removed: `operationMonitor` (`om`) is refused
+
+**Breaking for anyone sending `enc.om`.** It was accepted and read by nothing, so a subscriber who
+asked to be notified only about particular operations or Originators was answered `2001` and
+notified about everything instead. There is no plan to implement it; refusing says so rather than
+pretending. Requests carrying it now get `4000`.
+
+### Fixed: `<flexContainer>` specialization validation now enforces multiplicity
+
+A `<flexContainer>` missing every mandatory attribute of its specialization was created and answered
+`2001`. `TS-0004:7.4.37.2.1` requires the Hosting CSE to validate the representation against the
+schema the `containerDefinition` names and to answer `BAD_REQUEST` when it does not comply, and
+`TP/oneM2M/CSE/FLXC/CRE/001` tests exactly this. The validator only ever walked the attributes the
+*request* carried, so nothing looked at the declared set. This had been true since `<flexContainer>`
+arrived in v4.5.0.
+
+Two halves had to change. `scripts/build-specializations.js` now records which attributes are
+mandatory, and `cse/specialization.js` checks for them on CREATE.
+
+**The rule is "required unless `minOccurs="0"`", not "required if `minOccurs="1"`".** XSD's default
+for an omitted `minOccurs` is 1, and that default is how oneM2M's own specializations mark a
+required attribute — none of the fourteen flexContainer specialization XSDs in the corpus writes a
+literal `minOccurs="1"` on a custom attribute. Reading it the other way round would mark every
+attribute of every standard specialization optional.
+
+A mandatory attribute also can no longer be deleted by setting it to `null` on UPDATE, and an
+attribute named after an `Object` prototype member (`toString`, `constructor`, …) is now correctly
+undeclared rather than passing the declaration check and skipping the type check with it.
+
+**Enforcement arrives when you rebuild the registry, not when you upgrade.** A registry written by
+hand or built by v4.18.0 carries no mandatory flag, and its absence is read as "nothing is
+mandatory" — reading it as "everything is" would refuse resources that were valid a moment before.
+The shipped `parkingBlock` example declares all six of its attributes `minOccurs="0"`, so
+regenerating its registry produces a byte-for-byte identical file.
+
+### Fixed: discovery answered the opposite set for `modifiedSince`, and 5000 for `stateTag`
+
+The same ten comparisons exist in `filterCriteria`. The discovery copy had drifted four ways, and
+only `cra`/`crb` had a test:
+
+- **`ms` and `us` were swapped.** A discovery asking for resources modified since a date returned
+  exactly the ones that were not — RSC 2000, with nothing to indicate the answer was inverted.
+- **`sts`/`stb` answered 5000.** The condition was sent to every table in the query, including the
+  ones with no `stateTag` column. It now restricts the query to the types that carry it.
+- **`sza`/`szb` never worked.** They filtered on a column named `sz` that no model has, and the
+  request schema refused them with `4000` before that code could run. Both are now declared and
+  filter on `cs`.
+- **`sza` was exclusive** where the clause says "equal to or greater than".
+
+Directions now come from one shared table, so discovery and notification gating cannot disagree
+about the same tag again.
+
+**Where this leaves `eventNotificationCriteria`**: of the 16 members in `TS-0004:6.3.5.7`, 14 are
+now evaluated. `om` is refused deliberately. `missingData` (`md`) remains unimplemented -- it is
+`<timeSeries>`-only and pairs with `net=8`.
+
 ## v4.18.0 (2026-08-28)
 
 **Why MINOR**: nothing the CSE answers changes — `cse/` is untouched, the registry format is the

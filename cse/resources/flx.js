@@ -96,7 +96,8 @@ async function do_create_a_flx(req_prim, resp_prim) {
     if (reject_unsupported_retention(prim_res, resp_prim)) return;
 
     const { custom } = specialization.split_attributes(prim_res);
-    const custom_check = specialization.validate_custom(entry, custom);
+    // creating: a CREATE carries the whole resource, so mandatory attributes must be present.
+    const custom_check = specialization.validate_custom(entry, custom, { creating: true });
     if (!custom_check.ok) {
         resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
         resp_prim.pc = { 'm2m:dbg': custom_check.message };

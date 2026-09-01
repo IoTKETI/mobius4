@@ -21,6 +21,51 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.19.0
+
+### Required only if you create `<subscription>` resources with `enc.om`
+
+`operationMonitor` is now refused with `4000`. It was accepted before and read by nothing, so any
+filtering you believed it was doing was not happening — the subscription notified on everything.
+Remove `om` from the request. If you were relying on the filtering, there is no replacement: the
+condition is not implemented, and this release stops pretending otherwise.
+
+The same applies to `notificationEventType` values this CSE does not implement (5, 6, 7, 8), which
+now return `5001` instead of being accepted. Such a subscription never fired a notification, so
+nothing that used to work stops working — but a client that ignored the response code and assumed
+success will now see the failure it was already experiencing.
+
+### Recommended if you use `<flexContainer>` specializations
+
+Mandatory attributes are now enforced on CREATE — but only for entries that say which attributes
+are mandatory, and a registry built before this release says nothing about it. **Rebuild the
+registry to turn enforcement on:**
+
+```bash
+node scripts/build-specializations.js
+```
+
+Nothing breaks if you do not: an old registry keeps behaving exactly as it did. Reading a missing
+mandatory flag as "everything is mandatory" would have refused resources that were valid a moment
+before the upgrade, so the absence means "nothing is mandatory" instead.
+
+After rebuilding, a CREATE that omits a mandatory attribute is refused `4000`, and a mandatory
+attribute can no longer be deleted with `null` on UPDATE. Check your XSDs before rebuilding:
+**an attribute is mandatory unless it says `minOccurs="0"`** — an omitted `minOccurs` means 1.
+
+The shipped `parkingBlock` example declares all six attributes `minOccurs="0"`, so rebuilding its
+registry changes nothing.
+
+### Nothing to do otherwise
+
+The `attribute` (`atr`) condition, the ten value comparisons (`crb` `cra` `ms` `us` `sts` `stb`
+`exb` `exa` `sza` `szb`) and `filterOperation` (`fo`) are all new, and each changes behaviour only
+for subscriptions that set it. Existing `<subscription>` resources carry none of them and receive
+exactly the notifications they received before. There is no migration and no DB schema change.
+
+If you had worked around the old `4000` refusals by polling, you can replace that with a
+subscription now.
+
 ## v4.18.0
 
 ### Required only if you added `<flexContainer>` specializations by hand

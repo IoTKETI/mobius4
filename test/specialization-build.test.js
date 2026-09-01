@@ -205,6 +205,50 @@ test("reads custom attributes declared under xs:all", () => {
   );
 });
 
+test("an attribute is required unless it says minOccurs=\"0\"", () => {
+  // The rule is "not optional", not "says minOccurs=1". XSD's default for an omitted minOccurs is
+  // 1, and that default is how oneM2M's own specializations mark a required attribute: none of the
+  // fourteen flexContainer specialization XSDs in the corpus writes a literal minOccurs="1" on a
+  // custom attribute -- CDT-allJoynSvcObject.xsd declares objectPath and enable with no minOccurs
+  // at all. Looking for minOccurs="1" instead would mark every attribute of every standard
+  // specialization optional, while still passing against a hand-written XSD that spells the 1 out.
+  const xsd = schema(`
+  <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
+    <xs:complexType><xs:complexContent><xs:extension base="m2m:flexContainerResource">
+      <xs:sequence>
+        <xs:element name="implied" type="xs:string"/>
+        <xs:element name="spelled" type="xs:string" minOccurs="1"/>
+        <xs:element name="repeated" type="xs:string" minOccurs="2" maxOccurs="unbounded"/>
+        <xs:element name="optional" type="xs:string" minOccurs="0"/>
+      </xs:sequence>
+    </xs:extension></xs:complexContent></xs:complexType>
+  </xs:element>`);
+
+  assert.deepEqual(
+    extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }).attributes,
+    bare({
+      implied: { type: "string", required: true },
+      spelled: { type: "string", required: true },
+      repeated: { type: "array", required: true },
+      optional: { type: "string" },
+    }),
+  );
+});
+
+test("the shipped example XSD declares nothing mandatory, so the shipped registry is unchanged", () => {
+  // docs/examples/specializations/parkingBlock.xsd marks all six minOccurs="0". Asserted here
+  // because it is what keeps this change from tightening an existing deployment: a registry
+  // rebuilt after this release is byte-for-byte what it was before.
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const xsd = fs.readFileSync(
+    path.join(__dirname, "..", "docs", "examples", "specializations", "parkingBlock.xsd"), "utf8");
+  const got = extractSpecialization(xsd, { cnd: "http://developers.iotocean.org/schema/parkingBlock.xsd" });
+  for (const [name, decl] of Object.entries(got.attributes)) {
+    assert.equal(decl.required, undefined, `${name} should not be mandatory in the shipped example`);
+  }
+});
+
 test("reads custom attributes declared under xs:choice", () => {
   const xsd = schema(`
   <xs:element name="parkingBlock" substitutionGroup="m2m:sg_flexContainerResource">
@@ -218,7 +262,7 @@ test("reads custom attributes declared under xs:choice", () => {
 
   assert.deepEqual(
     extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }).attributes,
-    bare({ spots: { type: "integer" }, label: { type: "string" } }),
+    bare({ spots: { type: "integer", required: true }, label: { type: "string", required: true } }),
   );
 });
 
@@ -521,7 +565,7 @@ test("the nested childResource every corpus specialization declares is structure
 
   assert.deepEqual(
     extractSpecialization(xsd, { cnd: "urn:example:allJoynSvcObject" }).attributes,
-    bare({ objectPath: { type: "string" }, enable: { type: "boolean" } }),
+    bare({ objectPath: { type: "string", required: true }, enable: { type: "boolean", required: true } }),
   );
 });
 
@@ -542,7 +586,7 @@ test("childResource directly under the extension is structure too, not an array 
 
   assert.deepEqual(
     extractSpecialization(xsd, { cnd: "urn:example:parkingBlock" }).attributes,
-    bare({ spots: { type: "integer" } }),
+    bare({ spots: { type: "integer", required: true } }),
   );
 });
 

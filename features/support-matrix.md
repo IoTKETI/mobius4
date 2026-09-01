@@ -61,10 +61,10 @@ Two neighbouring files answer different questions, and it is worth knowing which
 | Software management (SM) | ❌ none | 0 / 1 | — |
 | Semantic mashup (SSM) | ❌ none | 0 / 1 | — |
 | Service subscription (SSUP) | ❌ none | 0 / 1 | — |
-| Subscription and notification (SUB) | ⚠️ partial | 2 / 7 | — |
+| Subscription and notification (SUB) | ⚠️ partial | 2 / 7 | 13 |
 | Time management (TMG) | ❌ none | 0 / 3 | — |
 | Time series (TS) | ⚠️ partial | 0 / 1 | 2 |
-| **total** | | **38 / 112** | **78** |
+| **total** | | **38 / 112** | **91** |
 
 ## Resource types
 

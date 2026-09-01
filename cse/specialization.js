@@ -86,18 +86,57 @@ function type_matches(declared, value) {
 }
 
 // Validates custom attributes against the specialization's declaration.
-// A null value means "delete this attribute" (oneM2M UPDATE convention) and is always
-// accepted for a declared name, so its type is not checked.
-function validate_custom(entry, custom) {
+//
+// TS-0004:7.4.37.2.1 requires the Hosting CSE to validate the received representation against the
+// schema the containerDefinition names, and to answer BAD_REQUEST when it is not valid. Presence is
+// part of that: a specialization's XSD marks an attribute mandatory by leaving minOccurs at its
+// default of 1, and a representation that omits it does not comply.
+//
+// `creating` gates the mandatory-presence check. A CREATE carries the whole resource, so every
+// mandatory attribute has to be there. An UPDATE carries only what is changing
+// (TS-0004:7.4.37.2.3 re-validates, but a partial representation is the normal case), so requiring
+// them all would make every partial update fail.
+//
+// A null value means "delete this attribute" (oneM2M UPDATE convention). It is accepted for an
+// optional attribute without a type check, and refused for a mandatory one -- deleting it would
+// leave the resource in a state the schema does not allow, which no later CREATE could produce.
+function validate_custom(entry, custom, { creating = false } = {}) {
     const declared = entry.attributes || {};
 
     for (const [key, value] of Object.entries(custom)) {
-        if (!(key in declared)) {
+        // Object.hasOwn, not `key in`: the registry is a JSON.parse result whose prototype chain
+        // still carries toString, constructor, valueOf and the rest. With `in`, an attribute named
+        // toString read as declared, and `declared[key].type` was then undefined, which
+        // type_matches accepts through its default -- so a custom attribute nobody declared was
+        // stored with no type check at all.
+        if (!Object.hasOwn(declared, key)) {
             return { ok: false, message: `${key} is not declared by specialization ${entry.typeName}` };
         }
-        if (value === null) continue;
-        if (!type_matches(declared[key].type, value)) {
-            return { ok: false, message: `${key} must be of type ${declared[key].type}` };
+        const decl = declared[key] || {};
+        if (value === null) {
+            if (decl.required) {
+                return { ok: false, message: `${key} is mandatory in specialization ${entry.typeName} and cannot be deleted` };
+            }
+            continue;
+        }
+        if (!type_matches(decl.type, value)) {
+            return { ok: false, message: `${key} must be of type ${decl.type}` };
+        }
+    }
+
+    if (creating) {
+        // Registries built before this check carry no `required` flag at all, and are read as
+        // "nothing is mandatory" rather than "everything is". Rebuilding the registry from the
+        // manifest is what turns enforcement on -- guessing requiredness from an old registry is
+        // not possible, and defaulting to mandatory would refuse resources that used to be valid.
+        const missing = Object.keys(declared).filter(
+            (key) => declared[key] && declared[key].required && !Object.hasOwn(custom, key)
+        );
+        if (missing.length > 0) {
+            return {
+                ok: false,
+                message: `specialization ${entry.typeName} requires ${missing.join(', ')}`,
+            };
         }
     }
 
