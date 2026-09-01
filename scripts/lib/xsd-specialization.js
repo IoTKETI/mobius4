@@ -93,7 +93,7 @@ const XML_COMMENT = /<!--[\s\S]*?-->/g;
 // Whether an element declaration is mandatory.
 //
 // XSD says an omitted minOccurs is 1, and that default is how oneM2M's own specializations mark a
-// required attribute: none of the fourteen substitutionGroup="m2m:sg_flexContainerResource" XSDs in
+// required attribute: none of the eight XSDs that declare substitutionGroup="m2m:sg_flexContainerResource" in
 // the corpus writes a literal minOccurs="1" on a custom attribute -- CDT-allJoynSvcObject.xsd
 // declares `objectPath` and `enable` with no minOccurs at all, and CDT-allJoynMethodCall.xsd marks
 // its optional ones minOccurs="0".

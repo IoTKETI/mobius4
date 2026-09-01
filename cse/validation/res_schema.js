@@ -446,11 +446,12 @@ const sub_create_schema = Joi.object().keys({
 
     nu: Joi.array().required().items(Joi.string()),
     enc: Joi.object().optional().keys({
-        // m2m:notificationEventType is an xs:integer restricted to eight enumerations
-        // (CDT-enumerationTypes.xsd:986). A value outside them is not a oneM2M value, so it is
-        // refused here as BAD_REQUEST; a defined value this CSE does not act on is caught after
-        // validation and answered NOT_IMPLEMENTED instead -- see cse/notification-event-types.js.
-        net: Joi.array().items(Joi.number().integer().min(1).max(8)),
+        // Only the type is checked here. Both range decisions -- outside the eight enumerations of
+        // m2m:notificationEventType (BAD_REQUEST) and defined-but-unimplemented (NOT_IMPLEMENTED)
+        // -- are made after validation in cse/notification-event-types.js, so that each can name
+        // the offending value. Joi reports an item failure by its array position, which made
+        // {"net":[9]} and {"net":[99]} produce the same message (M4-009).
+        net: Joi.array().items(Joi.number().integer()),
         chty: Joi.array().items(Joi.number().integer()),
         // atr (attribute) restricts which attribute updates fire a net=1 notification --
         // TS-0001:9.6.8 table 9.6.8-3. m2m:attributeList is an xs:list of xs:NCName carrying
@@ -499,7 +500,7 @@ const sub_update_schema = Joi.object().keys({
     // changeable afterwards. The conditions here mirror the create schema exactly; letting the two
     // drift is what left om acceptable on create and refused on update for as long as it did.
     enc: Joi.object().optional().keys({
-        net: Joi.array().items(Joi.number().integer().min(1).max(8)),
+        net: Joi.array().items(Joi.number().integer()),
         chty: Joi.array().items(Joi.number().integer()),
         atr: Joi.array().min(1).items(Joi.string()),
         // The ten value-comparison conditions of TS-0001:9.6.8 table 9.6.8-3, combined by fo.

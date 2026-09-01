@@ -49,7 +49,24 @@ test("a net value outside the enumeration is refused as BAD_REQUEST", async () =
   for (const bad of [0, 9, 99, -1]) {
     const res = await subWith({ net: [bad] });
     assert.equal(res.rsc, "4000", `net=[${bad}] should be 4000, got ${res.rsc}: ${res.raw.slice(0, 160)}`);
+    // The message has to name the offending value. Left to Joi's item validation it named the
+    // array *position* instead, so net=[9] and net=[99] were indistinguishable to the client and
+    // net=[0] read correctly only because index 0 and value 0 coincide (M4-009).
+    assert.ok((res.body["m2m:dbg"] || "").includes(String(bad)),
+      `the message should name ${bad}, not an array index: ${res.raw.slice(0, 200)}`);
   }
+
+  // The pair that made the defect visible: same position, different values, different messages.
+  const nine = await subWith({ net: [9] });
+  const ninetynine = await subWith({ net: [99] });
+  assert.notEqual(nine.body["m2m:dbg"], ninetynine.body["m2m:dbg"],
+    `net=[9] and net=[99] must not produce the same message: ${nine.body["m2m:dbg"]}`);
+
+  // And a bad value in second position is reported by value, not by "1".
+  const second = await subWith({ net: [3, 9] });
+  assert.equal(second.rsc, "4000");
+  assert.ok((second.body["m2m:dbg"] || "").includes("9"),
+    `the message should name 9: ${second.raw.slice(0, 200)}`);
 });
 
 test("a net value oneM2M defines but this CSE does not act on is refused as NOT_IMPLEMENTED", async () => {

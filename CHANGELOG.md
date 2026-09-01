@@ -107,7 +107,7 @@ mandatory, and `cse/specialization.js` checks for them on CREATE.
 
 **The rule is "required unless `minOccurs="0"`", not "required if `minOccurs="1"`".** XSD's default
 for an omitted `minOccurs` is 1, and that default is how oneM2M's own specializations mark a
-required attribute — none of the fourteen flexContainer specialization XSDs in the corpus writes a
+required attribute — none of the eight flexContainer specialization XSDs in the corpus writes a
 literal `minOccurs="1"` on a custom attribute. Reading it the other way round would mark every
 attribute of every standard specialization optional.
 

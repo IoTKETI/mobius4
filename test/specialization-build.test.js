@@ -108,7 +108,9 @@ const TWIN_XSD = schema(`
 
 test("picks the specialization out of an XSD that also declares its announced twin", () => {
   // Every real specialization XSD declares two top-level elements. Counting them and demanding one
-  // refused all fourteen of them in the corpus.
+  // refused every specialization in the corpus: of the 14 files that mention
+  // sg_flexContainerResource, 8 declare one, and extraction went from 0 to 7 (allJoynApp is
+  // refused for a separate reason -- an attribute type that maps to none of the six).
   const got = extractSpecialization(TWIN_XSD, { cnd: "urn:example:parkingBlock" });
 
   assert.equal(got.typeName, "parkingBlock");
@@ -208,7 +210,7 @@ test("reads custom attributes declared under xs:all", () => {
 test("an attribute is required unless it says minOccurs=\"0\"", () => {
   // The rule is "not optional", not "says minOccurs=1". XSD's default for an omitted minOccurs is
   // 1, and that default is how oneM2M's own specializations mark a required attribute: none of the
-  // fourteen flexContainer specialization XSDs in the corpus writes a literal minOccurs="1" on a
+  // eight flexContainer specialization XSDs in the corpus writes a literal minOccurs="1" on a
   // custom attribute -- CDT-allJoynSvcObject.xsd declares objectPath and enable with no minOccurs
   // at all. Looking for minOccurs="1" instead would mark every attribute of every standard
   // specialization optional, while still passing against a hand-written XSD that spells the 1 out.

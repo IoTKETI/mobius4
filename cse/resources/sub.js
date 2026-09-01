@@ -1,5 +1,5 @@
 const { sub_create_schema, sub_update_schema } = require('../validation/res_schema');
-const { unimplemented_net } = require('../notification-event-types');
+const { undefined_net, unimplemented_net } = require('../notification-event-types');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const sequelize = require('../../db/sequelize');
@@ -92,6 +92,13 @@ async function create_a_sub(req_prim, resp_prim) {
   // anything outside the enumeration as BAD_REQUEST; this is the other half -- a valid request for
   // a capability that is absent, which is NOT_IMPLEMENTED. Left unchecked the <subscription> was
   // created, answered 2001, and then never fired.
+  const bad_net = undefined_net(prim_res.enc);
+  if (bad_net.length > 0) {
+    resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+    resp_prim.pc = { 'm2m:dbg': 'notificationEventType ' + bad_net.join(', ') + ' is not a oneM2M value' };
+    return resp_prim;
+  }
+
   const unimpl_net = unimplemented_net(prim_res.enc);
   if (unimpl_net.length > 0) {
     resp_prim.rsc = enums.rsc_str['NOT_IMPLEMENTED'];
@@ -250,6 +257,13 @@ async function update_a_sub(req_prim, resp_prim) {
   // anything outside the enumeration as BAD_REQUEST; this is the other half -- a valid request for
   // a capability that is absent, which is NOT_IMPLEMENTED. Left unchecked the <subscription> was
   // created, answered 2001, and then never fired.
+  const bad_net = undefined_net(prim_res.enc);
+  if (bad_net.length > 0) {
+    resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+    resp_prim.pc = { 'm2m:dbg': 'notificationEventType ' + bad_net.join(', ') + ' is not a oneM2M value' };
+    return;
+  }
+
   const unimpl_net = unimplemented_net(prim_res.enc);
   if (unimpl_net.length > 0) {
     resp_prim.rsc = enums.rsc_str['NOT_IMPLEMENTED'];

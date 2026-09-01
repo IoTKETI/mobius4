@@ -34,6 +34,19 @@ const DEFINED_NET = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 // test/notification-event-type.test.js fails if the two drift.
 const IMPLEMENTED_NET = new Set([1, 2, 3, 4]);
 
+// Returns the net values in enc that are outside the enumeration entirely, or [] if there are none.
+// The caller turns a non-empty result into BAD_REQUEST.
+//
+// This is checked here rather than by a Joi .min(1).max(8) on the array items, because Joi reports
+// an item failure by its position: {"net":[9]} and {"net":[99]} both produced "0 must be less than
+// or equal to 8", where the 0 is the array index and not the value. The two are indistinguishable
+// to the client, and at the lower bound the index happens to read like a value -- {"net":[0]} said
+// "0 must be larger than or equal to 1", which looks correct by coincidence. Reported as M4-009.
+function undefined_net(enc) {
+    if (!enc || !Array.isArray(enc.net)) return [];
+    return enc.net.filter(v => Number.isInteger(v) && !DEFINED_NET.has(v));
+}
+
 // Returns the net values in enc that are defined by oneM2M but not acted on here, or [] if there
 // are none. The caller turns a non-empty result into NOT_IMPLEMENTED.
 function unimplemented_net(enc) {
@@ -41,4 +54,4 @@ function unimplemented_net(enc) {
     return enc.net.filter(v => DEFINED_NET.has(v) && !IMPLEMENTED_NET.has(v));
 }
 
-module.exports = { DEFINED_NET, IMPLEMENTED_NET, unimplemented_net };
+module.exports = { DEFINED_NET, IMPLEMENTED_NET, undefined_net, unimplemented_net };
