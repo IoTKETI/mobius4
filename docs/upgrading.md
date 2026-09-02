@@ -21,6 +21,17 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.22.0
+
+**Nothing to do.** Two additions, neither of which changes an existing deployment.
+
+If you have a script or a habit that runs `docker run <image> <something>` expecting it to start
+the CSE and ignore the argument, it will now run the argument instead. That form previously started
+a CSE and created an administrator identity as a side effect, so it is unlikely to be something you
+relied on — but it is the one behaviour that changed.
+
+`--entrypoint node` still works exactly as before.
+
 ## v4.21.0
 
 **Nothing to do.** `scripts/reset-resources.js` is new and does nothing unless you run it. No

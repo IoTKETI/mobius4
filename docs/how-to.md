@@ -114,8 +114,19 @@ start — do not reach for `TRUNCATE` on every table in the schema as a shortcut
 `spatial_ref_sys` belongs to PostGIS and emptying it does *not* repair itself: `CREATE EXTENSION IF
 NOT EXISTS` does nothing once the extension is registered.
 
-The script is not in the deployment image. It is a test-environment tool, and the image copies
-scripts by name.
+Under Docker, stop the CSE first — the command refuses while it is connected — and then run it in
+a throwaway container:
+
+```bash
+docker compose stop mobius4
+docker compose run --rm --no-deps mobius4 scripts/reset-resources.js --yes
+docker compose start mobius4
+```
+
+No `--entrypoint` override is needed. The entrypoint runs the arguments it is given, with the
+deployment's own configuration assembled from the environment — which is the part that matters,
+because `--entrypoint node` would skip that assembly and send the script to `localhost` instead of
+the deployment's database.
 
 ### Group fan-out
 

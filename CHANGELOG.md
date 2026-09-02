@@ -21,6 +21,36 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.0 (2026-09-02)
+
+**Why MINOR**: it adds a deployment capability. The same reasoning as v4.18.0, which shipped the
+specialization build in the image, and v4.8.0, which added `docker compose up`. Nothing the CSE
+answers changes and there is no migration.
+
+### Added: `scripts/reset-resources.js` ships in the image
+
+```bash
+docker compose stop mobius4
+docker compose run --rm --no-deps mobius4 scripts/reset-resources.js --yes
+docker compose start mobius4
+```
+
+### Changed: the entrypoint runs the arguments it is given
+
+`docker/entrypoint.js` ignored its arguments. `docker run <image> scripts/something.js` started a
+normal CSE instead, and on a fresh identity volume minted and printed a new administrator identity
+on the way — so a mistyped command looked like something worse than it was.
+
+It now runs the command with the configuration it would have started the CSE with, and does **not**
+resolve or create an administrator identity while doing so: a command is not a CSE start. The
+command's exit code becomes the container's.
+
+The documented workaround, `--entrypoint node`, still works and is still correct for a script that
+needs no configuration. It is no longer needed, and for anything touching the database it was never
+enough: the entrypoint is what turns `DB_HOST` and its neighbours into `NODE_CONFIG`, so bypassing
+it sent the script to `localhost` rather than the deployment's database. That is why
+`reset-resources.js` could not simply be copied in without this change.
+
 ## v4.21.0 (2026-09-02)
 
 **Why MINOR**: it adds an operator-facing command, the same shape as v4.18.0's specialization
