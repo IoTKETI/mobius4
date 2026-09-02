@@ -392,6 +392,37 @@ Metrics are richer, when `metrics.enabled` is on: `curl localhost:7599/metrics`.
 
 ---
 
+## Emptying a deployment's resources
+
+For a test deployment that has to start from nothing. Stop the CSE first — the command refuses
+while anything is connected to the database, which is what keeps it from emptying one out from
+under a running CSE:
+
+```bash
+docker compose stop mobius4
+docker compose run --rm --no-deps mobius4 scripts/reset-resources.js          # dry run
+docker compose run --rm --no-deps mobius4 scripts/reset-resources.js --yes    # delete
+docker compose start mobius4
+```
+
+The dry run prints the target database and the row count per table; nothing is deleted without
+`--yes`. Add `--expect <database>` to make it refuse unless the configuration resolves to the
+database you named.
+
+**Deleted**: every oneM2M resource. **Kept**: the database itself, its schema and indexes, the
+PostGIS extension, `config/`, and the administrator identity volume. The CSE recreates the
+`<CSEBase>` and the access control policies from configuration when it starts, so there is no third
+step beyond starting it again.
+
+This is not `docker compose down -v`. That deletes the volumes — the database *and* the
+administrator identity — and the pair is what the identity guard exists to keep together. This
+empties the resources and leaves both volumes intact.
+
+The entrypoint runs whatever arguments it is given, with the configuration it would have started
+the CSE with. `--entrypoint node` is not needed and is worse: it skips the entrypoint, which is the
+only thing that turns `DB_HOST` and its neighbours into `NODE_CONFIG`, so the script would read
+`config/default.json` and go to `localhost`.
+
 ## Troubleshooting
 
 **`no matching manifest for linux/arm64`** — the PostGIS image. See

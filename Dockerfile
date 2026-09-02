@@ -43,6 +43,11 @@ COPY config ./config
 COPY scripts/build-specializations.js ./scripts/
 COPY scripts/lib/xsd-specialization.js ./scripts/lib/
 
+# Emptying a test deployment's resources. Here for the same reason as the build above -- doing it
+# by hand means a database client and knowing which tables are the CSE's and which belong to
+# PostGIS. It refuses while anything is connected, so it cannot be pointed at a running deployment.
+COPY scripts/reset-resources.js ./scripts/
+
 # The XSD that the shipped config/specializations.manifest.json resolves to. .dockerignore excludes
 # docs/ wholesale and re-admits this one file, so that the manifest as shipped builds inside the
 # image rather than failing on a path that is not there.

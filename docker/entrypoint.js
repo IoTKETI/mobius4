@@ -46,6 +46,42 @@ const number = (name) => {
 };
 
 
+// ── running a command instead of the CSE ──────────────────────────────────────────────────────
+
+// `docker compose run --rm mobius4 scripts/reset-resources.js --yes` runs that script with the
+// deployment's own configuration. Without this, arguments were ignored: the entrypoint started a
+// normal CSE and, on a fresh identity volume, minted and printed a new administrator identity on
+// the way -- so a mistyped command looked like something worse than it was.
+//
+// The documented way round it was `--entrypoint node`, which works for a script that needs no
+// configuration but not for one that does: the entrypoint is what turns DB_HOST and its
+// neighbours into NODE_CONFIG, so bypassing it leaves the script reading config/default.json and
+// talking to localhost instead of the deployment's database.
+//
+// Handled before the identity is resolved, deliberately. A command is not a CSE start and must
+// not create an identity as a side effect.
+//
+// spawn rather than require: a script's `require.main === module` guard would be false if this
+// process required it, so main() would never run. The PID 1 signal argument that governs the CSE
+// handover below does not apply -- these are short-lived commands, and SIGTERM is forwarded.
+const command = process.argv.slice(2);
+if (command.length > 0) {
+    const { spawn } = require('node:child_process');
+    process.env.NODE_CONFIG = JSON.stringify(buildNodeConfig({ env, bool, number }, undefined));
+
+    const child = spawn(process.execPath, command, {
+        cwd: path.join(__dirname, '..'),
+        stdio: 'inherit',
+        env: process.env,
+    });
+    for (const signal of ['SIGTERM', 'SIGINT']) {
+        process.on(signal, () => child.kill(signal));
+    }
+    child.on('exit', (code, signal) => process.exit(signal ? 1 : code));
+    child.on('error', (err) => fail(`could not run ${command[0]}: ${err.message}`));
+    return;
+}
+
 // ── the administrator identity ────────────────────────────────────────────────────────────────
 
 const length = number('CSE_ADMIN_LENGTH') || DEFAULT_LENGTH;
