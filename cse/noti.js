@@ -307,6 +307,13 @@ async function http_noti(noti_target, sgn) {
             headers: {
                 "X-M2M-Origin": config.cse.cse_id,
                 "X-M2M-RI": 'http-noti-' + generate_ri(),
+                // A notification is a request primitive, and TS-0004:6.4.1 gives Release Version
+                // Indicator multiplicity 1 -- it is mandatory on every one. This header was
+                // missing, and a receiver that checks its request parameters rejected the
+                // notification because of it. The value is the first entry of cse.versions, the
+                // same source the MQTT notification path and the retargeting path already use, so
+                // all three agree on what release this CSE speaks.
+                "X-M2M-RVI": config.cse.versions[0],
                 "Content-Type": "application/json",
             },
             data: sgn,
