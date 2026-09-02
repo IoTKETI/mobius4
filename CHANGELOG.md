@@ -21,6 +21,38 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.21.0 (2026-09-02)
+
+**Why MINOR**: it adds an operator-facing command, the same shape as v4.18.0's specialization
+build. Nothing the CSE answers changes, there is no migration, and a deployment that never runs it
+is untouched.
+
+### Added: `scripts/reset-resources.js` — empty a test deployment's resources
+
+```bash
+node scripts/reset-resources.js            # says what it would delete, deletes nothing
+node scripts/reset-resources.js --yes      # deletes
+```
+
+Deletes every oneM2M resource and keeps everything else: `config/`, the database, its schema and
+indexes, the PostGIS extension, `config/specializations.json`, and the administrator identity file.
+Start the CSE afterwards and it recreates the `<CSEBase>` and the access control policies from
+configuration, so there is no third step.
+
+Replaces dropping the `public` schema by hand in a database client, which works but takes PostGIS
+with it. The command refuses while anything is connected to the target database — a running CSE
+holds caches that would disagree with an emptied one, and a production deployment is always
+connected, so this cannot empty one out from under itself. `--expect <database>` makes it refuse
+unless the configuration resolves to the database you named.
+
+The table list is asked of the database rather than written down, so a table added by a later
+migration is included automatically and a table belonging to an extension is excluded. That second
+half matters more than it looks: PostGIS owns `spatial_ref_sys`, and emptying it would break every
+spatial query **permanently**, because `CREATE EXTENSION IF NOT EXISTS` does nothing once the
+extension is registered.
+
+Not in the deployment image — it is a test-environment tool, and the image copies scripts by name.
+
 ## v4.20.1 (2026-09-02)
 
 **Why PATCH**: a bug fix that adds no capability. The notification a subscriber already receives
