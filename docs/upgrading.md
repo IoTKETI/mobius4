@@ -21,6 +21,12 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.21.0
+
+**Nothing to do.** `scripts/reset-resources.js` is new and does nothing unless you run it. No
+migration, no configuration change, and the deployment image is unchanged — the script is a
+test-environment tool and is not copied into it.
+
 ## v4.20.1
 
 **Nothing to do**, but worth knowing: if a notification target was rejecting your notifications,

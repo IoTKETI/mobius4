@@ -78,6 +78,45 @@ than accepted and ignored. `net` values 5–8 are defined by oneM2M but not impl
 rejected with 5001; anything outside 1–8 is 4000. `net=8` and its `md` (`missingData`) condition
 **are** implemented — see the release notes for v4.20.0.
 
+### Emptying a test deployment
+
+A test environment often has to start from nothing. `scripts/reset-resources.js` deletes every
+oneM2M resource and leaves everything else alone:
+
+```bash
+node scripts/reset-resources.js            # says what it would delete, deletes nothing
+node scripts/reset-resources.js --yes      # deletes
+```
+
+**Stop the CSE first.** The command refuses while anything is connected to the database — a running
+CSE holds caches that would disagree with an emptied one, and a production deployment is always
+connected, so it cannot empty one out from under itself.
+
+Then start the CSE. It recreates the `<CSEBase>` and the default and administrator access control
+policies from configuration, so there is no third step.
+
+| | |
+| :--- | :--- |
+| **Deleted** | every `<AE>`, `<container>`, `<contentInstance>`, `<timeSeries>`, `<subscription>`, `<group>`, `<accessControlPolicy>`, `<remoteCSE>` and the AI/ML resources — all of it, with no way back. There is no soft delete in this CSE |
+| **Kept** | `config/`, the database, its schema and indexes, the PostGIS extension, `config/specializations.json`, and the administrator identity file |
+
+The target is whatever `db.name` resolves to in the configuration in effect. Print it before
+trusting it — the dry run does, along with the row count per table. Add `--expect <database>` to
+make the command refuse if the configuration resolves to anything else:
+
+```bash
+node scripts/reset-resources.js --yes --expect mobius4_test
+```
+
+Dropping the `public` schema in a database client and recreating it has the same effect, but it
+also drops the PostGIS extension. That happens to work because the CSE reinstalls it on the next
+start — do not reach for `TRUNCATE` on every table in the schema as a shortcut, because
+`spatial_ref_sys` belongs to PostGIS and emptying it does *not* repair itself: `CREATE EXTENSION IF
+NOT EXISTS` does nothing once the extension is registered.
+
+The script is not in the deployment image. It is a test-environment tool, and the image copies
+scripts by name.
+
 ### Group fan-out
 
 Group feature with `group` and `fanOutPoint` resource type in the oneM2M specification provides request fan-out which is basically the batch resource access (CRUD) feature. One use case is that retrieving  `contentInstance` resources of multiple `container` resources that represent different sensor readings.
