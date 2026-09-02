@@ -21,6 +21,25 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.20.1 (2026-09-02)
+
+**Why PATCH**: a bug fix that adds no capability. The notification a subscriber already receives
+now carries a request parameter it was missing.
+
+### Fixed: HTTP notifications were missing `X-M2M-RVI`
+
+A notification is a request primitive, and `TS-0004:6.4.1` gives Release Version Indicator
+multiplicity **1** — mandatory on every one. The HTTP notification path sent only `X-M2M-Origin`
+and `X-M2M-RI`. A third-party receiver that validates its request parameters rejected the
+notification because of it, which looked from this side like a network problem.
+
+Both of this CSE's other paths already sent it — the MQTT notification path and request
+retargeting — so the value comes from the same source as those, the first entry of `cse.versions`,
+and all three now agree on what release this CSE speaks.
+
+Nothing caught this because the test suite's notification sink was not recording headers. It does
+now, and a test asserts that `X-M2M-Origin`, `X-M2M-RI` and `X-M2M-RVI` are all present.
+
 ## v4.20.0 (2026-09-01)
 
 **Why MINOR**: a oneM2M capability plus a backward-compatible DB migration — both named in the

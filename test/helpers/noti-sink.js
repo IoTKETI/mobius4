@@ -24,7 +24,10 @@ async function startSink() {
     req.on("end", () => {
       let parsed = null;
       try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
-      const item = { url: req.url, body: parsed, raw };
+      // headers are recorded because a notification is a request primitive and its
+      // parameters are as much part of being correct as its body -- a receiver that
+      // validates them rejects the whole thing.
+      const item = { url: req.url, method: req.method, headers: req.headers, body: parsed, raw };
       received.push(item);
 
       for (const w of waiters.slice()) {

@@ -48,6 +48,24 @@ test("net=1 — notifies on update of the subscribed-to resource", async () => {
   assert.equal(got.body["m2m:sgn"].nev.net, 1);
 });
 
+test("a notification carries the request parameters a receiver validates", async () => {
+  // TS-0018에 해당 TP 없음. A notification is a request primitive, and TS-0004:6.4.1 table
+  // 6.4.1-1 gives Release Version Indicator multiplicity 1 -- mandatory, not optional. It was
+  // missing from the HTTP notification path while both the MQTT path and the retargeting path
+  // set it, and a third-party receiver that validates its request parameters rejected the
+  // notification outright. Nothing here caught it because the sink was not recording headers.
+  const { cntSid, subSid } = await cntWithSub({ net: [1] });
+  const upd = await update(srv.baseUrl, cntSid, { "m2m:cnt": { lbl: ["hdrs"] } });
+  assert.equal(upd.rsc, "2004", `the update must succeed: ${upd.raw.slice(0, 160)}`);
+
+  const got = await sink.waitFor((i) => netOf(i) === 1 && i.body["m2m:sgn"].sur === subSid);
+  assert.equal(got.method, "POST");
+  for (const h of ["x-m2m-origin", "x-m2m-ri", "x-m2m-rvi"]) {
+    assert.ok(got.headers[h], `${h} is mandatory on a request primitive, got ${JSON.stringify(Object.keys(got.headers))}`);
+  }
+  assert.match(got.headers["x-m2m-rvi"], /^[0-9]/, `rvi should be a release version, got ${got.headers["x-m2m-rvi"]}`);
+});
+
 test("net=2 — notifies on deletion of the subscribed-to resource", async () => {
   const { cntSid, subSid } = await cntWithSub({ net: [2] });
   await remove(srv.baseUrl, cntSid);

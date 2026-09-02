@@ -21,6 +21,12 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.20.1
+
+**Nothing to do**, but worth knowing: if a notification target was rejecting your notifications,
+this is a likely cause. `X-M2M-RVI` was missing from every HTTP notification, and a receiver that
+validates request parameters is entitled to refuse one without it. Nothing on your side changes.
+
 ## v4.20.0
 
 ### Required: run the migration
