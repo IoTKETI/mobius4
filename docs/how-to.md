@@ -75,8 +75,8 @@ it is at least 1024 bytes **and** created after the start of 2026.
 
 **What is refused.** `om` (`operationMonitor`) is not implemented and is rejected with 4000 rather
 than accepted and ignored. `net` values 5–8 are defined by oneM2M but not implemented here and are
-rejected with 5001; anything outside 1–8 is 4000. `md` (`missingData`, which pairs with `net=8`) is
-not implemented.
+rejected with 5001; anything outside 1–8 is 4000. `net=8` and its `md` (`missingData`) condition
+**are** implemented — see the release notes for v4.20.0.
 
 ### Group fan-out
 

@@ -203,6 +203,7 @@ async function sweep_missing_data(opts = {}) {
     });
 
     let updated = 0;
+    let notified = 0;
 
     for (const row of candidates) {
         // The whole body is one try/catch, not just detect_missing: to_epoch_seconds calls below
@@ -290,13 +291,34 @@ async function sweep_missing_data(opts = {}) {
             row.md_watermark_n = result.watermark;
             await row.save();
             updated++;
+
+            // The reporting half (TS-0001:10.2.4.29, TS-0004:7.5.1.2.9). Runs after the resource
+            // state is persisted, so a subscription can never be told about a point the <ts> does
+            // not yet carry. result.missing is what this tick newly detected -- deliberately not
+            // the folded missingDataList, which is capped by missingDataMaxNr and shared by every
+            // subscription, while the clause asks each subscription for what it has seen since its
+            // own timer started.
+            //
+            // Required lazily: cse/noti.js pulls in the MQTT binding and the AE model, and this
+            // module is also loaded by tests that only exercise the detection arithmetic.
+            if (result.missing.length > 0) {
+                const { report_missing_data } = require('./missing-data-subscription');
+                const noti = require('./noti');
+                notified += await report_missing_data({
+                    ts_ri: row.ri,
+                    missing: result.missing,
+                    mdt: row.mdt,
+                    send_a_noti: noti.send_a_noti,
+                    prefetch_ae_poa: noti.prefetch_ae_poa,
+                });
+            }
         } catch (err) {
             // A single unparseable timestamp must not stop the sweep for every other resource.
             logger.warn({ err, ri: row.ri }, 'missing-data sweep skipped one <ts>');
         }
     }
 
-    return { scanned: candidates.length, updated };
+    return { scanned: candidates.length, updated, notified };
 }
 
 module.exports = { detect_missing, apply_missing, sweep_missing_data, to_epoch_seconds, from_epoch_seconds };

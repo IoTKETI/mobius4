@@ -21,6 +21,28 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.20.0
+
+### Required: run the migration
+
+```bash
+psql -d "$MOBIUS4_DB" -f db/migrations/v4.20.0.sql
+```
+
+It adds two nullable columns to `sub` and alters nothing. They hold the window state of a
+`missingData` subscription; a deployment that never creates one leaves them NULL forever. A fresh
+install needs nothing — `db/init.js` creates the columns.
+
+Running the CSE without the migration breaks `<subscription>` handling: the model declares the two
+columns, so every query against `sub` fails.
+
+### Nothing else to do
+
+`notificationEventType` 8 and the `missingData` condition are new, and `notificationContentType` is
+now refused outside 1–5. Anything sending `nct` outside that range was having it ignored, so no
+behaviour that worked stops working — but a client that ignored the response code will now see a
+failure it was already getting no benefit from.
+
 ## v4.19.0
 
 ### Required only if you create `<subscription>` resources with `enc.om`

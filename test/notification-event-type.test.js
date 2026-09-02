@@ -72,7 +72,8 @@ test("a net value outside the enumeration is refused as BAD_REQUEST", async () =
 test("a net value oneM2M defines but this CSE does not act on is refused as NOT_IMPLEMENTED", async () => {
   // 5..8 are real oneM2M values. Answering 4000 would tell the subscriber their request was
   // malformed, which is false; answering 2001 and then never notifying is what this replaces.
-  for (const unimpl of [5, 6, 7, 8]) {
+  // 8 was here until v4.20.0 implemented it (missingData reporting, TS-0001:10.2.4.29).
+  for (const unimpl of [5, 6, 7]) {
     const res = await subWith({ net: [unimpl] });
     assert.equal(res.rsc, "5001", `net=[${unimpl}] should be 5001, got ${res.rsc}: ${res.raw.slice(0, 160)}`);
     assert.match(res.body["m2m:dbg"] || "", /notificationEventType/,
@@ -83,8 +84,8 @@ test("a net value oneM2M defines but this CSE does not act on is refused as NOT_
 test("an unimplemented net value is refused even when mixed with an implemented one", async () => {
   // The whole list has to be checked, not just its first member: net is 0..5 and a subscriber may
   // ask for several. Accepting [1, 8] would silently drop the 8 half of the request.
-  const res = await subWith({ net: [1, 8] });
-  assert.equal(res.rsc, "5001", `net=[1,8] should be 5001, got ${res.rsc}: ${res.raw.slice(0, 160)}`);
+  const res = await subWith({ net: [1, 7] });
+  assert.equal(res.rsc, "5001", `net=[1,7] should be 5001, got ${res.rsc}: ${res.raw.slice(0, 160)}`);
 });
 
 test("the implemented net values are still accepted", async () => {
@@ -133,12 +134,29 @@ test("the implemented-net list matches what the notification path branches on", 
   // rejects from that data. If someone adds a branch there and forgets this list, a working
   // capability starts answering 5001 -- so the list is asserted directly, the way
   // test/unimplemented-and-clearing.test.js asserts the parent-governed types.
-  assert.deepEqual([...IMPLEMENTED_NET].sort(), [1, 2, 3, 4]);
+  assert.deepEqual([...IMPLEMENTED_NET].sort((a, b) => a - b), [1, 2, 3, 4, 8]);
   assert.deepEqual([...DEFINED_NET].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8]);
 
-  const noti = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "cse", "noti.js"), "utf8");
-  for (const v of IMPLEMENTED_NET) {
+  const read = (...p) => require("node:fs").readFileSync(require("node:path").join(__dirname, "..", ...p), "utf8");
+
+  // 1-4 are resource-CRUD events and live as branches in cse/noti.js.
+  const noti = read("cse", "noti.js");
+  for (const v of [1, 2, 3, 4]) {
+    assert.ok(IMPLEMENTED_NET.has(v));
     assert.match(noti, new RegExp(`net\\.includes\\(${v}\\)`),
       `cse/noti.js should branch on net=${v}, since the list claims it is implemented`);
   }
+
+  // 8 is not a CRUD event at all -- it is raised by the missing-data sweep, so it has no branch in
+  // noti.js and a check that only looked there would call it unimplemented. Its path is asserted
+  // where it actually is.
+  assert.ok(IMPLEMENTED_NET.has(8));
+  assert.match(read("cse", "missing-data-subscription.js"), /NET_MISSING_DATA = 8/,
+    "cse/missing-data-subscription.js should be the path for net=8");
+  assert.match(read("cse", "missing-data.js"), /report_missing_data/,
+    "the sweep should call into it, or nothing ever raises net=8");
+
+  // The guard this test exists for: nothing may be listed as implemented without a path above.
+  assert.equal(IMPLEMENTED_NET.size, 5,
+    "a new implemented net value needs its handling site asserted here too");
 });
