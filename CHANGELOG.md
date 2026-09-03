@@ -21,6 +21,42 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.1 (2026-09-03)
+
+**Why PATCH**: bug fixes. No capability is added and no configuration has to change.
+
+### Fixed: missing-data detection was late by up to the whole sweep interval
+
+`TS-0001:10.2.4.29` puts a missing data point's detection at "expected dataGenerationTime +
+missingDataDetectTimer". The sweep ran on a fixed cadence instead, so detection was late by up to
+one interval -- and the shipped interval is 30 seconds, which turns that into a real defect once
+`periodicInterval` is measured in seconds.
+
+Measured on the shipped configuration with a conformance tester's `<timeSeries>` (`pei` 5000,
+`mdt` 1000, one instance): a gap that is real at six seconds still reported
+`missingDataCurrentNr` 0 at nine seconds and at twenty, and only appeared at thirty-five. It now
+reports it at nine.
+
+The sweep books each pass from the data: it reports the earliest instant any detecting
+`<timeSeries>` could next have something to judge, and the next pass runs then. One timer, not one
+per resource -- per-resource timers would have to be created, cancelled and re-created on every
+create, update, delete and expiry, survive restarts, and respect the single-instance rule, for the
+same answer with much more state. A short fixed tick was the other option and was rejected because
+each pass costs a query per detecting resource whether or not anything is due.
+
+**`cse.missing_data_sweep_interval_seconds` changes meaning**: it is now the longest the sweep will
+sleep, not how often it runs. Lowering it no longer makes detection faster; what it bounds is how
+long a newly created or edited `<timeSeries>` waits before the sweep notices it. A 250 ms floor is
+built in so a very small `periodicInterval` cannot spin.
+
+### Fixed: a subscriber naming itself by path was asked to verify its own subscription
+
+`TS-0004:7.4.8.2.1` Recv-6.4 verifies `notificationURI` entries that "are not the Originator". One
+`<AE>` answers to two names -- its AE-ID as the Originator, a path as a notification target -- and
+comparing them as text does not see one entity. Target selection now resolves both names to the
+resource they point at, and only when they differ as text and only for names rooted at this
+`<CSEBase>`, so an ordinary subscription creation still costs no extra query.
+
 ## v4.24.0 (2026-09-03)
 
 **Why MINOR**: a oneM2M capability is added. No migration; one configuration key, off by default,

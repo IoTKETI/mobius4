@@ -1163,3 +1163,18 @@ One behaviour changes whether or not you enable it. An incoming NOTIFY that carr
 `verificationRequest` used to be answered `2000` without its payload being read; it is now checked
 against the privileges the standard requires and may be answered `4101`, `5205` or `4000`. Ordinary
 notifications are unaffected.
+
+## v4.24.1
+
+Nothing required. No migration, no configuration change.
+
+One setting changes meaning. `cse.missing_data_sweep_interval_seconds` used to be how often the
+missing-data sweep ran; it is now **the longest the sweep will sleep**. The sweep books each pass
+from the data, so a gap is detected at `expected dataGenerationTime + missingDataDetectTimer`
+whatever this is set to.
+
+If you lowered it to make detection prompt — a common workaround, since the shipped 30 seconds made
+a `<timeSeries>` with a `periodicInterval` of a few seconds look like detection was broken — you can
+put it back. Lowering it no longer affects detection latency. What it still bounds is how long a
+newly created or edited `<timeSeries>` can wait before the sweep notices it exists, so a very large
+value delays that.
