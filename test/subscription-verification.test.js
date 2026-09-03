@@ -25,15 +25,15 @@ test("a oneM2M resource-ID is a verification target", () => {
   }
 });
 
-test("the Originator's own entry is excluded", () => {
+test("the Originator's own entry is excluded", async () => {
   // The clause says "are not the Originator" -- a subscriber notifying itself has nothing to
   // verify, and asking it to would make the common self-subscription case fail.
-  const got = verification_targets(["/CSE1/AE1", "/CSE1/AE2"], "/CSE1/AE1");
+  const got = await verification_targets(["/CSE1/AE1", "/CSE1/AE2"], "/CSE1/AE1");
   assert.deepEqual(got, ["/CSE1/AE2"]);
 });
 
-test("URLs and the Originator are filtered together", () => {
-  const got = verification_targets(["http://h/n", "/CSE1/AE1", "/CSE1/AE2"], "/CSE1/AE1");
+test("URLs and the Originator are filtered together", async () => {
+  const got = await verification_targets(["http://h/n", "/CSE1/AE1", "/CSE1/AE2"], "/CSE1/AE1");
   assert.deepEqual(got, ["/CSE1/AE2"]);
 });
 
@@ -51,7 +51,7 @@ test("verification is off unless a deployment turns it on", () => {
   assert.equal(verification_enabled(), false, "config/default.json must ship it disabled");
 });
 
-test("the Originator is excluded however it is spelled", () => {
+test("the Originator is excluded however it is spelled", async () => {
   // Without this the whole normalisation could be deleted and every other test here would still
   // pass -- each of them writes the Originator and the nu entry as the same string, which plain
   // equality already handles. This is the case that needs it: one AE, the three spellings
@@ -68,10 +68,12 @@ test("the Originator is excluded however it is spelled", () => {
     `${config.cse.cse_id}/${cseRelative}`,
     `${config.cse.sp_id}${config.cse.cse_id}/${cseRelative}`,
   ];
-  const other = `${config.cse.csebase_rn}/ae2`;
+  // A resource on another CSE: it cannot be the Originator and cannot be resolved here, so this
+  // test never needs a database. The AE-ID-versus-path case, which does, has its own test below.
+  const other = "/CSE9/ae2";
   for (const spelling of spellings) {
     assert.deepEqual(
-      verification_targets([cseRelative, other], spelling), [other],
+      await verification_targets([cseRelative, other], spelling), [other],
       `the Originator written as ${spelling} must still be recognised as ${cseRelative}`);
   }
 });
@@ -97,7 +99,8 @@ test("the module loads without a deployment's own configuration", () => {
 
   const r = spawnSync(process.execPath, ["-e",
     "const m = require('./cse/subscription-verification');" +
-    "process.stdout.write(JSON.stringify(m.verification_targets(['/CSE1/AE1', '/CSE1/AE2'], '/CSE1/AE1')));"],
+    "m.verification_targets(['/CSE1/AE1', '/CSE1/AE2'], '/CSE1/AE1')" +
+    "  .then((r) => process.stdout.write(JSON.stringify(r)));"],
     { cwd: repoRoot, encoding: "utf8", env: { ...process.env, NODE_ENV: "test", NODE_CONFIG_DIR: bareConfig } });
 
   assert.equal(r.status, 0, `loading the module must not need a deployment identity: ${r.stderr}`);
@@ -403,6 +406,55 @@ test("on: the target refuses the verification NOTIFY (4103), the creation is ref
     assert.equal(rscSink.received.length, 1, "the verification NOTIFY must have reached the target");
   } finally {
     await rscSink.stop();
+    await srv.stop();
+  }
+});
+
+test("a subscriber that names itself by path is not asked to verify its own subscription", async () => {
+  // TS-0004:7.4.8.2.1 Recv-6.4 verifies notificationURI entries that "are not the Originator". One
+  // <AE> answers to two names: it registers and is thereafter the Originator by its AE-ID
+  // ("C3tXgC"), while a notificationURI pointing at it is written as a path ("Mobius/ae1"). Those
+  // are not equal as strings, so comparing names as text sends the subscriber a verification
+  // request for the subscription it is in the middle of creating.
+  //
+  // Requires a database, unlike the other target-selection tests here, because that is the whole
+  // point: telling the two names apart is a lookup, not string work. It is also the only case that
+  // pays for one -- names that already match as text are settled without a query.
+  //
+  // TS-0018에 해당 TP 없음.
+  const { startServer } = require("./helpers/server");
+  const { startSink } = require("./helpers/noti-sink");
+  const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer({ cse: { subscription_verification: true } });
+  const sink = await startSink();
+  try {
+    // The <AE> is reachable, so a verification request WOULD arrive at the sink if one were sent.
+    // That is what makes the assertion below meaningful: the subscription succeeding proves
+    // nothing on its own, since the sink answers 2000 and verification would have passed anyway.
+    const rn = uniqueRn("ae");
+    const madeAe = await create(srv.baseUrl, CSE_BASE, 2,
+      { "m2m:ae": { rn, api: "Nsv.self", rr: true, poa: [sink.url] } }, { originator: "" });
+    assert.equal(madeAe.rsc, "2001", `failed to register the <AE>: ${madeAe.raw.slice(0, 200)}`);
+    const aei = madeAe.body["m2m:ae"].aei;
+    assert.ok(aei, "the CSE must have assigned an AE-ID");
+    assert.notEqual(aei, `${CSE_BASE}/${rn}`, "the two names must differ, or this test proves nothing");
+
+    const cntRn = uniqueRn("c");
+    await create(srv.baseUrl, `${CSE_BASE}/${rn}`, 3, { "m2m:cnt": { rn: cntRn } }, { originator: aei });
+
+    const subRn = uniqueRn("s");
+    const madeSub = await create(srv.baseUrl, `${CSE_BASE}/${rn}/${cntRn}`, 23, {
+      // The AE subscribes and points the notification at itself, by path.
+      "m2m:sub": { rn: subRn, nu: [`${CSE_BASE}/${rn}`], enc: { net: [3] }, nct: 1 },
+    }, { originator: aei });
+    assert.equal(madeSub.rsc, "2001", `the creation must succeed: ${madeSub.raw.slice(0, 200)}`);
+
+    const verif = sink.received.find((i) => i.body?.["m2m:sgn"]?.vrq === true);
+    assert.equal(verif, undefined,
+      `the Originator must not be sent a verification request for its own subscription; ` +
+      `the sink received ${JSON.stringify(sink.received.map((i) => i.body))}`);
+  } finally {
+    await sink.stop();
     await srv.stop();
   }
 });

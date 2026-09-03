@@ -61,13 +61,65 @@ function cse_relative(id) {
     return id;
 }
 
-function verification_targets(nu_list, originator) {
-    const normalise = cse_relative;
-    const own = normalise(originator);
-    return (nu_list || []).filter((nu) => {
-        if (!is_resource_id_target(nu)) return false;
-        return nu !== originator && normalise(nu) !== own;
-    });
+// Do these two IDs name the same resource on this CSE?
+//
+// One <AE> answers to more than one name. The Originator of a subscription creation arrives as its
+// AE-ID -- "C3tXgC" -- while a notificationURI naming the same AE is usually written as a path,
+// "Mobius/ae1". TS-0004:7.4.8.2.1 Recv-6.4 excludes notificationURI entries that "are not the
+// Originator", so failing to see those two as one entity means sending a subscriber a verification
+// request for its own subscription: it is asked to confirm a subscription it is in the middle of
+// creating.
+//
+// String work cannot close that gap, so this resolves each name to the ri it points at. mobius4
+// gives an <AE> the same value for ri and aei, which is what makes an AE-ID comparable with a
+// resolved path.
+//
+// Reached only when the two names differ as text, and only for names rooted at this <CSEBase>.
+// An ID belonging to another CSE cannot be resolved here and the lookup table does not hold it, so
+// asking would be a wasted round trip on every subscription creation.
+async function same_resource(a_relative, b_relative) {
+    const local = (v) => typeof v === "string" && v !== "" &&
+        (!v.includes("/") || v.startsWith(`${config.cse.csebase_rn}/`));
+    if (!local(a_relative) || !local(b_relative)) return false;
+
+    const Lookup = require("../models/lookup-model");
+    const to_ri = async (v) => {
+        if (!v.includes("/")) return v;                       // already unstructured
+        const row = await Lookup.findOne({ where: { sid: v }, attributes: ["ri"] });
+        return row ? row.ri : null;
+    };
+
+    const [a_ri, b_ri] = await Promise.all([to_ri(a_relative), to_ri(b_relative)]);
+    return a_ri !== null && b_ri !== null && a_ri === b_ri;
+}
+
+// The notificationURI entries that need a verification request: resource-ID form, and not the
+// Originator (TS-0004:7.4.8.2.1 Recv-6.4).
+async function verification_targets(nu_list, originator) {
+    const candidates = (nu_list || []).filter(is_resource_id_target);
+    if (candidates.length === 0) return [];
+
+    const own = cse_relative(originator);
+    const targets = [];
+    for (const nu of candidates) {
+        const relative = cse_relative(nu);
+        if (relative === own) continue;         // the same name, whichever way it is spelled
+
+        // Different names can still be one resource. Only this case pays for a query.
+        //
+        // A failed lookup must not turn a database problem into a refused subscription creation,
+        // so it degrades to "not the same", which sends a verification the subscriber may not have
+        // needed -- a wasted request rather than a wrong answer.
+        let same = false;
+        try {
+            same = await same_resource(relative, own);
+        } catch (err) {
+            require("../logger").warn({ err: err.message, nu, originator },
+                "could not resolve a notificationURI while selecting verification targets");
+        }
+        if (!same) targets.push(nu);
+    }
+    return targets;
 }
 
 function verification_enabled() {
@@ -141,7 +193,7 @@ async function handle_verification(req_prim, resp_prim) {
 async function verify_targets(nu_list, originator) {
     if (!verification_enabled()) return null;
 
-    const targets = verification_targets(nu_list, originator);
+    const targets = await verification_targets(nu_list, originator);
     if (targets.length === 0) return null;
 
     const enums = require("../config/enums");
