@@ -21,6 +21,33 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.4 (2026-09-03)
+
+**Why PATCH**: a bug fix. A setting that had never taken effect now does.
+
+### Fixed: `cse.keep_alive_timeout` did nothing
+
+`bindings/http.js` assigned it to `server.keep_alive_timeout`. Node's property is
+`server.keepAliveTimeout` -- so the snake_case spelling added an unused property to the server
+object, the value was read and multiplied and thrown away, and **every deployment ran on Node's
+default of 5 seconds** whatever it configured. A client holding an HTTP session open across a
+sequence of requests had it closed under it, and the responses said `Keep-Alive: timeout=5` while
+`config/default.json` said 60.
+
+Measured before and after: configured 120 answered `timeout=5`; configured 120 now answers
+`timeout=120`.
+
+`headersTimeout` is raised above the keep-alive when it would otherwise be smaller. It bounds how
+long the request line and headers may take to arrive and Node defaults it to 60 seconds, so a
+keep-alive above that would hold a socket open longer than the server is willing to wait for the
+next request on it -- closing connections the client believed were good.
+
+To hold sessions open longer, raise the setting:
+
+```json
+"cse": { "keep_alive_timeout": 300 }
+```
+
 ## v4.22.3 (2026-09-03)
 
 **Why PATCH**: a bug fix that adds no capability. Requests that used to hang now fail in a bounded
