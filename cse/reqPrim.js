@@ -688,7 +688,12 @@ async function forward_to_poa(poa_list, req_prim, forward_to, resp_prim, target_
         'X-M2M-Origin': req_prim.fr,
         'X-M2M-RVI': req_prim.rvi || '2a',
         'Content-Type': 'application/json'
-      }
+      },
+      // Without this the request was held until the operating system gave up on the socket --
+      // tens of seconds to minutes -- and to the Originator that is indistinguishable from a lost
+      // request. On expiry the poa loop moves to the next access point, and when none answers the
+      // Originator gets 5103 TARGET_NOT_REACHABLE, which is the truth.
+      timeout: config.cse.forwarding_timeout_seconds * 1000,
     };
 
     if (req_prim.op === 1) {
@@ -758,7 +763,8 @@ async function forward_to_poa(poa_list, req_prim, forward_to, resp_prim, target_
       poa,
     }, 'request primitive forwarded');
 
-    const remote_resp = await mqtt_outbound.request_over_mqtt(poa, forwarded, target_cse_id);
+    const remote_resp = await mqtt_outbound.request_over_mqtt(poa, forwarded, target_cse_id,
+        config.cse.forwarding_timeout_seconds * 1000);
     if (remote_resp) {
       // The remote CSE's own rqi is its answer to the forwarded request; the Originator is waiting
       // on the one it sent, so the original is restored.

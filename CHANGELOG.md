@@ -21,6 +21,42 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.3 (2026-09-03)
+
+**Why PATCH**: a bug fix that adds no capability. Requests that used to hang now fail in a bounded
+time with the status that says what happened.
+
+### Fixed: an unresponsive peer held a forwarded request open indefinitely
+
+The HTTP forwarding call had no timeout. A `<remoteCSE>` that accepted the connection and then said
+nothing held the request until the operating system gave up on the socket — tens of seconds to
+minutes — and to the Originator that is indistinguishable from a request that was lost. Registration
+with a registrar CSE had the same gap, and it runs at startup.
+
+Both are bounded now. On expiry the access-point loop moves to the next `pointOfAccess`, and when
+none answers the Originator gets `5103 TARGET_NOT_REACHABLE` with the reason attached — which is
+the status that was already there for the case where nothing could be reached.
+
+### Changed: the timeouts are configuration, not constants
+
+```json
+"cse": {
+  "notification_timeout_seconds": 3,
+  "forwarding_timeout_seconds": 10
+}
+```
+
+The notification timeout was three seconds written into the call. The forwarding one did not exist.
+The MQTT forwarding path had its own ten-second default, which now comes from the same setting so
+the two bindings agree.
+
+**Note on what this does not change.** A hanging peer was never able to stop the CSE serving other
+requests — measured with a notification target that never answers, a forwarded CSE that never
+answers, thirty forwards hanging at once, and a client reusing one keep-alive connection. In every
+case unrelated requests were answered in under 15 ms. What an unresponsive peer could do is hold
+*its own* request open forever, so a client whose every request went through the same dead peer saw
+nothing come back at all — which is what this release ends.
+
 ## v4.22.2 (2026-09-03)
 
 **Why PATCH**: bug fixes that add no capability — `notificationContentType` was already a

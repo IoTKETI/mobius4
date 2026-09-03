@@ -21,6 +21,18 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.22.3
+
+**Nothing to do.** Two new settings with the defaults that were already in effect:
+
+```json
+"cse": { "notification_timeout_seconds": 3, "forwarding_timeout_seconds": 10 }
+```
+
+Forwarding had no timeout before, so this bounds something that was previously unbounded. If you
+forward to a CSE that is legitimately slow to answer, raise `forwarding_timeout_seconds` — the
+Originator now gets `5103 TARGET_NOT_REACHABLE` after it expires rather than waiting.
+
 ## v4.22.2
 
 ### Required only if you create `<subscription>` resources with `notificationContentType`

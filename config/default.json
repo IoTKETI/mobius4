@@ -51,7 +51,13 @@
     "missing_data_sweep_interval_seconds": 30,
     "discovery_limit": 200,
     "allow_discovery_for_any": false,
-    "keep_alive_timeout": 60
+    "keep_alive_timeout": 60,
+    // How long the CSE waits for an entity it sent something to. Both used to be hard to see: the
+    // notification path had 3 seconds written into the call, and the forwarding path had nothing
+    // at all -- an unresponsive CSE held that request until the operating system gave up, which is
+    // tens of seconds to minutes and looks from the outside like the request was lost.
+    "notification_timeout_seconds": 3,
+    "forwarding_timeout_seconds": 10
   },
   "cb": {
     "default_acp": {

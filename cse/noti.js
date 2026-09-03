@@ -417,7 +417,7 @@ async function http_noti(noti_target, sgn) {
                 "Content-Type": "application/json",
             },
             data: sgn,
-            timeout: 3000,
+            timeout: config.cse.notification_timeout_seconds * 1000,
         })
         .then((resp) => {
             logger.debug({ target: noti_target, status: resp.status }, 'http notification acknowledged');

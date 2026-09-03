@@ -29,7 +29,10 @@ exports.registree = async function () {
             srv: registree.versions
         }
     };
-    const response = await axios.post(url, body, { headers });
+    // Registration is an outbound request like any other. Without a timeout an unreachable
+    // registrar held this call open, and it runs at startup.
+    const response = await axios.post(url, body, { headers,
+        timeout: config.cse.forwarding_timeout_seconds * 1000 });
 
     if (response.status === 201) {
         logger.info({ registrarUrl: url }, 'remoteCSE resource created on registrar');

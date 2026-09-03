@@ -45,6 +45,18 @@ async function startFakeCse({ rsc = "2000", status = 200, body = { "m2m:cnt": { 
   };
 }
 
+// A CSE that accepts the connection and then says nothing. Different from a dead port: the
+// transport succeeds, so nothing fails until something gives up waiting.
+async function startHangingCse() {
+  const held = [];
+  const server = http.createServer((req, res) => { held.push(res); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    stop: () => new Promise((r) => { for (const res of held) res.destroy(); server.close(r); }),
+  };
+}
+
 // A port nothing is listening on, for the transport-failure cases.
 async function deadUrl() {
   const s = http.createServer();
@@ -59,7 +71,9 @@ let reqPrim, enums;
 before(() => {
   process.env.NODE_ENV = "test";
   process.env.NODE_CONFIG = JSON.stringify({
-    cse: { admin: "Stest0000001" },
+    // A short forwarding timeout so the hanging-peer cases below finish in a test's lifetime.
+    // The default is 10 seconds.
+    cse: { admin: "Stest0000001", forwarding_timeout_seconds: 1 },
     logging: { level: "error", file: { enabled: false } },
     mqtt: { enabled: false },
   });
@@ -235,4 +249,39 @@ test("a forwarded DELETE carries no body", async (t) => {
   assert.ok(!remote.received[0].body, `a DELETE must not carry a body, got ${JSON.stringify(remote.received[0].body)}`);
   assert.ok(!("content-length" in remote.received[0].headers) || remote.received[0].headers["content-length"] === "0",
     `content-length: ${remote.received[0].headers["content-length"]}`);
+});
+
+test("a peer that never answers is given up on, not waited for", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const hanging = await startHangingCse();
+  t.after(() => hanging.stop());
+
+  // There was no timeout on this call at all. An unresponsive CSE held the request until the
+  // operating system gave up on the socket -- tens of seconds to minutes -- and to the Originator
+  // that is indistinguishable from a request that was lost.
+  const resp = {};
+  const started = Date.now();
+  await forward_to_poa([hanging.url], { op: 2, fr: "Sabc", rqi: "t1", rvi: "3" }, "/reg-b/Mobius/x", resp);
+  const took = Date.now() - started;
+
+  assert.equal(resp.rsc, enums.rsc_str["TARGET_NOT_REACHABLE"],
+    "no access point answered, which is what 5103 says");
+  assert.ok(took < 5000, `should give up near the configured 1s, took ${took}ms`);
+  assert.ok(took >= 900, `and should actually have waited for it, took ${took}ms`);
+});
+
+test("a hanging poa does not stop the next one from being tried", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const hanging = await startHangingCse();
+  const good = await startFakeCse({ rsc: "2000" });
+  t.after(() => Promise.all([hanging.stop(), good.stop()]));
+
+  // The poa loop treats a timeout the way it treats any transport failure: this access point is
+  // unusable, the next one might not be.
+  const resp = {};
+  await forward_to_poa([hanging.url, good.url], { op: 2, fr: "Sabc", rqi: "t2", rvi: "3" },
+    "/reg-b/Mobius/x", resp);
+
+  assert.equal(resp.rsc, 2000);
+  assert.equal(good.received.length, 1, "the second access point was tried");
 });
