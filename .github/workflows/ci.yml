@@ -3,6 +3,16 @@ name: CI
 on:
   push:
     branches: [master]
+    # A commit that changes only prose has nothing for the suite to answer, and the matrix costs
+    # two five-minute jobs every push. Release notes, upgrade notes and the version history table
+    # are pushed on their own often enough for this to be worth having.
+    #
+    # Deliberately not on pull_request. GitHub reports a run skipped by paths-ignore as absent
+    # rather than passing, so if a required status check is ever added to master, a docs-only pull
+    # request would become unmergeable. Pushes carry no such requirement.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request:
 
 jobs:
