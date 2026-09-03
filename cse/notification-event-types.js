@@ -113,8 +113,18 @@ function effective_nct(enc, nct) {
 //   the accept-and-stay-silent shape v4.19.0 removed from net and om. Recorded as a decision
 //   without a clause behind it.
 function net_combination_error(enc, nct, parent_ty) {
-    const net = enc && Array.isArray(enc.net) ? enc.net : null;
+    // Numbers, whatever arrived. These checks run on the request body rather than on the
+    // Joi-validated copy, and Joi converts -- so a client that sent {"nct": "3"} has a string here
+    // and a number by the time it is stored, and every comparison below is strict. The visible
+    // effect was a refusal that misnamed its own reason: nct 3 with net 3 is allowed by table
+    // 9.6.8-4, and the request was rejected with "notificationContentType 3 is not valid with
+    // notificationEventType 3". A oneM2M JSON body should carry these as numbers, but this CSE
+    // already accepts the string everywhere else, and one place disagreeing is worse than either
+    // answer.
+    const to_number = (v) => (v === undefined || v === null ? v : Number(v));
+    const net = enc && Array.isArray(enc.net) ? enc.net.map(to_number) : null;
     if (!net) return null;
+    nct = to_number(nct);
     const reports_missing_data = net.includes(8);
 
     if (reports_missing_data && net.length > 1) {

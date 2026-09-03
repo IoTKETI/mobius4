@@ -1197,3 +1197,10 @@ The Subscription Verification notification now carries `subscriptionReference`, 
 `<subscription>` about to be created. `TS-0004` table 6.3.5.13-1 makes it mandatory on every
 notification; without it, a receiver that validates the notification data type rejects the request,
 and the subscription creation is then refused `5204`.
+
+## v4.24.4
+
+Nothing required. A `<subscription>` that sends `notificationContentType` as a JSON string
+(`"nct": "3"`) is now accepted instead of being refused with a message that named a valid
+combination as invalid. Sending it as a number, which is what oneM2M's JSON serialization calls
+for, behaves exactly as before.

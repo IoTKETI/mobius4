@@ -194,3 +194,29 @@ test("an omitted notificationContentType is stored as the default for its event 
   assert.equal((await retrieve(srv.baseUrl, `${root.sid}/${ts}/${sub}`)).body["m2m:sub"].nct, 5,
     "table 9.6.8-4 makes TimeSeries notification the default for net=8");
 });
+
+test("a notificationContentType sent as a string is judged as the number it is", async () => {
+  // These checks run against the request body, not the Joi-validated copy, and Joi converts. So a
+  // client sending {"nct": "3"} reached the combination check with a string and every comparison
+  // there is strict -- the request was refused with "notificationContentType 3 is not valid with
+  // notificationEventType 3", which table 9.6.8-4 says is allowed. The value also reached storage
+  // as a string and became 3 in an INTEGER column, so the resource was right and only the gate
+  // disagreed.
+  //
+  // A oneM2M JSON body should carry this as a number. What is pinned here is that the CSE does not
+  // hold two opinions about the same request.
+  //
+  // TS-0018에 해당 TP 없음.
+  const cnt = uniqueRn("c");
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: cnt } });
+  const sub = uniqueRn("s");
+  const made = await create(srv.baseUrl, `${root.sid}/${cnt}`, 23, {
+    "m2m:sub": { rn: sub, nu: [sink.url], enc: { net: [3] }, nct: "3" },
+  });
+  assert.equal(made.rsc, "2001",
+    `nct 3 is valid with net 3 whichever way it is written: ${made.raw.slice(0, 200)}`);
+
+  const { retrieve } = require("./helpers/onem2m");
+  assert.equal((await retrieve(srv.baseUrl, `${root.sid}/${cnt}/${sub}`)).body["m2m:sub"].nct, 3,
+    "and it is stored as the number");
+});

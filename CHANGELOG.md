@@ -21,6 +21,23 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.4 (2026-09-03)
+
+**Why PATCH**: a bug fix. No capability, no migration.
+
+### Fixed: a `notificationContentType` sent as a string was refused for the wrong reason
+
+`{"nct": "3"}` with `{"net": [3]}` was rejected with *"notificationContentType 3 is not valid with
+notificationEventType 3"* — a combination table 9.6.8-4 explicitly allows. The combination check
+runs against the request body rather than the Joi-validated copy, and Joi converts, so the check
+saw the string `"3"` while every comparison in it is strict. The same value reached storage as a
+string and became `3` in an `INTEGER` column, so the resource would have been right and only the
+gate disagreed.
+
+A oneM2M JSON body should carry this as a number. The CSE already accepted the string everywhere
+else, though, and one place holding a different opinion about the same request is worse than either
+answer.
+
 ## v4.24.3 (2026-09-03)
 
 **Why PATCH**: a bug fix. No capability, no migration.
