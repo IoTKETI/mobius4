@@ -21,6 +21,39 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.22.2
+
+### Required only if you create `<subscription>` resources with `notificationContentType`
+
+**Two combinations that used to be accepted are now refused with `4000`.**
+
+`TS-0001:9.6.8` table 9.6.8-4 says which content types each event type allows. Only the `net=8` row
+was checked before; the rest were accepted and then ignored, so a subscription with an invalid pair
+has been running without the content type doing anything. Check yours:
+
+| `notificationEventType` | allowed `notificationContentType` |
+| :--- | :--- |
+| 1 (update) | 1 All Attributes, 2 Modified Attributes, 3 ResourceID |
+| 2, 3, 4 (delete, child create, child delete) | 1 All Attributes, 3 ResourceID |
+| 8 (missing data) | 5 TimeSeries notification |
+
+A subscription asking for more than one event type needs a content type valid for all of them.
+
+### What arrives changes, for two content types
+
+`nct=2` now sends the attributes that **changed**, not the ones the request named — so a
+notification that used to carry only `lbl` now also carries `lt`, and `st` on the types that have
+one. `nct=3` now sends `{"m2m:uri": "..."}` instead of the whole resource; a client that was
+reading the resource out of an `nct=3` notification was getting something the specification does
+not promise, and needs updating.
+
+Notifications for `nct=2` (and `nct=5`) now also carry `subscribedTo`.
+
+### Nothing to do otherwise
+
+`?atrl=` partial retrieve now returns only the attributes named, which is what it always claimed
+to do. A forwarded DELETE no longer carries an empty body.
+
 ## v4.22.1
 
 **Nothing to do**, but read this if you forward requests between CSEs.

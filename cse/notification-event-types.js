@@ -55,18 +55,57 @@ function unimplemented_net(enc) {
     return enc.net.filter(v => DEFINED_NET.has(v) && !IMPLEMENTED_NET.has(v));
 }
 
-// notificationContentType 5, "TimeSeries notification".
-const NCT_TIMESERIES = 5;
+// notificationContentType, TS-0001:9.6.8 table 9.6.8-4 and CDT-enumerationTypes.xsd:967.
+const NCT = Object.freeze({ ALL: 1, MODIFIED: 2, RESOURCE_ID: 3, TRIGGER: 4, TIMESERIES: 5 });
+
+// Which notificationContentType each notificationEventType allows, and which it defaults to.
+//
+// Table 9.6.8-4 is a grid of "valid", "valid (default)" and "n/a", and n/a means the combination
+// is not a thing -- "ResourceID" says nothing for a TimeSeries notification, and "Modified
+// Attributes" says nothing about a resource that was deleted. Written out here rather than
+// checked case by case, because the shape that matters is the whole grid: net=8 was the only
+// combination anyone had looked at, and every other invalid pair was accepted and then ignored.
+//
+// net 5, 6 and 7 are in the table because the table has them. This CSE does not implement them and
+// unimplemented_net refuses them first, so these rows are unreachable today and are here so that
+// implementing one does not also mean rediscovering its content types.
+const NCT_BY_NET = Object.freeze({
+    1: { allowed: [NCT.ALL, NCT.MODIFIED, NCT.RESOURCE_ID], default: NCT.ALL },
+    2: { allowed: [NCT.ALL, NCT.RESOURCE_ID], default: NCT.ALL },
+    3: { allowed: [NCT.ALL, NCT.RESOURCE_ID], default: NCT.ALL },
+    4: { allowed: [NCT.ALL, NCT.RESOURCE_ID], default: NCT.ALL },
+    5: { allowed: [NCT.ALL, NCT.RESOURCE_ID], default: NCT.ALL },
+    6: { allowed: [NCT.TRIGGER], default: NCT.TRIGGER },
+    7: { allowed: [NCT.MODIFIED], default: NCT.MODIFIED },
+    8: { allowed: [NCT.TIMESERIES], default: NCT.TIMESERIES },
+});
+
+// TS-0004:7.5.1.2.2 step 2.1: subscribedTo carries the subscribed-to resource's ID "if
+// notificationContentType is set to one of Modified Attributes, Trigger Payload or TimeSeries
+// notification. Otherwise, the subscribedTo attribute shall not be present." Both halves are
+// requirements -- sending it always would be as wrong as never sending it.
+function notification_carries_subscribed_to(nct) {
+    return nct === NCT.MODIFIED || nct === NCT.TRIGGER || nct === NCT.TIMESERIES;
+}
+
+// The effective notificationContentType of a subscription: what it set, or the default for the
+// event type it asked for.
+function effective_nct(enc, nct) {
+    if (nct !== undefined && nct !== null) return nct;
+    const net = enc && Array.isArray(enc.net) ? enc.net : [1];
+    const row = NCT_BY_NET[net[0]];
+    return row ? row.default : NCT.ALL;
+}
 
 // The rules that tie notificationEventType, notificationContentType and the subscribed-to resource
-// together for net=8. Returns a message, or null when the combination is allowed.
+// together. Returns a message, or null when the combination is allowed.
 //
 //   TS-0001:9.6.8 table 9.6.8-3, notificationEventType row: value H "shall not be combined with
 //   any other notificationEventType value".
 //
-//   TS-0001:9.6.8 table 9.6.8-4: for H the only valid notificationContentType is "TimeSeries
-//   notification", and it is the default. Every other net marks that value n/a, so nct=5 outside
-//   net=8 is equally invalid.
+//   Table 9.6.8-4: the grid above. A notificationContentType has to be valid for *every*
+//   notificationEventType the subscription asks for -- a notification is generated per event, and
+//   one the CSE could not render is not made acceptable by another that it could.
 //
 //   TS-0001:9.6.8 table 9.6.8-3, missingData row: the condition "only applies to subscribed-to
 //   resources of type <timeSeries>". The clause does not say to refuse a subscription on any other
@@ -81,12 +120,16 @@ function net_combination_error(enc, nct, parent_ty) {
     if (reports_missing_data && net.length > 1) {
         return 'notificationEventType 8 cannot be combined with any other notificationEventType value';
     }
-    if (reports_missing_data && nct !== undefined && nct !== null && nct !== NCT_TIMESERIES) {
-        return `notificationEventType 8 requires notificationContentType ${NCT_TIMESERIES}, got ${nct}`;
+
+    if (nct !== undefined && nct !== null) {
+        for (const value of net) {
+            const row = NCT_BY_NET[value];
+            if (row && !row.allowed.includes(nct)) {
+                return `notificationContentType ${nct} is not valid with notificationEventType ${value}`;
+            }
+        }
     }
-    if (nct === NCT_TIMESERIES && !reports_missing_data) {
-        return `notificationContentType ${NCT_TIMESERIES} is only valid with notificationEventType 8`;
-    }
+
     if (reports_missing_data && parent_ty !== undefined && Number(parent_ty) !== 29) {
         return 'notificationEventType 8 requires the subscribed-to resource to be a <timeSeries>';
     }
@@ -94,6 +137,7 @@ function net_combination_error(enc, nct, parent_ty) {
 }
 
 module.exports = {
-    DEFINED_NET, IMPLEMENTED_NET, NCT_TIMESERIES,
+    DEFINED_NET, IMPLEMENTED_NET, NCT, NCT_BY_NET,
     undefined_net, unimplemented_net, net_combination_error,
+    effective_nct, notification_carries_subscribed_to,
 };

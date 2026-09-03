@@ -9,6 +9,7 @@ const AE = require('../models/ae-model');
 const Lookup = require('../models/lookup-model');
 const { not_obsolete_where } = require('./utils');
 const { comparison_conditions_match, resource_of } = require('./enc-conditions');
+const { NCT, effective_nct, notification_carries_subscribed_to } = require('./notification-event-types');
 
 
 // supported notificationEventType (net) = {
@@ -51,7 +52,78 @@ function attribute_condition_matches(enc, req_prim) {
     return updated_attribute_names(req_prim).some(name => enc.atr.includes(name));
 }
 
-async function check_and_send_noti(req_prim, resp_prim, event_type) {
+// The attributes that actually changed, as a partial resource.
+//
+// TS-0004:7.5.1.2.2 step 2.1: with notificationContentType "Modified Attributes" the notification
+// "shall include the partial resource containing modified attribute(s) only". Modified, not
+// requested -- and the two are different on every UPDATE this CSE performs. Updating an <AE>'s
+// labels also moves its lastModifiedTime; updating a <container> moves stateTag as well; and an
+// attribute the request never mentioned can change because something else did it. Sending back
+// only what the Originator asked to change reported a resource state that never existed.
+//
+// So it is a comparison of the representation before the operation with the one after, which also
+// covers the indirect cases without having to enumerate them.
+//
+// An attribute that is gone afterwards is reported as null, the same way an UPDATE asks for its
+// removal. The clause does not say how a partial resource spells a deletion, and omitting it would
+// make "removed" indistinguishable from "unchanged".
+function modified_attributes(before_pc, after_pc) {
+    const after = resource_of(after_pc);
+    if (!after) return after_pc;
+    const before = resource_of(before_pc) || {};
+    const key = Object.keys(after_pc)[0];
+
+    const changed = {};
+    for (const [name, value] of Object.entries(after)) {
+        if (JSON.stringify(before[name]) !== JSON.stringify(value)) changed[name] = value;
+    }
+    for (const name of Object.keys(before)) {
+        if (!Object.hasOwn(after, name)) changed[name] = null;
+    }
+    return { [key]: changed };
+}
+
+// The structured ID of the subscribed-to resource. A <subscription>'s own sid is that resource's
+// sid with the subscription's resourceName appended, so it is already here and needs no query.
+function subscribed_to_sid(sub_res) {
+    const sid = sub_res.sid || '';
+    const cut = sid.lastIndexOf('/');
+    return cut === -1 ? sid : sid.slice(0, cut);
+}
+
+// The notification content for one subscription, per its notificationContentType.
+//
+// `subject_sid` is the structured ID of the resource the notification is about: the subscribed-to
+// resource for net=1 and net=2, the child for net=3 and net=4.
+function notification_content(nct, { full_pc, before_pc, requested_pc, subject_sid }) {
+    switch (nct) {
+        case NCT.MODIFIED:
+            // before_pc is absent when no subscriber needed it at the time the operation ran --
+            // the snapshot is only taken when one does. Falling back to what was requested is what
+            // this used to do always, and is closer than sending everything.
+            return before_pc ? modified_attributes(before_pc, full_pc) : (requested_pc || full_pc);
+        case NCT.RESOURCE_ID:
+            // "the Notify request primitive shall include the URI of the resource"
+            // (TS-0004:7.5.1.2.2 step 2.1).
+            return { 'm2m:uri': subject_sid };
+        default:
+            return full_pc;
+    }
+}
+
+// Does anything subscribed to this resource need to know which attributes changed?
+//
+// Asked before an UPDATE runs, because "modified attributes" can only be worked out by comparing
+// the representation before with the one after, and afterwards the before is gone. The answer is
+// almost always no, and the cost of asking is one indexed count on a table the notification path
+// reads anyway -- which is the point of asking rather than snapshotting unconditionally.
+async function wants_modified_attributes(res_ri) {
+    if (!res_ri) return false;
+    const n = await SUB.count({ where: { pi: res_ri, nct: 2, ...not_obsolete_where() } });
+    return n > 0;
+}
+
+async function check_and_send_noti(req_prim, resp_prim, event_type, before_pc = null) {
     const sub_res_pi = req_prim.ri;
 
     // Fire this SELECT off first (it is awaited further down). hostingCSE.delete_a_res runs the
@@ -112,18 +184,31 @@ async function check_and_send_noti(req_prim, resp_prim, event_type) {
 
         if (!comparison_conditions_match(sub.enc, event_res)) return;
 
+        const nct = effective_nct(sub.enc, sub.nct);
+        const own_sid = subscribed_to_sid(sub);
+        // For a child event the notification is about the child, so its structured ID is the
+        // subscribed-to resource's plus the child's resourceName.
+        const child_rn = event_res && event_res.rn;
+        const child_sid = child_rn ? `${own_sid}/${child_rn}` : own_sid;
+
         if (sub.enc.net.includes(3) && event_type === 'create') {
             const this_ty = req_prim.ty;
             if (!sub.enc.chty || sub.enc.chty.includes(this_ty)) {
-                await send_a_noti(sub, resp_prim.pc, 3, ae_poa_map);
+                await send_a_noti(sub, notification_content(nct, {
+                    full_pc: resp_prim.pc, subject_sid: child_sid,
+                }), 3, ae_poa_map);
             }
         } else if (sub.enc.net.includes(1) && event_type === 'update') {
             if (attribute_condition_matches(sub.enc, req_prim)) {
-                const pc = sub.nct === 2 ? req_prim.pc : resp_prim.pc;
-                await send_a_noti(sub, pc, 1, ae_poa_map);
+                await send_a_noti(sub, notification_content(nct, {
+                    full_pc: resp_prim.pc, before_pc, requested_pc: req_prim.pc,
+                    subject_sid: own_sid,
+                }), 1, ae_poa_map);
             }
         } else if (sub.enc.net.includes(2) && event_type === 'delete') {
-            await send_a_noti(sub, resp_prim.pc, 2, ae_poa_map);
+            await send_a_noti(sub, notification_content(nct, {
+                full_pc: resp_prim.pc, subject_sid: own_sid,
+            }), 2, ae_poa_map);
         }
     }));
 
@@ -161,7 +246,12 @@ async function notify_parent_of_child_deletion(deleted_pc, deleted_ty) {
     if (targets.length === 0) return false;
 
     const ae_poa_map = await prefetch_ae_poa(targets);
-    await Promise.all(targets.map(sub => send_a_noti(sub, deleted_pc, 4, ae_poa_map)));
+    await Promise.all(targets.map((sub) => {
+        const nct = effective_nct(sub.enc, sub.nct);
+        const own_sid = subscribed_to_sid(sub);
+        const subject_sid = deleted_res && deleted_res.rn ? `${own_sid}/${deleted_res.rn}` : own_sid;
+        return send_a_noti(sub, notification_content(nct, { full_pc: deleted_pc, subject_sid }), 4, ae_poa_map);
+    }));
     return true;
 }
 
@@ -225,6 +315,16 @@ async function send_a_noti(sub_res, event_obj, notificationEventType, ae_poa_map
             sur: sub_res.sid,
         },
     };
+
+    // TS-0004:7.5.1.2.2 step 2.1: subscribedTo carries the subscribed-to resource's ID "if
+    // notificationContentType is set to one of Modified Attributes, Trigger Payload or TimeSeries
+    // notification. Otherwise, the subscribedTo attribute shall not be present." Both halves are
+    // requirements, which is why this is a condition rather than always setting it: with a partial
+    // resource or a timeSeriesNotification the payload does not say which resource it is about,
+    // and with a full representation it does.
+    if (notification_carries_subscribed_to(effective_nct(sub_res.enc, sub_res.nct))) {
+        sgn["m2m:sgn"].sut = subscribed_to_sid(sub_res);
+    }
 
     // TS-0004:7.5.1.2.2 step 2.1 (repeated in 7.5.1.2.3/.4/.19/.20): "if the <subscription>
     // resource instance has the creator attribute, the Originator shall set the creator element
@@ -444,7 +544,8 @@ function batch_noti_data(dsp_ri,data) {
     logger.trace({ dsp_ri, batchSize: Object.keys(batch_data[dsp_ri]).length }, 'batch data updated');
 }
 
-module.exports = { 
+module.exports = {
+    wants_modified_attributes, 
     check_and_send_noti, 
     send_sub_del_noti,
     self_noti_handler,

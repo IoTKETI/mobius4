@@ -2,8 +2,8 @@
   "formatVersion": 1,
   "probed_at": "2026-09-03",
   "probed_against": {
-    "commit": "d50a278",
-    "version": "4.22.1"
+    "commit": "1dfe797",
+    "version": "4.22.2"
   },
   "entries": [
     {

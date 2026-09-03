@@ -25,6 +25,9 @@ const http = require("node:http");
 async function startFakeCse({ rsc = "2000", status = 200, body = { "m2m:cnt": { rn: "x" } } } = {}) {
   const received = [];
   const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => { received[received.length - 1].body = raw; });
     received.push({ method: req.method, url: req.url, origin: req.headers["x-m2m-origin"],
                     ri: req.headers["x-m2m-ri"], headers: req.headers });
     res.setHeader("X-M2M-RSC", rsc);
@@ -215,4 +218,21 @@ test("an error status from the remote CSE does not take the Request Identifier w
 
   assert.equal(resp.rsc, 4004);
   assert.equal(resp.rqi, "client-43");
+});
+
+test("a forwarded DELETE carries no body", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const remote = await startFakeCse({ rsc: "2002", status: 200, body: {} });
+  t.after(() => remote.stop());
+
+  // Content is 0..1 in a request primitive (TS-0004:6.4.1), and a DELETE has none. express.json()
+  // hands back {} for a request with no body and {} is truthy, so every bodyless request arrived
+  // with an empty Content attached and forwarding then sent "{}" on to the next CSE.
+  await forward_to_poa([remote.url], { op: 4, fr: "Sabc", rqi: "d1", rvi: "3" }, "/reg-b/Mobius/x", {});
+
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(remote.received[0].method, "DELETE");
+  assert.ok(!remote.received[0].body, `a DELETE must not carry a body, got ${JSON.stringify(remote.received[0].body)}`);
+  assert.ok(!("content-length" in remote.received[0].headers) || remote.received[0].headers["content-length"] === "0",
+    `content-length: ${remote.received[0].headers["content-length"]}`);
 });

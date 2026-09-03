@@ -745,6 +745,21 @@ async function update_a_res(req_prim, resp_prim) {
 		return;
 	}
 
+	// "Modified Attributes" means the attributes that changed, not the ones the request named
+	// (TS-0004:7.5.1.2.2 step 2.1), and the difference is every UPDATE this CSE performs: lt always
+	// moves, st moves on the types that have one, and anything else may have been changed by
+	// another path. Working that out needs the representation as it stands now, so the snapshot is
+	// taken before the handler runs -- afterwards there is nothing to compare against.
+	//
+	// Only when a subscriber actually asked for it. The check is one indexed count against a table
+	// the notification path reads regardless.
+	let before_pc = null;
+	if (await noti.wants_modified_attributes(req_prim.ri)) {
+		const before_resp = {};
+		await retrieve_a_res(req_prim, before_resp);
+		before_pc = before_resp.pc;
+	}
+
 	switch (req_prim.to_ty) {
 		case 1:
 			await acp.update_an_acp(req_prim, resp_prim);
@@ -798,7 +813,7 @@ async function update_a_res(req_prim, resp_prim) {
 		resp_prim.rsc = enums.rsc_str["UPDATED"];
 
 		// after update, check and send notification(s) if needed
-		noti.check_and_send_noti(req_prim, resp_prim, "update")
+		noti.check_and_send_noti(req_prim, resp_prim, "update", before_pc)
 			.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 	}
 

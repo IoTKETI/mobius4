@@ -656,7 +656,19 @@ function httpToPrim(http_req) {
   }
 
   try {
-    if (http_req.body) prim.pc = http_req.body;
+    // Only when there is something in it. express.json() hands back {} for a request with no body
+    // at all, and {} is truthy -- so every GET and DELETE arrived carrying an empty Content, which
+    // then travelled with the primitive. Two things came of that: a forwarded DELETE was sent to
+    // the next CSE with "{}" as its body, and the atrl partial-retrieve assignment a few lines
+    // above (prim.pc = { atrl }) was overwritten by it, so ?atrl=... silently returned the whole
+    // resource.
+    //
+    // Content is 0..1 in a request primitive (TS-0004:6.4.1). Absent is the correct spelling of
+    // "no content"; an empty object is a content that says nothing.
+    const body = http_req.body;
+    const has_content = body !== undefined && body !== null &&
+        (typeof body !== 'object' || Array.isArray(body) ? true : Object.keys(body).length > 0);
+    if (has_content) prim.pc = body;
   } catch {
     prim.parsingError = "HTTP body parsing error";
     return prim;

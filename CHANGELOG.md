@@ -21,6 +21,64 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.2 (2026-09-03)
+
+**Why PATCH**: bug fixes that add no capability — `notificationContentType` was already a
+subscription attribute, it just did not do what it says. **Two of these refuse requests that used
+to be accepted**, which is unusual for a PATCH and is called out in
+[docs/upgrading.md](docs/upgrading.md#v4222); in both cases the request was being accepted and then
+ignored, so nothing that worked stops working.
+
+### Fixed: "Modified Attributes" sent the requested attributes, not the modified ones
+
+`TS-0004:7.5.1.2.2` step 2.1: the notification "shall include the partial resource containing
+**modified attribute(s) only**". It was sending the UPDATE request body back — which is what the
+Originator asked to change, not what changed. Every UPDATE also moves `lastModifiedTime`, a
+`<container>` UPDATE moves `stateTag`, and an attribute the request never mentioned can change
+because something else changed it. The notification described a resource state that never existed.
+
+It is now the difference between the representation before the operation and the one after, so the
+indirect cases are covered without enumerating them. An attribute that is gone afterwards is
+reported as `null`.
+
+The snapshot that makes this possible is only taken when a subscriber has actually asked for
+modified attributes — one indexed count against a table the notification path reads anyway.
+
+### Fixed: "ResourceID" sent the whole resource
+
+`nct=3` is valid for `net=1` through `net=5` and was accepted and ignored, so a subscriber that
+asked for an identifier got the payload it was trying to avoid. It now sends
+`{"m2m:uri": "<structured ID>"}` — of the child, for a child event.
+
+### Fixed: `subscribedTo` was never sent
+
+Step 2.1 again: `subscribedTo` "shall contain the resource ID of the subscribed-to resource" when
+`notificationContentType` is Modified Attributes, Trigger Payload or TimeSeries notification, and
+"shall not be present" otherwise. Both halves are requirements. It was absent from every
+notification, including the `net=8` ones added in v4.20.0.
+
+### Changed: an invalid `notificationContentType` for the event type is refused
+
+`TS-0001:9.6.8` table 9.6.8-4 is a grid of which content types each event type allows. Only the
+`net=8` row was ever checked; every other invalid pair — `nct=2` with `net=3`, `nct=4` with
+`net=1` — was accepted and then ignored. The whole grid is now enforced, including net 5, 6 and 7,
+which this CSE refuses earlier for other reasons.
+
+### Fixed: a request with no body carried an empty Content
+
+`express.json()` hands back `{}` for a request with no body, and `{}` is truthy, so every GET and
+DELETE arrived with an empty Content attached to its request primitive. Content is 0..1
+(`TS-0004:6.4.1`) and absent is how "no content" is spelled.
+
+Two consequences, both gone:
+
+- **A forwarded DELETE was sent to the next CSE with `{}` as its body.** This is a request-primitive
+  problem, not an HTTP one — the empty Content travelled with the primitive, so the MQTT forwarding
+  path carried it too.
+- **`?atrl=...` never worked.** The binding sets `pc = { atrl }` from the query string and the empty
+  body was then assigned over it, so a partial retrieve returned the whole resource with a `2000`
+  and nothing said the parameter had been ignored.
+
 ## v4.22.1 (2026-09-03)
 
 **Why PATCH**: bug fixes that add no capability. Forwarding worked; what it sent was wrong in ways
