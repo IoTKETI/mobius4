@@ -78,3 +78,53 @@ test("the URL rule is the one cse/noti.js applies, coap included", () => {
     assert.equal(is_resource_id_target(nu), !noti_treats_as_url(nu), nu);
   }
 });
+
+test("an ordinary notification is not treated as a verification request", async () => {
+  // The receive path answers 2000 to every NOTIFY today. Whatever this adds must not change
+  // that for a normal notification -- every existing subscription depends on it.
+  const { handle_verification } = require("../cse/subscription-verification");
+  const resp = {};
+  const handled = await handle_verification(
+    { op: 5, fr: "/CSE1/AE1", to: "Mobius/ae1", pc: { "m2m:sgn": { nev: { rep: {}, net: 3 } } } }, resp);
+  assert.equal(handled, false);
+  assert.deepEqual(resp, {}, "an untouched response must be left for the normal path");
+});
+
+test("a verification request with no creator is refused 4000", async () => {
+  // TS-0004:7.5.1.2.3 has the sender set creator to "the Originator ID of the subscription
+  // creation request". Without it the receiver has nobody to check, so the request is malformed
+  // rather than unauthorised.
+  const { handle_verification } = require("../cse/subscription-verification");
+  const resp = {};
+  const handled = await handle_verification(
+    { op: 5, fr: "/CSE1", to: "Mobius/ae1", pc: { "m2m:sgn": { vrq: true } } }, resp);
+  assert.equal(handled, true);
+  assert.equal(resp.rsc, 4000);
+});
+
+test("a NOTIFY that is not a verification request still answers 2000", async () => {
+  // The whole receive path, not the module -- what would break a deployment is the wiring,
+  // not the predicate.
+  const { startServer } = require("./helpers/server");
+  const { startSink } = require("./helpers/noti-sink");
+  const { ADMIN } = require("./helpers/onem2m");
+  const srv = await startServer();
+  try {
+    const r = await fetch(`${srv.baseUrl}/Mobius`, {
+      method: "POST",
+      headers: {
+        // The default <CSEBase> ACP does not grant NOTIFY (acop bit 16) to 'all' originators --
+        // only create/retrieve/update/discovery (db/init.js create_default_acp). An arbitrary
+        // unregistered origin gets 4103 here before this task's code is ever reached, which is
+        // what "Cverif-probe" from the plan actually measured. Using ADMIN isolates the check
+        // to the wiring this task adds.
+        "X-M2M-Origin": ADMIN, "X-M2M-RI": "v1", "X-M2M-RVI": "4",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ "m2m:sgn": { nev: { rep: { "m2m:cin": { con: 1 } }, net: 3 }, sur: "x" } }),
+    });
+    assert.equal(r.headers.get("x-m2m-rsc"), "2000");
+  } finally {
+    await srv.stop();
+  }
+});

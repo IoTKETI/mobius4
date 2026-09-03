@@ -352,9 +352,16 @@ async function prim_handling(req_prim) {
         break;
 
       // NOTIFY
-      case 5:
+      case 5: {
+        // A verification request is a NOTIFY that carries verificationRequest instead of a
+        // notificationEvent (CDT-notification.xsd makes vrq and nev siblings). Until now every
+        // NOTIFY was answered OK without the payload being looked at, so a verification request
+        // was accepted no matter what it said.
+        const { handle_verification } = require('./subscription-verification');
+        if (await handle_verification(req_prim, resp_prim)) break;
         resp_prim.rsc = enums.rsc_str["OK"];
         break;
+      }
     }
   }
 

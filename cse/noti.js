@@ -483,8 +483,17 @@ async function get_urls_from_poa(res_id) {
 function self_noti_handler(topic, req_prim) {
     logger.debug({ topic }, 'self notification received');
 
-    const res = req_prim.pc['m2m:sgn'].nev.rep;
-    const sub_rn = req_prim.pc['m2m:sgn'].sur.split('/').pop();
+    // Reached only from bindings/mqtt.js for internal `self/...` topics, so a verification
+    // request cannot arrive here today. Guarded anyway: the read below assumes both nev and sur,
+    // and CDT-notification.xsd allows a notification with neither.
+    const sgn = req_prim.pc && req_prim.pc['m2m:sgn'];
+    if (!sgn || !sgn.nev || !sgn.sur) {
+        logger.debug({ topic }, 'self notification without nev/sur ignored');
+        return;
+    }
+
+    const res = sgn.nev.rep;
+    const sub_rn = sgn.sur.split('/').pop();
     const dsp_ri = sub_rn.split('sub-live-dataset-')[1];
 
     // self notification to create live dataset

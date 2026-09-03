@@ -54,4 +54,59 @@ function verification_enabled() {
     return config.cse.subscription_verification === true;
 }
 
-module.exports = { is_resource_id_target, verification_targets, verification_enabled };
+// TS-0004:7.5.1.2.3, receiver side: "The Receiver shall check if the creator of the
+// <subscription> resource and the Originator have the privilege to receive NOTIFY requests to
+// the notificationURI. If the creator does not, the Receiver shall respond with
+// SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE; if the Originator does not, with
+// SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE; otherwise a successful response."
+//
+// Returns true when this took over the response, false when the caller should carry on with the
+// ordinary notification path. Written as a takeover rather than a branch in reqPrim so that the
+// two callers (HTTP and MQTT) cannot drift apart.
+async function handle_verification(req_prim, resp_prim) {
+    const sgn = req_prim.pc && req_prim.pc["m2m:sgn"];
+    if (!sgn || sgn.vrq !== true) return false;
+
+    const enums = require("../config/enums");
+    const logger = require("../logger");
+
+    if (!sgn.cr) {
+        resp_prim.rsc = enums.rsc_str["BAD_REQUEST"];
+        resp_prim.pc = { "m2m:dbg": "a verification request must carry creator" };
+        return true;
+    }
+
+    const { access_decision } = require("./hostingCSE");
+    const NOTIFY = 5;
+
+    // Two checks, two status codes -- the clause distinguishes them, and a tester reads the
+    // difference to tell which side is misconfigured.
+    const creator_ok = await access_decision(
+        { ri: req_prim.ri, op: NOTIFY, fr: sgn.cr, to: req_prim.to }, {});
+    if (creator_ok === false) {
+        resp_prim.rsc = enums.rsc_str["SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE"];
+        resp_prim.pc = { "m2m:dbg": "the subscription creator has no NOTIFY privilege for this target" };
+        logger.info({ cr: sgn.cr, to: req_prim.to }, "subscription verification refused: creator");
+        return true;
+    }
+
+    const host_ok = await access_decision(
+        { ri: req_prim.ri, op: NOTIFY, fr: req_prim.fr, to: req_prim.to }, {});
+    if (host_ok === false) {
+        resp_prim.rsc = enums.rsc_str["SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE"];
+        resp_prim.pc = { "m2m:dbg": "the subscription host has no NOTIFY privilege for this target" };
+        logger.info({ fr: req_prim.fr, to: req_prim.to }, "subscription verification refused: host");
+        return true;
+    }
+
+    resp_prim.rsc = enums.rsc_str["OK"];
+    logger.debug({ cr: sgn.cr, fr: req_prim.fr, to: req_prim.to }, "subscription verification accepted");
+    return true;
+}
+
+module.exports = {
+    is_resource_id_target,
+    verification_targets,
+    verification_enabled,
+    handle_verification,
+};
