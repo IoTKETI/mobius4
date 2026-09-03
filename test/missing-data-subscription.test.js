@@ -133,7 +133,7 @@ test("the notification is a timeSeriesNotification, not a <timeSeries> represent
 
 let srv, base, root, sink;
 const SWEEP_SECONDS = 1;
-const DETECTING = { pei: 2, peid: 0, mdt: 1, mdd: true };
+const DETECTING = { pei: 2000, peid: 0, mdt: 1000, mdd: true };
 const MD = { num: 2, dur: "PT1H" };
 
 before(async () => {

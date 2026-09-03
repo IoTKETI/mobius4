@@ -129,7 +129,9 @@ async function report_missing_data({ ts_ri, missing, mdt, peid, send_a_noti, pre
     // (TS-0001:10.2.4.29). mdt is optional, and an omitted one used to be read as 0 here while
     // the sweep that produced these points read it as the deployment default -- the same absent
     // attribute meaning two different instants. effective_mdt is now the single answer.
-    const detect_delay = effective_mdt(mdt, peid ?? config.default.timeSeries.peid_default);
+    // effective_mdt answers in the attribute's unit, milliseconds; detection_s below is in epoch
+    // seconds.
+    const detect_delay = effective_mdt(mdt, peid ?? config.default.timeSeries.peid_default) / 1000;
     const detections = missing
         .map((dgt) => ({ dgt, detection_s: to_epoch_seconds(dgt) + detect_delay }))
         .sort((a, b) => a.detection_s - b.detection_s);

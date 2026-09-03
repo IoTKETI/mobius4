@@ -562,26 +562,30 @@ missing data detection time = expected dataGenerationTime + missingDataDetectTim
 ```
 
 `missingDataDetectTimer` (`mdt`) is optional and the standard gives it no default, so mobius4
-supplies one: `default.timeSeries.mdt_default`, **60 seconds** as shipped. A `<timeSeries>` with
-`periodicInterval: 10` therefore reports nothing for a full minute after a gap — the gap is real
-and will be listed, just not yet.
+supplies one: `default.timeSeries.mdt_default`, **60000 ms** as shipped. A `<timeSeries>` with
+`periodicInterval: 10000` (ten seconds) therefore reports nothing for a full minute after a gap —
+the gap is real and will be listed, just not yet.
 
 Either set `mdt` on the resource, which is the direct control:
 
 ```json
-{"m2m:ts": {"rn": "ts1", "pei": 10, "peid": 0, "mdt": 2, "mdd": true}}
+{"m2m:ts": {"rn": "ts1", "pei": 10000, "peid": 0, "mdt": 2000, "mdd": true}}
 ```
 
 or lower the deployment default in `config/local.json`:
 
 ```json
-{"default": {"timeSeries": {"mdt_default": 2}}}
+{"default": {"timeSeries": {"mdt_default": 2000}}}
 ```
 
 `mdt` must be greater than `periodicIntervalDelta` when that is present (`TS-0001:9.6.36`).
 mobius4 enforces this on a value you supply, and raises the deployment default to
 `periodicIntervalDelta + 1` when it would otherwise be too small — so the constraint holds either
-way. `pei`, `peid` and `mdt` are all **in seconds**.
+way. `pei`, `peid` and `mdt` are all **in milliseconds**. `TS-0001:9.6.36` types them as
+`xs:positiveInteger` and states no unit; this is what a conformance tester's own arithmetic
+requires, and mobius4 read them as seconds until v4.23.0. A period below one second cannot be
+represented in `missingDataList`, whose entries are `m2m:timestamp` values with one-second
+resolution.
 
 **2. Nothing is being detected at all.** Detection runs only when `missingDataDetect` is `true`
 *and* `periodicInterval` is set (`TS-0001:10.2.4.21`). `mdd` defaults to `false`, so a

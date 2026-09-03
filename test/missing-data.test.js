@@ -16,7 +16,7 @@ const { detect_missing, apply_missing } = require("../cse/missing-data");
 test("no missing points when every expected instance is present", () => {
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100100", "20260815T100200"],
     now: "20260815T100300",
     from_n: null,
@@ -28,7 +28,7 @@ test("a gap in the middle is reported at its expected dataGenerationTime", () =>
   // 10:01:00 never arrived. Its detection time is 10:01:30, which has passed at 10:03:00.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100200"],
     now: "20260815T100300",
     from_n: null,
@@ -41,7 +41,7 @@ test("an instance inside +/- periodicIntervalDelta counts as present", () => {
   // detection time (10:01:30) has passed — keeping this test to the single point under test.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100104"],
     now: "20260815T100200",
     from_n: null,
@@ -54,7 +54,7 @@ test("an instance outside the delta does not count as present", () => {
   // 10:02:00 so only that one point's detection time (10:01:30) has passed.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100109"],
     now: "20260815T100200",
     from_n: null,
@@ -66,7 +66,7 @@ test("a point whose detection time has not arrived yet is not yet missing", () =
   // At 10:01:10 the 10:01:00 point's detection time (10:01:30) has not passed.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100110",
     from_n: null,
@@ -80,7 +80,7 @@ test("watermark does not go negative when now is before the first detection time
   // compute first_n < 1 and re-examine N=0 (the anchor point, which by definition already exists).
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100005",
     from_n: null,
@@ -92,7 +92,7 @@ test("watermark does not go negative when now is before the first detection time
 test("results come back newest first", () => {
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100500",
     from_n: null,
@@ -105,7 +105,7 @@ test("results come back newest first", () => {
 test("the watermark makes a repeated sweep idempotent", () => {
   const args = {
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100300",
     from_n: null,
@@ -141,7 +141,7 @@ test("without mdn the list is unbounded", () => {
   assert.equal(r.mdc, 2);
 });
 
-// Boundary cases from TS-0001:10.2.4.29. The tests above land strictly inside (4s with peid: 5)
+// Boundary cases from TS-0001:10.2.4.29. The tests above land strictly inside (4s with peid: 5000)
 // or strictly outside (9s) the delta window, and use a `now` comfortably past or short of the
 // detection time. Neither ever lands exactly on a boundary, which is where interval arithmetic
 // like this tends to go wrong.
@@ -151,7 +151,7 @@ test("an instance exactly periodicIntervalDelta early counts as present (TS-0001
   // The clause defines the range as "expected +/- periodicIntervalDelta", which reads as inclusive.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100055"],
     now: "20260815T100200",
     from_n: null,
@@ -163,7 +163,7 @@ test("an instance exactly periodicIntervalDelta late counts as present (TS-0001:
   // 10:01:05 is exactly 5s after the expected 10:01:00, i.e. right at expected + periodicIntervalDelta.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000", "20260815T100105"],
     now: "20260815T100200",
     from_n: null,
@@ -176,7 +176,7 @@ test("a point is evaluated once the detection time exactly equals now (TS-0001:1
   // present near 10:01:00, so the point must show up as missing rather than being skipped.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100130",
     from_n: null,
@@ -189,7 +189,7 @@ test("a point is not yet evaluated one second before its detection time (TS-0001
   // Paired with the previous test: either one alone would pass against an off-by-one boundary.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: ["20260815T100000"],
     now: "20260815T100129",
     from_n: null,
@@ -202,7 +202,7 @@ test("every expected point is missing when no instance has ever arrived (TS-0001
   // detection times (10:01:30 and 10:02:30) have passed by now (10:03:00).
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: [],
     now: "20260815T100300",
     from_n: null,
@@ -214,7 +214,7 @@ test("an unparseable dataGenerationTime throws, naming the offending value", () 
   assert.throws(
     () => detect_missing({
       anchor: "20260815T100000",
-      pei: 60, peid: 5, mdt: 30,
+      pei: 60000, peid: 5000, mdt: 30000,
       present_dgts: ["garbage"],
       now: "20260815T100300",
       from_n: null,
@@ -238,7 +238,7 @@ test("a far-back anchor is bounded by max_points, and a second call resumes from
   const cap = 100;
 
   const first = detect_missing({
-    anchor, pei: 1, peid: 0, mdt: 0,
+    anchor, pei: 1000, peid: 0, mdt: 0,
     present_dgts: [],
     now,
     from_n: null,
@@ -248,7 +248,7 @@ test("a far-back anchor is bounded by max_points, and a second call resumes from
   assert.equal(first.watermark, cap);
 
   const second = detect_missing({
-    anchor, pei: 1, peid: 0, mdt: 0,
+    anchor, pei: 1000, peid: 0, mdt: 0,
     present_dgts: [],
     now,
     from_n: first.watermark,
@@ -269,7 +269,7 @@ test("max_points defaults from config when the caller does not pass one", () => 
   // (no max_points argument) still bounds it.
   const r = detect_missing({
     anchor: "20260101T000000",
-    pei: 1, peid: 0, mdt: 0,
+    pei: 1000, peid: 0, mdt: 0,
     present_dgts: [],
     now: "20260815T000000", // ~226 days later -- roughly 19.5 million seconds
     from_n: null,
@@ -282,8 +282,8 @@ test("max_points defaults from config when the caller does not pass one", () => 
 //
 // TS-0001:9.6.36: "If periodicIntervalDelta is present, the value of this attribute [mdt] shall
 // be greater than periodicIntervalDelta." cse/resources/ts.js only checks that when mdt is given
-// explicitly. pei:300/peid:150 is a legal configuration (peid <= pei/2) but larger than the flat
-// mdt_default of 60 -- an omitted mdt used to fall back to 60 regardless, producing a detection
+// explicitly. pei:300000/peid:150000 is a legal configuration (peid <= pei/2) but larger than the flat
+// mdt_default of 60000 ms -- an omitted mdt used to fall back to it regardless, producing a detection
 // time earlier than periodicIntervalDelta's window could close.
 
 test("an omitted mdt derives a default greater than the effective peid, so detection never fires before the window can close (finding 2, TS-0001:9.6.36)", () => {
@@ -292,7 +292,7 @@ test("an omitted mdt derives a default greater than the effective peid, so detec
   // peid=150 legitimately allows the instance until 10:07:30. now is exactly the old, wrong
   // detection time; a correct derived default must not have fired yet.
   const r = detect_missing({
-    anchor, pei: 300, peid: 150, mdt: undefined,
+    anchor, pei: 300000, peid: 150000, mdt: undefined,
     present_dgts: [anchor],
     now: "20260815T100600",
     from_n: null,
@@ -306,7 +306,7 @@ test("a late-but-in-window arrival clears the point once the derived default tim
   // window. now is past the derived detection time (expected 10:05:00 + derived timer 151s =
   // 10:07:31), so the point has been examined and must show up as present, not missing.
   const r = detect_missing({
-    anchor, pei: 300, peid: 150, mdt: undefined,
+    anchor, pei: 300000, peid: 150000, mdt: undefined,
     present_dgts: [anchor, "20260815T100640"],
     now: "20260815T100801",
     from_n: null,
@@ -319,7 +319,7 @@ test("an explicit mdt is used as-is, even below the derived default (finding 2)"
   // CREATE/UPDATE (cse/resources/ts.js), not silently raised here.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: [],
     now: "20260815T100130",
     from_n: null,
@@ -340,7 +340,7 @@ test("a point whose entire window predates the oldest surviving instance is skip
   // so a surviving instance this new proves eviction has already passed both points.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: [],
     oldest_surviving_dgt: "20260815T103000",
     now: "20260815T100300",
@@ -356,7 +356,7 @@ test("a point whose window overlaps the oldest surviving instance is still repor
   // genuine gap, same as without retention in play at all.
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: [],
     oldest_surviving_dgt: "20260815T100000",
     now: "20260815T100130",
@@ -368,7 +368,7 @@ test("a point whose window overlaps the oldest surviving instance is still repor
 test("without an oldest_surviving_dgt, missing detection behaves exactly as before retention-awareness (finding 3)", () => {
   const r = detect_missing({
     anchor: "20260815T100000",
-    pei: 60, peid: 5, mdt: 30,
+    pei: 60000, peid: 5000, mdt: 30000,
     present_dgts: [],
     oldest_surviving_dgt: null,
     now: "20260815T100130",

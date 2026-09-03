@@ -185,7 +185,7 @@ test("an omitted notificationContentType is stored as the default for its event 
 
   // net=8 needs a <timeSeries> parent, so it gets its own fixture rather than cntWithSub's.
   const ts = uniqueRn("ts");
-  await create(srv.baseUrl, root.sid, 29, { "m2m:ts": { rn: ts, pei: 2, peid: 0, mdt: 1, mdd: true } });
+  await create(srv.baseUrl, root.sid, 29, { "m2m:ts": { rn: ts, pei: 2000, peid: 0, mdt: 1000, mdd: true } });
   const sub = uniqueRn("s");
   const made = await create(srv.baseUrl, `${root.sid}/${ts}`, 23, {
     "m2m:sub": { rn: sub, nu: [sink.url], enc: { net: [8], md: { num: 2, dur: "PT1H" } } },

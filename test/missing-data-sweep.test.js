@@ -93,9 +93,9 @@ async function pollTs(sid, predicate, timeoutMs = 10000, atBase = null) {
   throw new Error(`timed out waiting for <ts> ${sid}; last seen ${JSON.stringify(last)}`);
 }
 
-// pei 2 / peid 0 / mdt 1 makes a gap detectable about three seconds after its expected time,
+// pei 2000ms / peid 0 / mdt 1000ms makes a gap detectable about three seconds after its expected
 // which the ten-second anchor offset guarantees has already elapsed.
-const DETECTING = { pei: 2, peid: 0, mdt: 1, mdd: true };
+const DETECTING = { pei: 2000, peid: 0, mdt: 1000, mdd: true };
 
 async function makeSeries(extra = {}) {
   const res = await create(base, root.sid, 29, {
@@ -170,13 +170,13 @@ test("TS-0001:10.2.4.23 Exceptions — editing a detection parameter while detec
   await create(base, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: ago(10), con: "1" } });
   const before = await pollTs(sid, (b) => b.mdc > 0);
 
-  const edited = await update(base, sid, { "m2m:ts": { pei: 300 } });
+  const edited = await update(base, sid, { "m2m:ts": { pei: 300000 } });
   assert.equal(edited.status, 400);
   assert.equal(edited.rsc, "4000"); // BAD_REQUEST
 
   const after = (await retrieve(base, sid)).body["m2m:ts"];
   assert.equal(after.mdd, true, "a refused update must not change mdd");
-  assert.equal(after.pei, 2, "a refused update must not change pei");
+  assert.equal(after.pei, 2000, "a refused update must not change pei");
   assert.equal(after.mdc, before.mdc, "a refused update must not clear the recorded state");
 });
 
@@ -185,7 +185,7 @@ test("TS-0001:10.2.4.23 Exceptions — a no-op resend of an unchanged detection 
   // attributes merely present in the request. Read-modify-write is an ordinary client pattern --
   // RETRIEVE, change something unrelated like lbl, PUT the whole resource back -- which echoes
   // pei/peid/mdt unchanged. That echo must not be refused as a modification.
-  const sid = await makeSeries(); // pei:2, peid:0, mdt:1, mdd:true
+  const sid = await makeSeries(); // pei:2000, peid:0, mdt:1000, mdd:true
   const before = (await retrieve(base, sid)).body["m2m:ts"];
 
   const resent = await update(base, sid, {
@@ -215,11 +215,11 @@ test("TS-0001:10.2.4.23 — editing a detection parameter while paused still cle
   const paused = await update(base, sid, { "m2m:ts": { mdd: false } });
   assert.equal(paused.body["m2m:ts"].mdd, false);
 
-  const edited = await update(base, sid, { "m2m:ts": { pei: 300 } });
+  const edited = await update(base, sid, { "m2m:ts": { pei: 300000 } });
   assert.equal(edited.status, 200);
   assert.equal(edited.body["m2m:ts"].mdd, false, "the edit must not itself resume detection");
   assert.equal(edited.body["m2m:ts"].mdc, 0);
-  assert.equal(edited.body["m2m:ts"].pei, 300);
+  assert.equal(edited.body["m2m:ts"].pei, 300000);
 });
 
 test("TS-0001:10.2.4.21 — detection runs only when pei is set and mdd is true", async () => {
@@ -229,7 +229,7 @@ test("TS-0001:10.2.4.21 — detection runs only when pei is set and mdd is true"
     "m2m:ts": { rn: uniqueRn("ts"), mdd: true },
   })).body["m2m:ts"].ri;
   const noMdd = (await create(base, root.sid, 29, {
-    "m2m:ts": { rn: uniqueRn("ts"), pei: 2, peid: 0, mdt: 1 },
+    "m2m:ts": { rn: uniqueRn("ts"), pei: 2000, peid: 0, mdt: 1000 },
   })).body["m2m:ts"].ri;
   // A correctly-configured control, given the same data as the two above. Without it, this test
   // proves nothing about the filter: it would pass identically if the sweep did not exist at
@@ -293,8 +293,8 @@ test("TS-0001:10.2.4.29 — a malformed dgt on one <ts> must not starve the swee
 });
 
 test("TS-0001:9.6.36 — an omitted mdt with a peid larger than the flat deployment default is accepted, and does not fabricate a missing point (finding 2)", async () => {
-  // pei:140/peid:70 is a legal configuration (peid <= pei/2, at the boundary) but peid is larger
-  // than the deployment's flat default.timeSeries.mdt_default (60). Two real-time submissions,
+  // pei:140000/peid:70000 is a legal configuration (peid <= pei/2, at the boundary) but peid is larger
+  // than the deployment's flat default.timeSeries.mdt_default (60000 ms). Two real-time submissions,
   // deliberately spaced apart, are what make this differ from just checking detect_missing's
   // arithmetic directly: under the old flat default, N=1's detection time is only 6s after this
   // test starts -- before the late arrival below is even sent -- so the sweep would already have
@@ -306,7 +306,7 @@ test("TS-0001:9.6.36 — an omitted mdt with a peid larger than the flat deploym
   // supplied mdt, so there is nothing of theirs to validate against peid (see the reasoning on
   // detect_missing in cse/missing-data.js).
   const res = await create(base, root.sid, 29, {
-    "m2m:ts": { rn: uniqueRn("ts"), pei: 140, peid: 70, mdd: true },
+    "m2m:ts": { rn: uniqueRn("ts"), pei: 140000, peid: 70000, mdd: true },
   });
   assert.equal(res.status, 201, `omitted mdt with peid=70 must be accepted: ${res.raw?.slice(0, 200)}`);
   const sid = res.body["m2m:ts"].ri;
@@ -337,7 +337,7 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
   // arrival apart from a genuine one. Fixture rows are written directly with the pg client
   // (test/container-retention.test.js's pattern) rather than posting the ~90 instances a faithful
   // eviction sequence would need.
-  const sid = await makeSeries(); // pei:2, peid:0, mdt:1, mdd:true
+  const sid = await makeSeries(); // pei:2000, peid:0, mdt:1000, mdd:true
 
   const t0 = Math.floor(Date.now() / 1000) - 200; // detection "started" 200s ago
   const PEI = 2;
@@ -403,7 +403,7 @@ test("TS-0001:9.6.36 — missingDataList does not grow without bound when missin
     // No mdn in the request -- TS-0001:9.6.36 makes missingDataList unbounded for this resource;
     // only the deployment-level default caps what the sweep actually accrues.
     const created = await create(capBase, capRoot.sid, 29, {
-      "m2m:ts": { rn: uniqueRn("ts"), pei: 1, peid: 0, mdt: 1, mdd: true },
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 1000, peid: 0, mdt: 1000, mdd: true },
     });
     assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
     const sid = created.body["m2m:ts"].ri;
@@ -428,7 +428,7 @@ test("TS-0001:9.6.36 — missingDataList does not grow without bound when missin
     assert.equal(body.mdlt.length, 5);
     assert.equal(body.mdn, undefined, "the fallback must not be written back as the resource's own missingDataMaxNr");
 
-    // pei:1/mdt:1 keeps producing a newly-due expected point roughly every second, so a second
+    // pei:1000/mdt:1000 keeps producing a newly-due expected point roughly every second, so a second
     // tick has more to fold in -- the cap must hold across repeated ticks, not just stop the
     // first time it is reached.
     await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 2000));
@@ -450,7 +450,7 @@ test("a late arrival leaves its expected slot missing, but not before the detect
   // What had no coverage is the second half: WHEN it shows up. Every existing test here sets mdt
   // explicitly, so nothing pinned what an omitted mdt does, and the answer is not "immediately" --
   // detection is at expected + missingDataDetectTimer, and with no mdt on the resource that term
-  // comes from default.timeSeries.mdt_default, 60 seconds as shipped. A <ts> with pei measured in
+  // comes from default.timeSeries.mdt_default, 60000 ms as shipped. A <ts> with pei measured in
   // seconds therefore shows an empty missingDataList for a full minute, which reads exactly like
   // detection being broken. Overridden to 3 here so the boundary is observable in a test; the
   // point being pinned is that there IS a boundary and where it comes from.
@@ -464,7 +464,7 @@ test("a late arrival leaves its expected slot missing, but not before the detect
   const lateSrv = await startServer({
     dbName: LATE_DB,
     cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS },
-    defaults: { timeSeries: { mdt_default: 3 } },
+    defaults: { timeSeries: { mdt_default: 3000 } },
   });
   try {
     const lateBase = lateSrv.baseUrl;
@@ -472,7 +472,7 @@ test("a late arrival leaves its expected slot missing, but not before the detect
 
     // No mdt on the resource -- that is the case under test.
     const created = await create(lateBase, lateRoot.sid, 29, {
-      "m2m:ts": { rn: uniqueRn("ts"), pei: 2, peid: 0, mdd: true },
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 2000, peid: 0, mdd: true },
     });
     assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
     const sid = created.body["m2m:ts"].ri;

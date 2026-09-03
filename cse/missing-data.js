@@ -87,6 +87,8 @@ function lower_bound(sorted, target) {
  * arithmetic compares detection times only against other detection times and a constant offset
  * cancels -- but the two were one edit away from producing window boundaries that never happened.
  *
+ * Both arguments and the result are in the attributes' own unit, milliseconds.
+ *
  * @param {number|null|undefined} mdt   the resource's missingDataDetectTimer, if it has one
  * @param {number} delta                the effective periodicIntervalDelta
  */
@@ -95,7 +97,7 @@ function effective_mdt(mdt, delta) {
 }
 
 function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving_dgt, now, from_n, max_points }) {
-    const delta = peid ?? config.default.timeSeries.peid_default;
+    const delta_ms = peid ?? config.default.timeSeries.peid_default;
 
     // TS-0001:9.6.36: "If periodicIntervalDelta is present, the value of this attribute [mdt]
     // shall be greater than periodicIntervalDelta." cse/resources/ts.js enforces that only when
@@ -107,8 +109,28 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving
     // mentioned mdt, without rejecting a request that never supplied the attribute being
     // complained about (the alternative — validating the effective timer at CREATE/UPDATE and
     // refusing — would do exactly that for a conforming client).
-    const timer = effective_mdt(mdt, delta);
+    const timer_ms = effective_mdt(mdt, delta_ms);
     const max_n = max_points ?? config.default.timeSeries.max_points_per_sweep;
+
+    // periodicInterval, periodicIntervalDelta and missingDataDetectTimer are MILLISECONDS. The
+    // arithmetic below is in epoch seconds because m2m:timestamp's resolution is one second, so
+    // the three are converted once here rather than at each use.
+    //
+    // TS-0001:9.6.36 gives all three as xs:positiveInteger and states no unit anywhere in the
+    // prose or the XSD -- this is not read off the standard but off a conformance tester's own
+    // arithmetic (SQ-009). TP/oneM2M/CSE/TS/001 was run against a <timeSeries> with pei 5000 and
+    // mdt 1000 and the resource read back nine seconds later expecting exactly one missing point:
+    // that is a five-second period detected one second late, and it is consistent with no other
+    // reading.
+    //
+    // A pei that is not a whole number of seconds cannot be represented in missingDataList, whose
+    // entries are m2m:timestamp values -- to_epoch_seconds does not accept the ",ffffff" fraction
+    // the type allows either. Sub-second periods are therefore out of scope here rather than
+    // silently rounded into duplicate entries (BACKLOG-131).
+    const MS_PER_SECOND = 1000;
+    const pei_s = pei / MS_PER_SECOND;
+    const delta = delta_ms / MS_PER_SECOND;
+    const timer = timer_ms / MS_PER_SECOND;
 
     const anchor_s = to_epoch_seconds(anchor);
     const now_s = to_epoch_seconds(now);
@@ -117,7 +139,7 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving
 
     // The highest N whose detection time has passed:
     //   anchor + N*pei + timer <= now
-    const last_n_wanted = Math.floor((now_s - anchor_s - timer) / pei);
+    const last_n_wanted = Math.floor((now_s - anchor_s - timer) / pei_s);
     const first_n = (from_n === null || from_n === undefined) ? 1 : from_n + 1;
 
     // A historical backfill (anchor far in the past, small periodicInterval) can put last_n_wanted
@@ -131,7 +153,7 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving
 
     const missing = [];
     for (let n = first_n; n <= last_n; n++) {
-        const expected = anchor_s + n * pei;
+        const expected = anchor_s + n * pei_s;
         // present is sorted ascending, so the window [expected-delta, expected+delta] is a
         // contiguous slice: find where it would start and check whether that element still
         // falls at or before the upper edge. Both edges are inclusive, matching the "+/-
@@ -258,7 +280,7 @@ async function sweep_missing_data(opts = {}) {
             }
 
             const anchor_s = to_epoch_seconds(anchor);
-            const delta = row.peid ?? config.default.timeSeries.peid_default;
+            const delta = (row.peid ?? config.default.timeSeries.peid_default) / 1000;
             const watermark = row.md_watermark_n ?? 0;
 
             // Only fetch children new enough to still matter. TS-0001:10.2.4.29's window is
@@ -268,7 +290,7 @@ async function sweep_missing_data(opts = {}) {
             // window-lower-bound, kept simple rather than tight). Before this, the query above
             // fetched every child under the parent regardless of age — up to maxNrOfInstances rows
             // — on every tick.
-            const boundary = from_epoch_seconds(anchor_s + watermark * row.pei - delta);
+            const boundary = from_epoch_seconds(anchor_s + watermark * (row.pei / 1000) - delta);
             const children = await TSI.findAll({
                 where: { pi: row.ri, dgt: { [Op.gte]: boundary } },
                 attributes: ['dgt'],

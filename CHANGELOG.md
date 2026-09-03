@@ -21,6 +21,55 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.23.0 (2026-09-03)
+
+**Why MINOR**: a conformance fix that changes how three `<timeSeries>` attributes are interpreted,
+with a migration that preserves the behaviour of every existing resource. Nothing a deployment has
+to do by hand, so this is not MAJOR -- but read the migration note before upgrading.
+
+### Fixed: `periodicInterval`, `periodicIntervalDelta` and `missingDataDetectTimer` are milliseconds
+
+They were read as seconds. `TS-0001:9.6.36` types all three as `xs:positiveInteger` and states no
+unit -- not in the prose, not in the XSD -- so the seconds reading rested on nothing but
+assumption. A conformance tester settles it: `TP/oneM2M/CSE/TS/001` was run here against a
+`<timeSeries>` with `pei` 5000 and `mdt` 1000 and the resource read back nine seconds later, the TP
+expecting exactly one missing data point. That is a five-second period detected one second late,
+and it is consistent with no other reading. Reproduced after the fix: `mdc` is 1 at nine seconds.
+
+`db/migrations/v4.23.0.sql` multiplies the stored values by 1000, so an existing `<timeSeries>`
+keeps the interval it has always had. **It must not be run twice.**
+
+Recorded rather than claimed: the unit is not in the standard text this project holds. It is read
+off the tester's arithmetic, and is logged as an open question (SQ-009) rather than as something
+the specification says.
+
+A period below one second is out of scope. `missingDataList` entries are `m2m:timestamp` values
+with one-second resolution, and the parser does not accept the `,ffffff` fraction the type allows.
+
+### Fixed: the effective `missingDataDetectTimer` came from two different rules
+
+`detect_missing`, which decides which points are missing, used the deployment default raised to
+clear `periodicIntervalDelta`; `report_missing_data`, which stamps when each was detected so a
+subscription's window timer can run, used a flat 0. The same absent attribute meant two instants a
+minute apart. Nothing failed -- the window arithmetic only ever compares a detection time against
+another detection time, so a constant offset cancelled -- which is why it is pinned by test now.
+
+### Added: the case that had no coverage
+
+A `<timeSeries>` whose next instance arrives half a period late, with no `mdt` of its own. Every
+existing sweep test set `mdt` explicitly, so nothing pinned what an omitted one does -- and the
+answer is not "detected immediately".
+
+### Changed: `default.timeSeries.mdt_default` is 60000, and is documented where the symptom is
+
+Same duration as before, in the corrected unit. It was already configurable and already in the
+configuration reference, but nothing stated its unit, it was absent from `config/local.json.example`,
+and no document connected it to what a user actually sees: a `missingDataList` that stays empty for
+a full minute after a real gap. `docs/how-to.md` now covers that, along with `missingDataDetect`
+defaulting to false, an empty list not being sent at all (`0..1 (L)`), and a `dataGenerationTime`
+sent ahead of the CSE's clock -- which puts every expected point in the future and is invisible
+until you compare `dgt` against the `ct` the CSE assigns.
+
 ## v4.22.5 (2026-09-03)
 
 **Why PATCH**: a bug fix in a stored value plus test coverage. No capability is added.

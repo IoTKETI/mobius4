@@ -1106,3 +1106,39 @@ changes — only what a RETRIEVE of the subscription reports.
 Subscriptions created before this version keep the value stored at creation
 time. If you have one and want the retrieved value corrected, recreate it, or
 UPDATE it with `nct: 5` explicitly.
+
+## v4.23.0
+
+**Run `db/migrations/v4.23.0.sql`, and run it exactly once.**
+
+```
+psql -U <user> -d <database> -f db/migrations/v4.23.0.sql
+```
+
+`periodicInterval`, `periodicIntervalDelta` and `missingDataDetectTimer` on `<timeSeries>` are now
+read as milliseconds. They were read as seconds up to v4.22.5. The migration multiplies the stored
+values by 1000, so every existing `<timeSeries>` keeps the interval it was created with.
+
+**Skip it and periods become a thousand times shorter.** A `<timeSeries>` created with
+`pei: 300` — five minutes — would be read as 300 ms, and its missing-data sweep would declare a
+gap roughly three times a second, filling `missingDataList` continuously.
+
+**Run it twice and they become a million times longer.** Check before running:
+
+```sql
+SELECT ri, pei, peid, mdt FROM ts WHERE pei IS NOT NULL LIMIT 5;
+```
+
+Values that read as plausible second counts — single or double digits, or a few hundred — have not
+been migrated. Values in the thousands already have.
+
+### What changes for clients
+
+A resource created with `pei: 300` now retrieves as `pei: 300000`. The interval is the same five
+minutes; only the unit of the number has changed. Any client that hardcodes `periodicInterval`,
+`periodicIntervalDelta` or `missingDataDetectTimer` when creating a `<timeSeries>` must multiply
+its values by 1000.
+
+If you set `default.timeSeries.mdt_default` or `default.timeSeries.peid_default` in
+`config/local.json`, multiply those by 1000 as well. The shipped default moved from `60` to
+`60000` — the same one minute.

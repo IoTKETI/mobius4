@@ -172,7 +172,7 @@
       "mni": 10000,
       "mia": 31536000,
       "peid_default": 0,
-      "mdt_default": 60,
+      "mdt_default": 60000,
       "max_points_per_sweep": 10000,
       "mdn_default": 10000
     },
