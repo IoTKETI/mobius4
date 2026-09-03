@@ -81,8 +81,15 @@ async function handle_verification(req_prim, resp_prim) {
 
     // Two checks, two status codes -- the clause distinguishes them, and a tester reads the
     // difference to tell which side is misconfigured.
-    const creator_ok = await access_decision(
-        { ri: req_prim.ri, op: NOTIFY, fr: sgn.cr, to: req_prim.to }, {});
+    // to_ty has to travel with ri and to. access_decision fetches the target through
+    // retrieve_a_res, which dispatches on to_ty alone -- with none, no case matches, it leaves pc
+    // unset, and access_decision reads that as "the resource does not exist" and returns false.
+    // Every verification would then be refused 4101 no matter who asked, and only on the success
+    // path, which is the one a negative test never reaches. set_ri_sid fills all three before the
+    // operation switch runs, so they are present on an inbound NOTIFY.
+    const target = { ri: req_prim.ri, to: req_prim.to, to_ty: req_prim.to_ty, op: NOTIFY };
+
+    const creator_ok = await access_decision({ ...target, fr: sgn.cr }, {});
     if (creator_ok === false) {
         resp_prim.rsc = enums.rsc_str["SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE"];
         resp_prim.pc = { "m2m:dbg": "the subscription creator has no NOTIFY privilege for this target" };
@@ -90,8 +97,7 @@ async function handle_verification(req_prim, resp_prim) {
         return true;
     }
 
-    const host_ok = await access_decision(
-        { ri: req_prim.ri, op: NOTIFY, fr: req_prim.fr, to: req_prim.to }, {});
+    const host_ok = await access_decision({ ...target, fr: req_prim.fr }, {});
     if (host_ok === false) {
         resp_prim.rsc = enums.rsc_str["SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE"];
         resp_prim.pc = { "m2m:dbg": "the subscription host has no NOTIFY privilege for this target" };

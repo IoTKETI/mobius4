@@ -128,3 +128,75 @@ test("a NOTIFY that is not a verification request still answers 2000", async () 
     await srv.stop();
   }
 });
+
+test("a verification request whose creator and Originator both hold NOTIFY is accepted", async () => {
+  // TS-0004:7.5.1.2.3 receiver side: creator and Originator both need NOTIFY privilege to the
+  // notificationURI, and then the response is a success. Every other test here reaches a refusal,
+  // and a refusal is what a broken privilege check produces too -- so nothing above this line can
+  // tell "checked and allowed" from "checked wrongly and denied".
+  //
+  // That mattered: the check passes a request to access_decision, which fetches the target through
+  // retrieve_a_res, which dispatches on to_ty alone. Built without to_ty, the fetch matched no
+  // case, left pc unset, and access_decision read that as "no such resource" -- so every
+  // verification was refused 4101 however the privileges actually stood. Only the success path
+  // shows it.
+  //
+  // TS-0018에 해당 TP 없음 -- CSE/SUB/NTF/001 and /002 both describe refusals.
+  const { startServer } = require("./helpers/server");
+  const { create, CSE_BASE, ADMIN, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer();
+  try {
+    const NOTIFY_BIT = 16;   // acop bit 5, TS-0001:9.6.2
+    const RETRIEVE_BIT = 2;  // deliberately not NOTIFY -- the negative case below turns on this
+    const allowed = "Cverif-allowed";
+    const denied = "Cverif-denied";
+
+    const acpRn = uniqueRn("acp");
+    const madeAcp = await create(srv.baseUrl, CSE_BASE, 1, { "m2m:acp": {
+      rn: acpRn,
+      pv: { acr: [
+        { acor: [allowed], acop: NOTIFY_BIT },
+        { acor: [denied], acop: RETRIEVE_BIT },
+        { acor: [ADMIN], acop: 63 },
+      ]},
+      pvs: { acr: [{ acor: [ADMIN], acop: 63 }] },
+    }});
+    assert.equal(madeAcp.rsc, "2001", `policy setup failed: ${madeAcp.raw.slice(0, 200)}`);
+
+    // The notification target: a <container> carrying that policy, addressed by resource ID the
+    // way a resource-ID notificationURI would be.
+    const cntRn = uniqueRn("c");
+    const madeCnt = await create(srv.baseUrl, CSE_BASE, 3, {
+      "m2m:cnt": { rn: cntRn, acpi: [`${CSE_BASE}/${acpRn}`] },
+    });
+    assert.equal(madeCnt.rsc, "2001", `target setup failed: ${madeCnt.raw.slice(0, 200)}`);
+
+    const verify = async (creator, originator) => {
+      const r = await fetch(`${srv.baseUrl}/${CSE_BASE}/${cntRn}`, {
+        method: "POST",
+        headers: {
+          "X-M2M-Origin": originator, "X-M2M-RI": uniqueRn("v"), "X-M2M-RVI": "4",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ "m2m:sgn": { vrq: true, cr: creator } }),
+      });
+      return r.headers.get("x-m2m-rsc");
+    };
+
+    assert.equal(await verify(allowed, allowed), "2000",
+      "both parties hold NOTIFY on the target, so the verification succeeds");
+    assert.equal(await verify(denied, allowed), "4101",
+      "the creator holds RETRIEVE but not NOTIFY");
+    // Measured, not chosen: 4103, not the 5205 the clause names. The generic access control in
+    // the request pipeline judges the NOTIFY on the Originator before handle_verification is
+    // reached, and answers ORIGINATOR_HAS_NO_PRIVILEGE first. So the SUBSCRIPTION_HOST_HAS_NO_
+    // PRIVILEGE branch is unreachable on the HTTP path today. It is kept because
+    // TS-0004:7.5.1.2.3 asks for it and because it is what runs if that ordering ever changes,
+    // but this assertion records what a caller actually sees rather than what the branch would
+    // say. Whether to reorder so the clause's own code wins is an open decision (BACKLOG-132).
+    assert.equal(await verify(allowed, denied), "4103",
+      "the generic access check answers before the verification handler is reached");
+  } finally {
+    await srv.stop();
+  }
+});
