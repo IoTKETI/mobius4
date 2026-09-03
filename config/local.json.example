@@ -56,6 +56,13 @@
     }
   },
 
+  "_comment_timeSeries": "Only needed if you use <timeSeries> missing-data detection. mdt_default is the missingDataDetectTimer, in seconds, used for a <timeSeries> that does not carry an mdt of its own -- TS-0001:9.6.36 makes mdt optional and gives it no default, but TS-0001:10.2.4.29 puts it in the detection time (expected dataGenerationTime + mdt), so a value is unavoidable. The shipped 60 suits periodicInterval measured in minutes; for a periodicInterval of a few seconds it means missingDataList stays empty for a full minute after a real gap. Lower it, or set mdt on the <timeSeries> itself. Note detect_missing raises whatever is here to periodicIntervalDelta + 1 when needed, so the spec's \"mdt shall be greater than periodicIntervalDelta\" holds regardless.",
+  "default": {
+    "timeSeries": {
+      "mdt_default": 60
+    }
+  },
+
   "security": {
     "helmet": {
       "enabled": false

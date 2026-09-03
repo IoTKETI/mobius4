@@ -548,6 +548,61 @@ same reason the `<latest>` and `<oldest>` virtual resources are not available un
 `<flexContainer>`; use `<container>` and `<contentInstance>` if you need history today.
 
 
+## `missingDataList` is empty when I expect entries
+
+A `<timeSeries>` with `missingDataDetect: true` skips a data point, you RETRIEVE the resource, and
+there is no `missingDataList` attribute at all. Three things produce that, in the order worth
+checking.
+
+**1. Detection has not happened yet.** `TS-0001:10.2.4.29` sets the moment a point is declared
+missing:
+
+```
+missing data detection time = expected dataGenerationTime + missingDataDetectTimer
+```
+
+`missingDataDetectTimer` (`mdt`) is optional and the standard gives it no default, so mobius4
+supplies one: `default.timeSeries.mdt_default`, **60 seconds** as shipped. A `<timeSeries>` with
+`periodicInterval: 10` therefore reports nothing for a full minute after a gap — the gap is real
+and will be listed, just not yet.
+
+Either set `mdt` on the resource, which is the direct control:
+
+```json
+{"m2m:ts": {"rn": "ts1", "pei": 10, "peid": 0, "mdt": 2, "mdd": true}}
+```
+
+or lower the deployment default in `config/local.json`:
+
+```json
+{"default": {"timeSeries": {"mdt_default": 2}}}
+```
+
+`mdt` must be greater than `periodicIntervalDelta` when that is present (`TS-0001:9.6.36`).
+mobius4 enforces this on a value you supply, and raises the deployment default to
+`periodicIntervalDelta + 1` when it would otherwise be too small — so the constraint holds either
+way. `pei`, `peid` and `mdt` are all **in seconds**.
+
+**2. Nothing is being detected at all.** Detection runs only when `missingDataDetect` is `true`
+*and* `periodicInterval` is set (`TS-0001:10.2.4.21`). `mdd` defaults to `false`, so a
+`<timeSeries>` created without it detects nothing. RETRIEVE the resource and read `mdd` back — it
+is always present in the representation, unlike `mdlt`.
+
+**3. The list is empty, and an empty list is not sent.** `missingDataList` is `0..1 (L)`, so
+mobius4 omits it rather than sending `[]`. `missingDataCurrentNr` (`mdc`) *is* always present:
+`mdc: 0` with no `mdlt` means "nothing detected", not "attribute unsupported". Check `mdc` first.
+
+### A gap the CSE cannot see: `dataGenerationTime` in the future
+
+Expected data points are `dataGenerationTime of the first instance + N × periodicInterval`. If the
+first `<timeSeriesInstance>` carries a `dgt` ahead of the CSE's clock, every expected point is in
+the future too and nothing is ever overdue.
+
+`m2m:timestamp` carries no timezone — the format is `YYYYMMDDThhmmss` and nothing more — so both
+ends must already agree on which zone it means. Compare the `dgt` you send against the `ct` the CSE
+puts on the same resource: `ct` is the CSE's own clock, and if `dgt` runs ahead of it, the sender is
+stamping local time where the receiver reads something else.
+
 ## Changes from previous version of Mobius
 
 ### Subscription/Notification
