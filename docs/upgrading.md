@@ -21,6 +21,22 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.22.4
+
+**Nothing to do, but your effective keep-alive changes.** `cse.keep_alive_timeout` never worked --
+it was assigned to the wrong property name, so the server ran on the 5-second default no matter
+what the setting said. It works now, which means a deployment carrying the shipped default of 60
+goes from holding idle connections 5 seconds to holding them 60.
+
+That is what the setting always claimed. If 5 seconds was what you wanted, set it explicitly:
+
+```json
+"cse": { "keep_alive_timeout": 5 }
+```
+
+If clients were losing sessions mid-conversation, this is why, and raising the value is now the
+fix it always looked like it would be.
+
 ## v4.22.3
 
 **Nothing to do.** Two new settings with the defaults that were already in effect:
