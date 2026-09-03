@@ -74,6 +74,26 @@ function lower_bound(sorted, target) {
  *                                   is left for the next call via the returned watermark
  * @returns {{ missing: string[], watermark: number }} missing newest-first
  */
+/**
+ * The missingDataDetectTimer actually in force for a <timeSeries>, which is not always the value
+ * of its mdt attribute: mdt is 0..1 and TS-0001:9.6.36 gives no default, but TS-0001:10.2.4.29
+ * defines the missing data detection time as "expected dataGenerationTime + missingDataDetectTimer"
+ * -- a term that has to have a value for the detection time to exist at all.
+ *
+ * Exported because two callers need the same answer. detect_missing decides *which* points are
+ * missing; report_missing_data timestamps *when* each was detected in order to run the
+ * subscription's window timer. Those were separate expressions and they disagreed: an omitted mdt
+ * meant the deployment default here and a flat 0 there. Nothing failed, because the window
+ * arithmetic compares detection times only against other detection times and a constant offset
+ * cancels -- but the two were one edit away from producing window boundaries that never happened.
+ *
+ * @param {number|null|undefined} mdt   the resource's missingDataDetectTimer, if it has one
+ * @param {number} delta                the effective periodicIntervalDelta
+ */
+function effective_mdt(mdt, delta) {
+    return mdt ?? Math.max(config.default.timeSeries.mdt_default, delta + 1);
+}
+
 function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving_dgt, now, from_n, max_points }) {
     const delta = peid ?? config.default.timeSeries.peid_default;
 
@@ -87,8 +107,7 @@ function detect_missing({ anchor, pei, peid, mdt, present_dgts, oldest_surviving
     // mentioned mdt, without rejecting a request that never supplied the attribute being
     // complained about (the alternative — validating the effective timer at CREATE/UPDATE and
     // refusing — would do exactly that for a conforming client).
-    const mdt_default = Math.max(config.default.timeSeries.mdt_default, delta + 1);
-    const timer = mdt ?? mdt_default;
+    const timer = effective_mdt(mdt, delta);
     const max_n = max_points ?? config.default.timeSeries.max_points_per_sweep;
 
     const anchor_s = to_epoch_seconds(anchor);
@@ -308,6 +327,7 @@ async function sweep_missing_data(opts = {}) {
                     ts_ri: row.ri,
                     missing: result.missing,
                     mdt: row.mdt,
+                    peid: row.peid,
                     send_a_noti: noti.send_a_noti,
                     prefetch_ae_poa: noti.prefetch_ae_poa,
                 });
@@ -321,4 +341,4 @@ async function sweep_missing_data(opts = {}) {
     return { scanned: candidates.length, updated, notified };
 }
 
-module.exports = { detect_missing, apply_missing, sweep_missing_data, to_epoch_seconds, from_epoch_seconds };
+module.exports = { detect_missing, effective_mdt, apply_missing, sweep_missing_data, to_epoch_seconds, from_epoch_seconds };

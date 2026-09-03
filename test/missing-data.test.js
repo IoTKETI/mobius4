@@ -376,3 +376,49 @@ test("without an oldest_surviving_dgt, missing detection behaves exactly as befo
   });
   assert.deepEqual(r.missing, ["20260815T100100"]);
 });
+
+// ── the effective missingDataDetectTimer is one rule, not two ──────────────────────────────────
+//
+// TS-0001:10.2.4.29 defines the missing data detection time as "expected dataGenerationTime +
+// missingDataDetectTimer". mdt is 0..1 and TS-0001:9.6.36 gives no default, so the CSE has to
+// supply the term -- and it has to supply the *same* term everywhere. detect_missing decides
+// which points are missing; report_missing_data stamps when each was detected so a subscription's
+// window timer can run. Those were two expressions of the same rule and they disagreed: an
+// omitted mdt was the deployment default in one and a flat 0 in the other, sixty seconds apart
+// by default.
+//
+// Nothing failed, and that is the point of pinning it. advance_window only ever compares a
+// detection time to another detection time, so a constant offset cancels and the disagreement was
+// invisible. It would have stopped being invisible the moment either side gained a comparison
+// against a wall clock or a stored boundary from a different basis.
+//
+// TS-0018에 해당 TP 없음.
+
+const { effective_mdt } = require("../cse/missing-data");
+
+test("an explicit mdt is used as given", () => {
+  assert.equal(effective_mdt(1, 0), 1);
+  assert.equal(effective_mdt(0, 0), 0, "zero is a value, not an absence");
+});
+
+test("an omitted mdt derives the deployment default, raised to clear periodicIntervalDelta", () => {
+  const config = require("config");
+  const flat = config.default.timeSeries.mdt_default;
+  assert.equal(effective_mdt(undefined, 0), flat);
+  assert.equal(effective_mdt(null, 0), flat);
+  // peid larger than the flat default: the derived value must still satisfy TS-0001:9.6.36's
+  // "shall be greater than periodicIntervalDelta".
+  assert.equal(effective_mdt(undefined, flat + 40), flat + 41);
+});
+
+test("the sweep and the subscription reporter derive the same timer for an omitted mdt", () => {
+  // The regression guard. Both callers must reach this through effective_mdt; if either grows its
+  // own expression again, one of these two numbers moves and this fails.
+  const config = require("config");
+  const { report_missing_data } = require("../cse/missing-data-subscription");
+  assert.equal(typeof report_missing_data, "function");
+  const derived = effective_mdt(undefined, 0);
+  assert.notEqual(derived, 0,
+    "if the derived default were 0 this test could not tell the two rules apart -- pick a config where it is not");
+  assert.equal(derived, config.default.timeSeries.mdt_default);
+});

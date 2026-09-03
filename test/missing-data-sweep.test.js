@@ -81,11 +81,12 @@ async function withAdmin(fn) {
   }
 }
 
-async function pollTs(sid, predicate, timeoutMs = 10000) {
+// atBase defaults to the shared server; tests that spin up their own pass theirs.
+async function pollTs(sid, predicate, timeoutMs = 10000, atBase = null) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {
-    last = (await retrieve(base, sid)).body["m2m:ts"];
+    last = (await retrieve(atBase || base, sid)).body["m2m:ts"];
     if (predicate(last)) return last;
     await new Promise((r) => setTimeout(r, 200));
   }
@@ -437,5 +438,71 @@ test("TS-0001:9.6.36 — missingDataList does not grow without bound when missin
   } finally {
     await capSrv.stop();
     await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${MDN_CAP_DB}`));
+  }
+});
+
+test("a late arrival leaves its expected slot missing, but not before the detect timer elapses", async () => {
+  // The reported shape, scaled down in time: data is expected every periodicInterval and the next
+  // instance turns up half a period late. TS-0001:10.2.4.29 makes the skipped slot a missing data
+  // point -- the expected dataGenerationTime is anchor + N*pei and periodicIntervalDelta is the
+  // only tolerance, so an instance stamped between two slots satisfies neither.
+  //
+  // What had no coverage is the second half: WHEN it shows up. Every existing test here sets mdt
+  // explicitly, so nothing pinned what an omitted mdt does, and the answer is not "immediately" --
+  // detection is at expected + missingDataDetectTimer, and with no mdt on the resource that term
+  // comes from default.timeSeries.mdt_default, 60 seconds as shipped. A <ts> with pei measured in
+  // seconds therefore shows an empty missingDataList for a full minute, which reads exactly like
+  // detection being broken. Overridden to 3 here so the boundary is observable in a test; the
+  // point being pinned is that there IS a boundary and where it comes from.
+  //
+  // TS-0018에 해당 TP 없음.
+  const LATE_DB = "mobius4_test_late_arrival";
+  await withAdmin(async (c) => {
+    await c.query(`DROP DATABASE IF EXISTS ${LATE_DB}`);
+    await c.query(`CREATE DATABASE ${LATE_DB}`);
+  });
+  const lateSrv = await startServer({
+    dbName: LATE_DB,
+    cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS },
+    defaults: { timeSeries: { mdt_default: 3 } },
+  });
+  try {
+    const lateBase = lateSrv.baseUrl;
+    const lateRoot = await createRoot(lateBase, "late");
+
+    // No mdt on the resource -- that is the case under test.
+    const created = await create(lateBase, lateRoot.sid, 29, {
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 2, peid: 0, mdd: true },
+    });
+    assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
+    const sid = created.body["m2m:ts"].ri;
+
+    // Anchor now, so the timing below is relative to a known instant rather than to whenever the
+    // fixture happened to run.
+    const t0 = Math.floor(Date.now() / 1000);
+    const anchoredAt = Date.now();
+    await create(lateBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
+    // Half a period late: the t0+2 slot is skipped and this instance fills none.
+    await create(lateBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0 + 3), con: "2" } });
+
+    // Expected t0+2, detected at t0+2+3 = t0+5. At t0+2 several sweeps have run and it must still
+    // be absent -- the slot is already overdue, only the detect timer is holding it back.
+    await new Promise((r) => setTimeout(r, Math.max(0, anchoredAt + 2000 - Date.now())));
+    const early = (await retrieve(lateBase, sid)).body["m2m:ts"];
+    assert.equal(early.mdc, 0, `nothing may be detected before expected + mdt: ${JSON.stringify(early.mdlt)}`);
+    assert.equal(early.mdlt, undefined, "0..1 (L): an empty list is not sent");
+
+    const body = await pollTs(sid, (b) => b.mdc > 0, 15000, lateBase);
+    assert.ok(
+      body.mdlt.includes(from_epoch_seconds(t0 + 2)),
+      `the skipped slot ${from_epoch_seconds(t0 + 2)} must be listed, got ${JSON.stringify(body.mdlt)}`
+    );
+    assert.equal(
+      body.mdlt.includes(from_epoch_seconds(t0 + 3)), false,
+      "the late instance's own dataGenerationTime is data that arrived, not a missing point"
+    );
+  } finally {
+    await lateSrv.stop();
+    await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${LATE_DB}`));
   }
 });

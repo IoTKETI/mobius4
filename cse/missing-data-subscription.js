@@ -31,7 +31,8 @@ const moment = require('moment');
 const logger = require('../logger').forFile(__filename);
 const SUB = require('../models/sub-model');
 const { not_obsolete_where } = require('./utils');
-const { to_epoch_seconds, from_epoch_seconds } = require('./missing-data');
+const config = require('config');
+const { to_epoch_seconds, from_epoch_seconds, effective_mdt } = require('./missing-data');
 
 // The notificationEventType this module reports under: "Report on missing data points".
 const NET_MISSING_DATA = 8;
@@ -117,16 +118,18 @@ function notification_body({ mdlt, mdc }) {
 //
 // Returns the number of notifications sent, for the sweep's log line. Failures are contained per
 // subscription: one bad notificationURI must not stop the others, and must not stop the sweep.
-async function report_missing_data({ ts_ri, missing, mdt, send_a_noti, prefetch_ae_poa }) {
+async function report_missing_data({ ts_ri, missing, mdt, peid, send_a_noti, prefetch_ae_poa }) {
     if (!Array.isArray(missing) || missing.length === 0) return 0;
 
     const subs = (await SUB.findAll({ where: { pi: ts_ri, ...not_obsolete_where() } }));
     const targets = subs.filter((sub) => subscribes_to_missing_data(sub.toJSON()));
     if (targets.length === 0) return 0;
 
-    // A point's detection time is its expected dataGenerationTime plus missingDataDetectTimer.
-    // mdt is optional on <timeSeries>; with none, detection is simultaneous with the expectation.
-    const detect_delay = Number.isFinite(Number(mdt)) ? Number(mdt) : 0;
+    // A point's detection time is its expected dataGenerationTime plus missingDataDetectTimer
+    // (TS-0001:10.2.4.29). mdt is optional, and an omitted one used to be read as 0 here while
+    // the sweep that produced these points read it as the deployment default -- the same absent
+    // attribute meaning two different instants. effective_mdt is now the single answer.
+    const detect_delay = effective_mdt(mdt, peid ?? config.default.timeSeries.peid_default);
     const detections = missing
         .map((dgt) => ({ dgt, detection_s: to_epoch_seconds(dgt) + detect_delay }))
         .sort((a, b) => a.detection_s - b.detection_s);
