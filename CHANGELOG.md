@@ -21,6 +21,52 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.1 (2026-09-03)
+
+**Why PATCH**: bug fixes that add no capability. Forwarding worked; what it sent was wrong in ways
+the Originator could not see.
+
+### Fixed: the `To` parameter was rewritten when forwarding
+
+`TS-0004:7.3.2.6` enumerates what a forwarding CSE converts — `From` into SP-relative or Absolute
+format, `M2M Service User` across SP domains, and the removal of `Release Version Indicator` and
+`Vendor Information` for a Release 1 entity. **`To` is not among them.** It was being rewritten
+into CSE-relative form by cutting the target CSE-ID out of it, so a request the Originator
+addressed to `/CSE1/CSEBase/thing` arrived at the next CSE as `CSEBase/thing`.
+
+That breaks the hop after it. The same clause routes a further hop by "the CSE-ID in the **To**
+parameter" matching the next CSE's `descendantCSEs`; with the CSE-ID cut out there is nothing left
+to route on.
+
+The cut was also a plain string match, which broke two more ways:
+
+| `To` | went to |
+| :--- | :--- |
+| `/CSE1` (another CSE's `<CSEBase>`, no path) | `…/undefined` |
+| `/CSE1/a/CSE1/b` | `…/a` — everything after the second occurrence silently lost |
+
+The parameter is now forwarded as it stands, and the scope is carried by the path component the
+way `TS-0009:6.2.2.1` table 6.2.2.1-1 defines: `/~/` for SP-relative, `/_/` for Absolute. That is
+the exact inverse of what `bindings/http.js` already did on the way in.
+
+### Fixed: the Request Identifier did not survive forwarding
+
+The hop was sent with `forwarding_` prefixed to the Originator's Request Identifier, and the remote
+CSE's echo of *that* was handed back to the Originator as its own. A client that sent
+`X-M2M-RI: abc` got `forwarding_abc` back.
+
+Request Identifier is multiplicity 1 in both the request and the response primitive
+(`TS-0004:6.4.1`, `6.4.2`), and `TS-0001:10.2.5.19` states the correlation outright — request and
+response are associated "by matching the **Request Identifier** parameter". An asynchronous client
+could not pair the answer with its question. The error path dropped it too.
+
+### Fixed: forwarded requests were not logged
+
+Incoming requests are logged as a primitive. Outgoing ones were not logged at all — only three
+fragments (the target CSE-ID, the resolved `To`, the access point), from which the request could
+not be reconstructed. There is now a matching `request primitive forwarded` line carrying the
+primitive, the method and the URL.
+
 ## v4.22.0 (2026-09-02)
 
 **Why MINOR**: it adds a deployment capability. The same reasoning as v4.18.0, which shipped the

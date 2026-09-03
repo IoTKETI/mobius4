@@ -25,7 +25,8 @@ const http = require("node:http");
 async function startFakeCse({ rsc = "2000", status = 200, body = { "m2m:cnt": { rn: "x" } } } = {}) {
   const received = [];
   const server = http.createServer((req, res) => {
-    received.push({ method: req.method, url: req.url, origin: req.headers["x-m2m-origin"] });
+    received.push({ method: req.method, url: req.url, origin: req.headers["x-m2m-origin"],
+                    ri: req.headers["x-m2m-ri"], headers: req.headers });
     res.setHeader("X-M2M-RSC", rsc);
     res.setHeader("X-M2M-RI", req.headers["x-m2m-ri"] || "");
     res.setHeader("X-M2M-RVI", "3");
@@ -120,4 +121,98 @@ test("an mqtt poa is refused rather than reported as OK", async (t) => {
 
   assert.notEqual(resp.rsc, enums.rsc_str["OK"], "a request that went nowhere is not a success");
   assert.equal(resp.rsc, enums.rsc_str["TARGET_NOT_REACHABLE"]);
+});
+
+// ── the To parameter and the Request Identifier ───────────────────────────────────────────────
+//
+// TS-0004:7.3.2.6 enumerates what a forwarding CSE converts: From into SP-relative or Absolute
+// format, M2M Service User across SP domains, and the removal of Release Version Indicator and
+// Vendor Information for a Release 1 entity. To is not among them, and neither is the Request
+// Identifier.
+//
+// Both were being modified. To was rewritten into CSE-relative form by cutting the target CSE-ID
+// out of it, and the Request Identifier was prefixed with "forwarding_" on the way out and then
+// read back off the remote CSE's answer on the way in -- so the Originator got a Request
+// Identifier it had never sent.
+
+const { to_path_component } = reqPrim;
+
+test("To maps onto the path component exactly as TS-0009 table 6.2.2.1-1 says", () => {
+  // The rows of that table, verbatim. This is the inverse of what bindings/http.js does on the way
+  // in, which is what lets the parameter be forwarded without being rewritten.
+  assert.equal(to_path_component("CSEBase/ae12/cont27/contInst696"), "/CSEBase/ae12/cont27/contInst696");
+  assert.equal(to_path_component("cin00856"), "/cin00856");
+  assert.equal(to_path_component("/CSE178/CSEBase/ae12/cont27/contInst696"), "/~/CSE178/CSEBase/ae12/cont27/contInst696");
+  assert.equal(to_path_component("/CSE178/cin00856"), "/~/CSE178/cin00856");
+  assert.equal(to_path_component("//mym2msp.org/CSE178/CSEBase/ae12/cont27/contInst696"), "/_/mym2msp.org/CSE178/CSEBase/ae12/cont27/contInst696");
+  assert.equal(to_path_component("//mym2msp.org/CSE178/cin00856"), "/_/mym2msp.org/CSE178/cin00856");
+});
+
+test("the To parameter is forwarded as it stands, CSE-ID and all", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const remote = await startFakeCse();
+  t.after(() => remote.stop());
+
+  await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "r1", rvi: "3" },
+    "/reg-b/Mobius/thing", {});
+
+  // Not "/Mobius/thing". The next CSE routes a further hop by the CSE-ID in the To parameter
+  // matching its descendantCSEs (TS-0004:7.3.2.6); with the CSE-ID cut out there is nothing left
+  // to route on.
+  assert.equal(remote.received[0].url, "/~/reg-b/Mobius/thing");
+});
+
+test("a To that is only a CSE-ID does not become the string 'undefined'", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const remote = await startFakeCse();
+  t.after(() => remote.stop());
+
+  // Retrieving another CSE's <CSEBase>. The old code cut on `${cseId}/` and took what followed,
+  // which for a To with no path was nothing at all -- the request went to poa + "/undefined".
+  await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "r1", rvi: "3" }, "/reg-b", {});
+  assert.equal(remote.received[0].url, "/~/reg-b");
+});
+
+test("a path that repeats the CSE-ID is not truncated", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const remote = await startFakeCse();
+  t.after(() => remote.stop());
+
+  // The old cut was a string match, so /reg-b/a/reg-b/b lost everything after the second
+  // occurrence and the request went to a different resource than the one asked for -- silently,
+  // with a 2000.
+  await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "r1", rvi: "3" },
+    "/reg-b/a/reg-b/b", {});
+  assert.equal(remote.received[0].url, "/~/reg-b/a/reg-b/b");
+});
+
+test("the Originator's Request Identifier is what goes out and what comes back", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  const remote = await startFakeCse();
+  t.after(() => remote.stop());
+
+  // The response primitive's rqi is set by request_forwarding before the poa loop; this stands in
+  // for it, and the point of the test is that nothing in the loop overwrites it.
+  const resp = { rqi: "client-42" };
+  await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "client-42", rvi: "3" },
+    "/reg-b/Mobius/x", resp);
+
+  assert.equal(remote.received[0].ri, "client-42",
+    "the hop carries the Originator's Request Identifier, not a derived one");
+  assert.equal(resp.rqi, "client-42",
+    "and the answer carries it back -- TS-0001:10.2.5.19 correlates request to response by it");
+});
+
+test("an error status from the remote CSE does not take the Request Identifier with it", async (t) => {
+  if (!forward_to_poa) return t.skip("forward_to_poa is not exported");
+  // The error path read x-m2m-ri off the response too, so the rqi was lost on failures as well.
+  const remote = await startFakeCse({ rsc: "4004", status: 404, body: { "m2m:dbg": "nope" } });
+  t.after(() => remote.stop());
+
+  const resp = { rqi: "client-43" };
+  await forward_to_poa([remote.url], { op: 2, fr: "Sabc", rqi: "client-43", rvi: "3" },
+    "/reg-b/Mobius/x", resp);
+
+  assert.equal(resp.rsc, 4004);
+  assert.equal(resp.rqi, "client-43");
 });

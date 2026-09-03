@@ -21,6 +21,20 @@ answers "what do I have to *do* about it."
 
 ---
 
+## v4.22.1
+
+**Nothing to do**, but read this if you forward requests between CSEs.
+
+Two things on the wire changed, and both are corrections toward the specification. The forwarded
+`To` now keeps the target CSE-ID and is carried as `/~/{CSE-ID}/{path}` (`TS-0009:6.2.2.1`) rather
+than as a CSE-relative path. And the forwarded request now carries the Originator's own Request
+Identifier instead of one prefixed with `forwarding_`, which is also what comes back in the
+response.
+
+If anything downstream was matching on the old shapes — a proxy keyed on the path, or a log filter
+looking for `forwarding_` — it needs updating. A conforming CSE is unaffected: both forms are what
+the specification asks for.
+
 ## v4.22.0
 
 **Nothing to do.** Two additions, neither of which changes an existing deployment.

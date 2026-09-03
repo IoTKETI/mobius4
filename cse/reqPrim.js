@@ -546,6 +546,13 @@ async function set_virtual_res_info(req_prim) {
 async function request_forwarding(req_prim, shortest_to) {
   const resp_prim = {};
 
+  // The Originator is waiting on the Request Identifier it sent. It is multiplicity 1 in both the
+  // request and the response primitive (TS-0004:6.4.1, 6.4.2), and TS-0001:10.2.5.19 states the
+  // correlation outright -- "matching the Request Identifier parameter of the request ... and the
+  // Request Identifier parameter of the response". Set here and never taken from the remote CSE's
+  // answer, which carries whatever that CSE chose to echo.
+  resp_prim.rqi = req_prim.rqi;
+
   // step1: change the originator ID into SP-relative or Absolute format, if needed
   // check 'to' param scope, if it is SP-relative or Absolute format
   if (shortest_to.startsWith('//')) {
@@ -576,10 +583,18 @@ async function request_forwarding(req_prim, shortest_to) {
 
   logger.debug({ targetCseId: target_cse_id }, 'forwarding request');
 
-  // resolve CSE-relative 'to' param for the target CSE
-
-  const cse_rel_to = shortest_to.split(target_cse_id + '/')[1];
-  logger.debug({ cseRelTo: cse_rel_to }, 'forwarding target resolved');
+  // The To parameter is forwarded as it stands. TS-0004:7.3.2.6 enumerates what a forwarding CSE
+  // converts -- From into SP-relative or Absolute format, M2M Service User across SP domains, and
+  // the removal of Release Version Indicator and Vendor Information for a Release 1 entity -- and
+  // To is not among them.
+  //
+  // It used to be rewritten into CSE-relative form by cutting the target CSE-ID out of it, which
+  // broke three ways. The next CSE routes a further hop by "the CSE-ID in the To parameter"
+  // matching its own descendantCSEs (same clause), so a To with the CSE-ID removed cannot be
+  // forwarded again. `To` of exactly the CSE-ID with no path produced the string "undefined". And
+  // the cut was made on a string match, so a path that repeated the CSE-ID -- /cse/a/cse/b --
+  // silently lost everything after the second occurrence.
+  logger.debug({ forwardTo: shortest_to }, 'forwarding target resolved');
 
 
   // step2: find the nextCSE among <csr> resources
@@ -595,9 +610,24 @@ async function request_forwarding(req_prim, shortest_to) {
   // send the request to the other CSE by the 'poa', which may be over HTTP or MQTT
 
   const poa_list = Array.isArray(csr_res.poa) ? csr_res.poa : [csr_res.poa];
-  return await forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_cse_id);
+  return await forward_to_poa(poa_list, req_prim, shortest_to, resp_prim, target_cse_id);
 }
 
+
+// The To parameter as the path component of a request line, TS-0009:6.2.2.1 table 6.2.2.1-1.
+//
+//   CSE-Relative   CSEBase/ae12/cont27   ->  /CSEBase/ae12/cont27
+//   SP-Relative    /CSE178/CSEBase/ae12  ->  /~/CSE178/CSEBase/ae12
+//   Absolute       //sp.org/CSE178/ae12  ->  /_/sp.org/CSE178/ae12
+//
+// This is the exact inverse of what bindings/http.js does on the way in, and it is why the To
+// parameter can be forwarded unchanged: the "/~/" and "/_/" prefixes carry the scope that would
+// otherwise have to be stripped out of the parameter itself.
+function to_path_component(to) {
+    if (to.startsWith('//')) return '/_/' + to.slice(2);
+    if (to.startsWith('/')) return '/~' + to;
+    return '/' + to;
+}
 
 function get_http_method(op) {
   switch (op) {
@@ -628,7 +658,7 @@ function to_rsc(value) {
   return Number.isFinite(n) ? n : value;
 }
 
-async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_cse_id) {
+async function forward_to_poa(poa_list, req_prim, forward_to, resp_prim, target_cse_id) {
   // pointOfAccess is a list because a CSE may be reachable more than one way. Trying only the
   // first made a <remoteCSE> unreachable as soon as that one stopped answering, however many
   // others it advertised, so each is tried in turn until one answers.
@@ -648,10 +678,13 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
     const http_method = get_http_method(req_prim.op);
     const http_req = {
       method: http_method,
-      url: poa + '/' + cse_rel_to,
+      url: poa + to_path_component(forward_to),
       data: req_prim.pc,
       headers: {
-        'X-M2M-RI': 'forwarding_' + req_prim.rqi,
+        // The Originator's own Request Identifier, not a derived one. It used to be prefixed with
+        // "forwarding_", and the remote CSE's echo of that was then handed back to the Originator
+        // as its own -- so a client correlating a response to its request never found a match.
+        'X-M2M-RI': req_prim.rqi,
         'X-M2M-Origin': req_prim.fr,
         'X-M2M-RVI': req_prim.rvi || '2a',
         'Content-Type': 'application/json'
@@ -662,12 +695,23 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
       http_req.headers['Content-Type'] = 'application/json' + ';ty=' + req_prim.ty;
     }
 
+    // The one record of what actually went out. Incoming requests are logged as a primitive by
+    // prim_handling; without the matching line here, a forwarded request could only be
+    // reconstructed from three fragments (targetCseId, the resolved To, the poa) and its headers
+    // and body were not recorded at all.
+    logger.info({
+      prim: { to: forward_to, fr: req_prim.fr, rqi: req_prim.rqi, rvi: req_prim.rvi,
+              op: req_prim.op, ty: req_prim.ty, pc: req_prim.pc },
+      method: http_method, url: http_req.url,
+    }, 'request primitive forwarded');
+
     try {
       const http_resp = await axios(http_req);
 
       // convert http response to response primitive
 
-      resp_prim.rqi = http_resp.headers['x-m2m-ri'];
+      // resp_prim.rqi is the Originator's, set in request_forwarding, and is deliberately not
+      // taken from the remote CSE's answer.
       // HTTP headers are strings; responseStatusCode is xs:integer (TS-0004
       // CDT-enumerationTypes.xsd). Passing the header through verbatim put a quoted "2000" into
       // the response primitive, which showed up in group fanout: a local member answered
@@ -688,7 +732,6 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
       // axios rejects both on a transport failure and on a non-2xx status. Only the former means
       // this access point is unusable; a status came from the CSE and is its answer.
       if (error.response) {
-        resp_prim.rqi = error.response.headers['x-m2m-ri'];
         resp_prim.rsc = to_rsc(error.response.headers['x-m2m-rsc']);
         resp_prim.rvi = error.response.headers['x-m2m-rvi'];
         if (error.response.data) resp_prim.pc = error.response.data;
@@ -706,9 +749,14 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
     const mqtt_outbound = require('../bindings/mqtt-outbound');
     const forwarded = {
       ...req_prim,
-      to: cse_rel_to,
-      rqi: 'forwarding_' + req_prim.rqi,
+      to: forward_to,
     };
+
+    logger.info({
+      prim: { to: forward_to, fr: req_prim.fr, rqi: req_prim.rqi, rvi: req_prim.rvi,
+              op: req_prim.op, ty: req_prim.ty, pc: req_prim.pc },
+      poa,
+    }, 'request primitive forwarded');
 
     const remote_resp = await mqtt_outbound.request_over_mqtt(poa, forwarded, target_cse_id);
     if (remote_resp) {
@@ -740,4 +788,4 @@ async function forward_to_poa(poa_list, req_prim, cse_rel_to, resp_prim, target_
   return resp_prim;
 }
 
-module.exports = { prim_handling, get_to_info, forward_to_poa };
+module.exports = { prim_handling, get_to_info, forward_to_poa, to_path_component };
