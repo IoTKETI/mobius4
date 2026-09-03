@@ -57,6 +57,7 @@
     // at all -- an unresponsive CSE held that request until the operating system gave up, which is
     // tens of seconds to minutes and looks from the outside like the request was lost.
     "notification_timeout_seconds": 3,
+    "subscription_verification": false,
     "forwarding_timeout_seconds": 10
   },
   "cb": {
