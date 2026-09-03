@@ -11,17 +11,32 @@
 // somebody else's deployment.
 const config = require("config");
 
-// The same rule cse/noti.js uses to decide whether an nu entry needs a poa lookup. Kept
-// identical on purpose: if the two ever disagree, a target would be notified but never
-// verified (or the reverse), and neither failure announces itself.
-const URL_SCHEMES = ["http", "https", "mqtt", "coap"];
+// The same rule cse/noti.js uses to decide whether an nu entry needs a poa lookup, which is
+// literally `startsWith('http')` and `startsWith('mqtt')` there. Kept identical on purpose: if
+// the two ever disagree, a target would be notified but never verified (or the reverse), and
+// neither failure announces itself.
+//
+// Identical includes the parts that are arguably wrong. "http" catches https, so it is not listed
+// separately. coap is NOT listed even though the standard names it as a binding, because mobius4
+// has no coap binding and noti.js does not exclude it -- adding it here would have made a
+// coap:// target a URL to this module and a resource-ID to noti.js, which is exactly the split
+// this comment claims does not exist. And an <AE> named "httpSink" is misread as a URL by both.
+// Fix them together or not at all.
+const URL_SCHEMES = ["http", "mqtt"];
 
 function is_resource_id_target(nu_entry) {
     if (typeof nu_entry !== "string") return false;
     return !URL_SCHEMES.some((scheme) => nu_entry.startsWith(scheme + "://") || nu_entry.startsWith(scheme));
 }
 
+// Two entries can name the same entity in different spellings -- "/Mobius4/Mobius/ae1" and
+// "Mobius/ae1" are one AE -- so the Originator is excluded by identity, not by string equality.
+// get_to_info collapses a local ID to its CSE-relative form; for a resource on another CSE it is
+// a passthrough, so two foreign spellings still compare unequal. That is a known limit, not an
+// oversight: resolving a foreign ID would need that CSE, which this check cannot reach.
 function verification_targets(nu_list, originator) {
+    // Required lazily: reqPrim requires this module's callers, and a top-level require here
+    // closes the cycle.
     const { get_to_info } = require("./reqPrim");
     const normalise = (v) => {
         if (typeof v !== "string" || v === "") return v;
