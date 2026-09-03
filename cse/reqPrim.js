@@ -143,6 +143,26 @@ async function prim_handling(req_prim) {
   }
 
 
+  // A Subscription Verification request is judged here, ahead of the generic access decision,
+  // because TS-0004:7.5.1.2.3 gives it status codes of its own for precisely the failure the
+  // generic check reports as 4103: "if the creator does not have the privilege ...
+  // SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE ... if the Originator does not have the privilege ...
+  // SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE". Left after the generic check, the Originator case never
+  // reached its own code -- measured as 4103, with 5205 unreachable.
+  //
+  // This is not a way around access control. handle_verification runs the same NOTIFY privilege
+  // check against the same target, twice: once for the subscription's creator and once for the
+  // Originator carrying the request. The generic check tests only the second of those, so a
+  // verification request now passes a strictly stronger test than an ordinary NOTIFY, not a
+  // weaker one. Anything that is not a verification request falls straight through.
+  //
+  // set_ri_sid has already run, so ri, sid and to_ty are on req_prim -- handle_verification needs
+  // to_ty to ask access_decision about the target at all.
+  if (req_prim.op === 5) {
+    const { handle_verification } = require('./subscription-verification');
+    if (await handle_verification(req_prim, resp_prim)) return resp_prim;
+  }
+
   //
   // access decision before calling each API handler
   //
@@ -352,16 +372,14 @@ async function prim_handling(req_prim) {
         break;
 
       // NOTIFY
-      case 5: {
-        // A verification request is a NOTIFY that carries verificationRequest instead of a
-        // notificationEvent (CDT-notification.xsd makes vrq and nev siblings). Until now every
-        // NOTIFY was answered OK without the payload being looked at, so a verification request
-        // was accepted no matter what it said.
-        const { handle_verification } = require('./subscription-verification');
-        if (await handle_verification(req_prim, resp_prim)) break;
+      // NOTIFY
+      //
+      // A verification request never gets here -- it is answered above, before the generic access
+      // decision, so that TS-0004:7.5.1.2.3's own status codes are the ones a caller sees. What
+      // remains is an ordinary notification, which this CSE accepts without inspecting.
+      case 5:
         resp_prim.rsc = enums.rsc_str["OK"];
         break;
-      }
     }
   }
 

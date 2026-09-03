@@ -52,20 +52,56 @@ test("verification is off unless a deployment turns it on", () => {
 });
 
 test("the Originator is excluded however it is spelled", () => {
-  // Without this the whole get_to_info normalisation could be deleted and every other test here
-  // would still pass -- each of them writes the Originator and the nu entry as the same string,
-  // which plain equality already handles. This is the case that needs it: one AE, three legal
-  // spellings of its resource ID, and a subscription that must not try to verify itself.
+  // Without this the whole normalisation could be deleted and every other test here would still
+  // pass -- each of them writes the Originator and the nu entry as the same string, which plain
+  // equality already handles. This is the case that needs it: one AE, the three spellings
+  // TS-0001:7.2 defines for it, and a subscription that must not try to verify itself.
   //
-  // The values are the ones get_to_info actually collapses on this deployment's identity
-  // (cse_id /Mobius4, csebase Mobius), measured rather than assumed.
+  // The spellings are built from the configuration in force rather than written out, because they
+  // are not the same on every deployment -- an earlier version of this test hardcoded an SP-ID
+  // from one machine's config/local.json and failed anywhere else.
+  const config = require("config");
   const { verification_targets } = require("../cse/subscription-verification");
-  for (const spelling of ["Mobius/ae1", "/Mobius4/Mobius/ae1", "//mydomain.io/Mobius4/Mobius/ae1"]) {
+  const cseRelative = `${config.cse.csebase_rn}/ae1`;
+  const spellings = [
+    cseRelative,
+    `${config.cse.cse_id}/${cseRelative}`,
+    `${config.cse.sp_id}${config.cse.cse_id}/${cseRelative}`,
+  ];
+  const other = `${config.cse.csebase_rn}/ae2`;
+  for (const spelling of spellings) {
     assert.deepEqual(
-      verification_targets(["Mobius/ae1", "Mobius/ae2"], spelling),
-      ["Mobius/ae2"],
-      `the Originator written as ${spelling} must still be recognised as Mobius/ae1`);
+      verification_targets([cseRelative, other], spelling), [other],
+      `the Originator written as ${spelling} must still be recognised as ${cseRelative}`);
   }
+});
+
+test("the module loads without a deployment's own configuration", () => {
+  // Not a style point. This module used to reach get_to_info in cse/reqPrim.js, which pulls in the
+  // CSE's module graph, and cse/datasetManager.js reads config.get("cse.admin") at load time --
+  // an identity config/default.json deliberately does not ship (v4.6.0 removed it so that an
+  // operator who never sets one is stopped at startup). Requiring this module therefore threw
+  // outright wherever config/local.json was absent: every test here passed on a developer machine
+  // and every one of them failed in CI, on a require, before a single assertion ran.
+  //
+  // Checked in a child process against a configuration directory holding only the shipped
+  // default.json, which is what CI actually has.
+  const { spawnSync } = require("node:child_process");
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+
+  const repoRoot = path.resolve(__dirname, "..");
+  const bareConfig = fs.mkdtempSync(path.join(os.tmpdir(), "mobius4-bare-config-"));
+  fs.copyFileSync(path.join(repoRoot, "config", "default.json"), path.join(bareConfig, "default.json"));
+
+  const r = spawnSync(process.execPath, ["-e",
+    "const m = require('./cse/subscription-verification');" +
+    "process.stdout.write(JSON.stringify(m.verification_targets(['/CSE1/AE1', '/CSE1/AE2'], '/CSE1/AE1')));"],
+    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, NODE_ENV: "test", NODE_CONFIG_DIR: bareConfig } });
+
+  assert.equal(r.status, 0, `loading the module must not need a deployment identity: ${r.stderr}`);
+  assert.equal(r.stdout, JSON.stringify(["/CSE1/AE2"]), "and it must still answer correctly");
 });
 
 test("the URL rule is the one cse/noti.js applies, coap included", () => {
@@ -187,15 +223,10 @@ test("a verification request whose creator and Originator both hold NOTIFY is ac
       "both parties hold NOTIFY on the target, so the verification succeeds");
     assert.equal(await verify(denied, allowed), "4101",
       "the creator holds RETRIEVE but not NOTIFY");
-    // Measured, not chosen: 4103, not the 5205 the clause names. The generic access control in
-    // the request pipeline judges the NOTIFY on the Originator before handle_verification is
-    // reached, and answers ORIGINATOR_HAS_NO_PRIVILEGE first. So the SUBSCRIPTION_HOST_HAS_NO_
-    // PRIVILEGE branch is unreachable on the HTTP path today. It is kept because
-    // TS-0004:7.5.1.2.3 asks for it and because it is what runs if that ordering ever changes,
-    // but this assertion records what a caller actually sees rather than what the branch would
-    // say. Whether to reorder so the clause's own code wins is an open decision (BACKLOG-132).
-    assert.equal(await verify(allowed, denied), "4103",
-      "the generic access check answers before the verification handler is reached");
+    assert.equal(await verify(allowed, denied), "5205",
+      "the creator is fine; the host sending the request is not -- TS-0004:7.5.1.2.3 names this " +
+      "code for it, and it only wins because verification is judged before the generic access " +
+      "check, which answered 4103 and left this branch unreachable");
   } finally {
     await srv.stop();
   }

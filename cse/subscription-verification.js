@@ -34,15 +34,35 @@ function is_resource_id_target(nu_entry) {
 // get_to_info collapses a local ID to its CSE-relative form; for a resource on another CSE it is
 // a passthrough, so two foreign spellings still compare unequal. That is a known limit, not an
 // oversight: resolving a foreign ID would need that CSE, which this check cannot reach.
+// The CSE-relative spelling of a resource ID that names something on this CSE.
+//
+// TS-0001:7.2 gives three forms for the same resource: CSE-Relative ("Mobius/ae1"), SP-Relative
+// ("/Mobius4/Mobius/ae1") and Absolute ("//localhost/Mobius4/Mobius/ae1"). The Originator arrives
+// in one of them and a notificationURI may be written in another, so comparing them as strings
+// would fail to recognise a subscriber notifying itself and send it a verification request for its
+// own subscription.
+//
+// Written here rather than delegated to reqPrim's get_to_info, which does the same job and more.
+// Requiring reqPrim pulls in the CSE's module graph, and cse/datasetManager.js reads
+// config.get("cse.admin") at load time -- an identity config/default.json deliberately does not
+// ship. This module then could not be loaded at all without a deployment's own configuration:
+// green on any machine with config/local.json, and a load-time throw in CI, which is exactly what
+// happened. A predicate over strings should not need a configured CSE to answer.
+//
+// What this does NOT collapse, and get_to_info did not either: an unstructured ID against a
+// structured one. An Originator of "C3tXgC" and a notificationURI of "Mobius/ae1" can be the same
+// <AE>, and telling so needs a database lookup, not string work (BACKLOG-134).
+function cse_relative(id) {
+    if (typeof id !== "string" || id === "") return id;
+    const sp_prefix = `${config.cse.sp_id}${config.cse.cse_id}/`;      // //sp/cse-id/
+    if (id.startsWith(sp_prefix)) return id.slice(sp_prefix.length);
+    const cse_prefix = `${config.cse.cse_id}/`;                        // /cse-id/
+    if (id.startsWith(cse_prefix)) return id.slice(cse_prefix.length);
+    return id;
+}
+
 function verification_targets(nu_list, originator) {
-    // Required lazily: reqPrim requires this module's callers, and a top-level require here
-    // closes the cycle.
-    const { get_to_info } = require("./reqPrim");
-    const normalise = (v) => {
-        if (typeof v !== "string" || v === "") return v;
-        const { shortest_to } = get_to_info({ to: v });
-        return shortest_to || v;
-    };
+    const normalise = cse_relative;
     const own = normalise(originator);
     return (nu_list || []).filter((nu) => {
         if (!is_resource_id_target(nu)) return false;
@@ -154,6 +174,7 @@ async function verify_targets(nu_list, originator) {
 
 module.exports = {
     is_resource_id_target,
+    cse_relative,
     verification_targets,
     verification_enabled,
     handle_verification,
