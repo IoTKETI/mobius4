@@ -607,6 +607,68 @@ ends must already agree on which zone it means. Compare the `dgt` you send again
 puts on the same resource: `ct` is the CSE's own clock, and if `dgt` runs ahead of it, the sender is
 stamping local time where the receiver reads something else.
 
+## Turning on subscription verification
+
+By default, creating a `<subscription>` does not consult the notification target. With
+`cse.subscription_verification` set, the CSE first sends that target a verification NOTIFY and
+refuses the creation unless it answers.
+
+```json
+{"cse": {"subscription_verification": true}}
+```
+
+in `config/local.json`, then restart. It is off in `config/default.json` because
+`TS-0004:7.4.8.2.1` Recv-6.4 says the Hosting CSE **may** do this, not shall — it is a deployment
+choice, not a conformance requirement. Turn it on to run the oneM2M conformance tests that depend
+on it; leave it off if notification targets in your deployment are not reliably reachable, because
+an unreachable one now fails subscription creation instead of merely missing notifications.
+
+### What it applies to
+
+Only `notificationURI` entries that are **oneM2M resource IDs and are not the Originator**. The
+clause scopes it that way, and `TS-0001:9.6.8` gives the same split a reason: the CSE "shall expect
+to receive a response for the notification request only if the Notification Target ... is in the
+oneM2M compliant Resource-ID format". A plain URL target cannot answer, so it cannot be verified.
+
+```
+nu: ["Mobius/ae1"]                    verified
+nu: ["/Mobius4/Mobius/ae1"]           verified (same AE, SP-relative spelling)
+nu: ["http://host/notify"]            not verified — a URL, unchanged behaviour
+nu: [<the Originator itself>]         not verified — the clause excludes it
+```
+
+A subscription with no resource-ID target behaves exactly as it did before, whether the setting is
+on or off.
+
+### What the creation answers when verification fails
+
+`5204` SUBSCRIPTION_VERIFICATION_INITIATION_FAILED, for both failures `TS-0004:7.4.8.2.1` Recv-6.4
+distinguishes: the request could not be sent at all, or it was sent and the target answered
+something other than 2000. The `<subscription>` is not created — verification runs before the
+insert, so there is no partially-created resource to clean up.
+
+The verification NOTIFY is dialled at the target `<AE>`'s `pointOfAccess`, and only `http` entries
+are tried. An `<AE>` reachable only over MQTT therefore cannot be verified, and a subscription
+naming it is refused 5204. It carries `verificationRequest` and `creator`, and no `subscriptionURI`
+— the `<subscription>` it is about does not exist yet. The timeout is
+`cse.notification_timeout_seconds`.
+
+### Being a verification target
+
+The other direction needs no configuration. A NOTIFY carrying `verificationRequest` is answered by
+checking that both the `creator` named in it and the Originator sending it hold NOTIFY privilege on
+the addressed resource, per `TS-0004:7.5.1.2.3`:
+
+| Outcome | Response |
+|---|---|
+| both hold NOTIFY | `2000` |
+| the creator does not | `4101` SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE |
+| the Originator does not | `5205` SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE |
+| no `creator` in the request | `4000` |
+
+Grant it the way any other privilege is granted — an `<accessControlPolicy>` whose `acop` includes
+the NOTIFY bit (16), named in the target resource's `acpi`.
+
 ## Changes from previous version of Mobius
 
 ### Subscription/Notification

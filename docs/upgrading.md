@@ -1142,3 +1142,24 @@ its values by 1000.
 If you set `default.timeSeries.mdt_default` or `default.timeSeries.peid_default` in
 `config/local.json`, multiply those by 1000 as well. The shipped default moved from `60` to
 `60000` — the same one minute.
+
+## v4.24.0
+
+Nothing required. No migration, and the one new setting is off by default, so an existing
+deployment behaves exactly as it did.
+
+To use subscription verification, put this in `config/local.json` and restart:
+
+```json
+{"cse": {"subscription_verification": true}}
+```
+
+Read "Turning on subscription verification" in `docs/how-to.md` first. The short version: with it
+on, creating a `<subscription>` whose `notificationURI` names a oneM2M resource ID is refused
+`5204` unless that target answers a verification NOTIFY with `2000`. Subscriptions whose
+`notificationURI` is a plain `http://` or `mqtt://` URL are unaffected either way.
+
+One behaviour changes whether or not you enable it. An incoming NOTIFY that carries
+`verificationRequest` used to be answered `2000` without its payload being read; it is now checked
+against the privileges the standard requires and may be answered `4101`, `5205` or `4000`. Ordinary
+notifications are unaffected.

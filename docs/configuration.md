@@ -81,6 +81,7 @@ cp config/local.json.example config/local.json
 | `cse.missing_data_sweep_interval_seconds` | How often the missing-data sweep runs (`cse/missing-data.js`, `TS-0001:10.2.4.29`), gated the same way `cse.expired_resource_cleanup_interval_days` gates the expiry sweep so only one CSE instance runs it. This is the upper bound on missing-data detection latency and the feature's only tuning knob — lowering it detects gaps sooner at the cost of more frequent sweep queries, raising it does the opposite |
 | `cse.allow_discovery_for_any` | If `true`, access control is skipped for discovery (faster responses) |
 | `cse.keep_alive_timeout` | HTTP keep-alive session timeout in seconds |
+| `cse.subscription_verification` | Whether to send a Subscription Verification request before creating a `<subscription>` (`TS-0004:7.4.8.2.1` Recv-6.4). **Default `false`.** The clause says "may", not "shall", so this is a deployment choice rather than a conformance requirement, and turning it on can make a subscription creation fail that used to succeed — see "Subscription verification" in `docs/how-it-works.md` and `docs/how-to.md` before enabling it |
 
 
 

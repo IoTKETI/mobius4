@@ -21,6 +21,52 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.0 (2026-09-03)
+
+**Why MINOR**: a oneM2M capability is added. No migration; one configuration key, off by default,
+so an existing deployment behaves exactly as it did.
+
+### Added: subscription verification (`TS-0004:7.4.8.2.1` Recv-6.4, `TS-0004:7.5.1.2.3`)
+
+Both directions.
+
+**Sending.** With `cse.subscription_verification` on, creating a `<subscription>` sends a
+verification NOTIFY to each `notificationURI` that is a oneM2M resource ID and is not the
+Originator, and refuses the creation with `5204` unless every one answers `2000`. It runs before
+the insert, so a refused creation leaves no resource behind. The notification carries
+`verificationRequest` and `creator` and no `subscriptionURI` -- the `<subscription>` does not exist
+yet, and the clause does not ask for one. The timeout is `cse.notification_timeout_seconds`.
+
+**Receiving.** A NOTIFY carrying `verificationRequest` is now answered on its merits rather than
+accepted unread: `2000` when the `creator` and the Originator both hold NOTIFY privilege on the
+addressed resource, `4101` when the creator does not, `5205` when the Originator does not, `4000`
+when the request carries no creator. Until now every NOTIFY was answered `2000` without the payload
+being looked at, so a verification request succeeded whatever it said.
+
+It is **off by default** because the clause says "may", not "shall". Turning it on is what several
+oneM2M conformance tests need in order to run at all; it is also a way for an unresponsive
+notification target to start failing subscription creations that used to succeed, and that target
+belongs to somebody else's deployment. `docs/how-to.md` has the details.
+
+Three response status codes were missing from `config/enums.js` and are added:
+`SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE` 4101, `SUBSCRIPTION_VERIFICATION_INITIATION_FAILED` 5204,
+`SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE` 5205.
+
+**Known limits, stated rather than discovered later.** Only `http` `pointOfAccess` entries are
+dialled, so an `<AE>` reachable only over MQTT cannot be verified and a subscription naming it is
+refused 5204. And an Originator given as an unstructured ID is not recognised as the same entity as
+a `notificationURI` given as a structured path -- telling those apart needs a database lookup, not
+string comparison, so such a subscriber is sent a verification request for its own subscription.
+
+### Fixed: a verification request now gets the status codes its clause names
+
+`SUBSCRIPTION_HOST_HAS_NO_PRIVILEGE` was unreachable when first implemented. The generic access
+decision judges a NOTIFY on its Originator before the operation is dispatched and answered `4103`,
+so the clause's own code never got to speak -- measured, not assumed. Verification is judged ahead
+of it now. This is not a way around access control: the verification handler runs the same NOTIFY
+privilege check against the same target twice, once for the creator and once for the Originator,
+where the generic check tests only the second.
+
 ## v4.23.0 (2026-09-03)
 
 **Why MINOR**: a conformance fix that changes how three `<timeSeries>` attributes are interpreted,

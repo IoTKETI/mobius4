@@ -7,6 +7,9 @@
     "_comment_admin": "REQUIRED, no default: mobius4 refuses to start until you set this. Names the identity that the admin <accessControlPolicy> grants all six operations to, so it reaches every resource carrying that policy — over HTTP as well as TLS. Replace the placeholder below with a value unique to this deployment and treat it as a credential.",
     "admin": "Superuser",
 
+    "_comment_subscription_verification": "Off by default. When true, creating a <subscription> whose notificationURI names a oneM2M resource ID (not an http:// or mqtt:// URL) first sends that target a verification NOTIFY, and the creation is refused with 5204 unless the target answers 2000. TS-0004:7.4.8.2.1 Recv-6.4 says the Hosting CSE *may* do this, so it is a choice: it is what several oneM2M conformance tests need in order to run at all, and it is also a way for an unresponsive notification target to start failing subscription creations that used to succeed. Subscriptions whose notificationURI is a plain URL are unaffected either way. Only HTTP pointOfAccess entries are dialled, so an <AE> reachable only over MQTT cannot be verified and its subscription is refused 5204.",
+    "subscription_verification": false,
+
     "sp_id": "//your-domain.io",
     "cse_id": "/Mobius4",
     "csebase_rn": "Mobius",
@@ -56,6 +59,7 @@
     }
   },
 
+  "_comment_subscription_verification": "Off by default. When true, creating a <subscription> whose notificationURI names a oneM2M resource ID (not an http:// or mqtt:// URL) first sends that target a verification NOTIFY, and the creation is refused with 5204 unless the target answers 2000. TS-0004:7.4.8.2.1 Recv-6.4 says the Hosting CSE *may* do this, so it is a choice: it is what several oneM2M conformance tests need in order to run at all, and it is also a way for an unresponsive notification target to start failing subscription creations that used to succeed. Subscriptions whose notificationURI is a plain URL are unaffected either way. Only HTTP pointOfAccess entries are dialled; an <AE> reachable only over MQTT cannot be verified and its subscription is refused 5204.",
   "_comment_timeSeries": "Only needed if you use <timeSeries> missing-data detection. mdt_default is the missingDataDetectTimer, in milliseconds, used for a <timeSeries> that does not carry an mdt of its own -- TS-0001:9.6.36 makes mdt optional and gives it no default, but TS-0001:10.2.4.29 puts it in the detection time (expected dataGenerationTime + mdt), so a value is unavoidable. The shipped 60000 suits periodicInterval measured in minutes; for a periodicInterval of a few seconds it means missingDataList stays empty for a full minute after a real gap. Lower it, or set mdt on the <timeSeries> itself. Note detect_missing raises whatever is here to periodicIntervalDelta + 1 when needed, so the spec's \"mdt shall be greater than periodicIntervalDelta\" holds regardless.",
   "default": {
     "timeSeries": {
