@@ -560,3 +560,49 @@ test("a dataGenerationTime ahead of the CSE clock is warned about, and detects n
     await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${AHEAD_DB}`));
   }
 });
+
+test("detection lands within the detect timer, not within the configured sweep interval", async () => {
+  // The bug this pins: the sweep ran on a fixed cadence, so a gap that TS-0001:10.2.4.29 makes
+  // detectable at "expected dataGenerationTime + missingDataDetectTimer" was reported up to a
+  // whole interval later. On the shipped 30 seconds and a conformance tester's <timeSeries>
+  // (pei 5000, mdt 1000, one instance), the resource still reported missingDataCurrentNr 0 nine
+  // and twenty seconds after a gap that was real at six -- measured before the fix.
+  //
+  // The server here does NOT lower missing_data_sweep_interval_seconds. That is the point: every
+  // other test in this file sets it to 1, which is exactly what hid this. The sweep now books its
+  // next pass from the data rather than on a cadence, so the configured interval is only a ceiling.
+  //
+  // TS-0018에 해당 TP 없음 -- TP/oneM2M/CSE/TS/001 asserts what missingDataList contains once a
+  // point is detected, not how soon after its detection time that happens.
+  const PACED_DB = "mobius4_test_paced_sweep";
+  await withAdmin(async (c) => {
+    await c.query(`DROP DATABASE IF EXISTS ${PACED_DB}`);
+    await c.query(`CREATE DATABASE ${PACED_DB}`);
+  });
+  const pacedSrv = await startServer({ dbName: PACED_DB });   // shipped interval, deliberately
+  try {
+    const pacedBase = pacedSrv.baseUrl;
+    const pacedRoot = await createRoot(pacedBase, "paced");
+    const created = await create(pacedBase, pacedRoot.sid, 29, {
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 5000, mdd: true, mdn: 5, mdt: 1000 },
+    });
+    assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
+    const sid = created.body["m2m:ts"].ri;
+
+    const t0 = Math.floor(Date.now() / 1000);
+    await create(pacedBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
+
+    // The point expected at t0+5s is detectable at t0+6s. Nine seconds is comfortably past that
+    // and far short of the configured interval, so a fixed-cadence sweep reports nothing here.
+    await new Promise((r) => setTimeout(r, 9000));
+    const body = (await retrieve(pacedBase, sid)).body["m2m:ts"];
+    assert.ok(body.mdc > 0,
+      `a gap detectable at +6s must be reported by +9s without the sweep interval being lowered; ` +
+      `got mdc=${body.mdc} mdlt=${JSON.stringify(body.mdlt)}`);
+    assert.ok(body.mdlt.includes(from_epoch_seconds(t0 + 5)),
+      `the expected point at +5s must be listed: ${JSON.stringify(body.mdlt)}`);
+  } finally {
+    await pacedSrv.stop();
+    await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${PACED_DB}`));
+  }
+});

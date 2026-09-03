@@ -246,6 +246,13 @@ async function sweep_missing_data(opts = {}) {
     let updated = 0;
     let notified = 0;
 
+    // The earliest instant at which any candidate could have something new to detect. Returned so
+    // the caller can wake up then instead of on a fixed cadence: TS-0001:10.2.4.29 puts detection
+    // at "expected dataGenerationTime + missingDataDetectTimer", and a fixed interval makes that
+    // late by up to a whole interval. With the shipped 30 seconds and a periodicInterval measured
+    // in seconds, a gap is real for half a minute before the resource admits it.
+    let next_due_s = null;
+
     for (const row of candidates) {
         // The whole body is one try/catch, not just detect_missing: to_epoch_seconds calls below
         // (the anchor, and every present/oldest dgt parsed inside detect_missing) and row.save()
@@ -333,6 +340,13 @@ async function sweep_missing_data(opts = {}) {
             await row.save();
             updated++;
 
+            // The next expected point for this resource, and when it becomes detectable. The
+            // watermark is how far detection has got, so watermark+1 is the next one to judge.
+            const due_s = anchor_s
+                + (result.watermark + 1) * (row.pei / 1000)
+                + effective_mdt(row.mdt, row.peid ?? config.default.timeSeries.peid_default) / 1000;
+            if (next_due_s === null || due_s < next_due_s) next_due_s = due_s;
+
             // The reporting half (TS-0001:10.2.4.29, TS-0004:7.5.1.2.9). Runs after the resource
             // state is persisted, so a subscription can never be told about a point the <ts> does
             // not yet carry. result.missing is what this tick newly detected -- deliberately not
@@ -360,7 +374,7 @@ async function sweep_missing_data(opts = {}) {
         }
     }
 
-    return { scanned: candidates.length, updated, notified };
+    return { scanned: candidates.length, updated, notified, next_due_s };
 }
 
 module.exports = { detect_missing, effective_mdt, apply_missing, sweep_missing_data, to_epoch_seconds, from_epoch_seconds };
