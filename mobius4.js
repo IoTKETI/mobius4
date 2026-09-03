@@ -17,7 +17,6 @@ const mqtt = require('./bindings/mqtt');
 const config = require('config');
 
 let cleanupIntervalId;
-let missingDataIntervalId;
 
 async function main() {
     const { version } = require('./package.json');
@@ -74,47 +73,14 @@ async function main() {
         //
         // The interval is the upper bound on how late a detection can be, so it is much shorter
         // than the cleanup's — which is measured in days.
-        // The sweep schedules itself from the data rather than running on a fixed cadence.
-        //
-        // TS-0001:10.2.4.29 puts a missing data point's detection at "expected dataGenerationTime +
-        // missingDataDetectTimer". A fixed interval makes that late by up to a whole interval,
-        // which the shipped 30 seconds turns into a real defect once periodicInterval is measured
-        // in seconds: a <timeSeries> with pei 5000 and mdt 1000 has a genuine gap at six seconds
-        // and still reports missingDataCurrentNr 0 at twenty. Measured, on the shipped
-        // configuration, before this changed.
-        //
-        // Each pass reports the earliest instant any candidate could next have something to detect,
-        // and the next pass is booked for then. One timer, not one per <timeSeries>: per-resource
-        // timers would have to be created, cancelled and re-created on every create, update,
-        // delete and expiry, survive restarts, and respect the singleton rule below -- the same
-        // answer for much more state. And one timer on a short fixed tick would pay for every
-        // resource on every tick (each candidate costs a children query and a save) whether or not
-        // anything was due.
-        //
-        // The delay is clamped at both ends. Never below MIN_SWEEP_DELAY_MS, so a pei of a few
-        // milliseconds cannot spin. Never above the configured interval, so a <timeSeries> created
-        // or edited while the timer sleeps is picked up without anything having to wake it.
-        const MIN_SWEEP_DELAY_MS = 250;
-        const sweepIntervalMs = config.cse.missing_data_sweep_interval_seconds * 1000;
+        // Scheduling lives in cse/missing-data-scheduler.js, which explains why it is not a
+        // setInterval: detection has to land at the instant the standard names, and a resource that
+        // becomes detectable while the sweep sleeps has to end that sleep.
         const { sweep_missing_data } = require('./cse/missing-data');
-
-        const scheduleMissingDataSweep = (delayMs) => {
-            missingDataIntervalId = setTimeout(async () => {
-                let nextMs = sweepIntervalMs;
-                try {
-                    const result = await sweep_missing_data();
-                    if (result && result.next_due_s !== null && result.next_due_s !== undefined) {
-                        nextMs = result.next_due_s * 1000 - Date.now();
-                    }
-                } catch (err) {
-                    logger.error({ err }, 'missing-data sweep failed');
-                }
-                scheduleMissingDataSweep(Math.min(sweepIntervalMs, Math.max(MIN_SWEEP_DELAY_MS, nextMs)));
-            }, delayMs);
-        };
-        scheduleMissingDataSweep(MIN_SWEEP_DELAY_MS);
-        logger.info({ maxIntervalSeconds: config.cse.missing_data_sweep_interval_seconds, minDelayMs: MIN_SWEEP_DELAY_MS },
-            'missing data sweep scheduled (self-pacing, bounded by the configured interval)');
+        require('./cse/missing-data-scheduler').start({
+            ceilingSeconds: config.cse.missing_data_sweep_interval_seconds,
+            sweep: sweep_missing_data,
+        });
     } else {
         logger.info({ instance: process.env.NODE_APP_INSTANCE }, 'expired resource cleanup runs on instance 0; skipped here');
     }
@@ -136,7 +102,7 @@ async function shutdown(signal) {
     try {
         // 1. Stop the intervals (blocks any new work from being scheduled)
         if (cleanupIntervalId) clearInterval(cleanupIntervalId);
-        if (missingDataIntervalId) clearTimeout(missingDataIntervalId);
+        require('./cse/missing-data-scheduler').stop();
         require('./cse/datasetManager').shutdown();
 
         // 2. Close the HTTP servers — refuse new connections + drop keep-alive connections at once

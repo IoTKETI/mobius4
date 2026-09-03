@@ -562,15 +562,23 @@ test("a dataGenerationTime ahead of the CSE clock is warned about, and detects n
 });
 
 test("detection lands within the detect timer, not within the configured sweep interval", async () => {
-  // The bug this pins: the sweep ran on a fixed cadence, so a gap that TS-0001:10.2.4.29 makes
-  // detectable at "expected dataGenerationTime + missingDataDetectTimer" was reported up to a
-  // whole interval later. On the shipped 30 seconds and a conformance tester's <timeSeries>
-  // (pei 5000, mdt 1000, one instance), the resource still reported missingDataCurrentNr 0 nine
-  // and twenty seconds after a gap that was real at six -- measured before the fix.
+  // The sweep ran on a fixed cadence, so a gap that TS-0001:10.2.4.29 makes detectable at
+  // "expected dataGenerationTime + missingDataDetectTimer" was reported up to a whole interval
+  // later. On the shipped 30 seconds and a conformance tester's <timeSeries> (pei 5000, mdt 1000,
+  // one instance), the resource still reported missingDataCurrentNr 0 nine and twenty seconds
+  // after a gap that was real at six.
   //
-  // The server here does NOT lower missing_data_sweep_interval_seconds. That is the point: every
-  // other test in this file sets it to 1, which is exactly what hid this. The sweep now books its
-  // next pass from the data rather than on a cadence, so the configured interval is only a ceiling.
+  // The interval here is 300 seconds, far longer than anything this test waits for, and that is
+  // the whole design of it. The sweep now paces itself, but a pass that finds nothing detectable
+  // has no due time to pace from and falls back to the ceiling -- so a CSE that has been idle is
+  // asleep for the full interval, and everything created during that sleep is invisible until it
+  // ends. An earlier version of this test set the interval to the shipped 30 seconds and created
+  // the <timeSeries> immediately, which landed inside the first pass at 250 ms and passed while
+  // that hole was still open. A warm CSE showed mdc 0 at nine seconds; this configuration makes
+  // the same failure certain rather than a race.
+  //
+  // So what is really pinned here is the wake: nothing but cse/missing-data-scheduler.js's wake()
+  // can produce a detection inside 300 seconds.
   //
   // TS-0018에 해당 TP 없음 -- TP/oneM2M/CSE/TS/001 asserts what missingDataList contains once a
   // point is detected, not how soon after its detection time that happens.
@@ -579,30 +587,91 @@ test("detection lands within the detect timer, not within the configured sweep i
     await c.query(`DROP DATABASE IF EXISTS ${PACED_DB}`);
     await c.query(`CREATE DATABASE ${PACED_DB}`);
   });
-  const pacedSrv = await startServer({ dbName: PACED_DB });   // shipped interval, deliberately
+  const pacedSrv = await startServer({
+    dbName: PACED_DB,
+    cse: { missing_data_sweep_interval_seconds: 300 },
+  });
   try {
     const pacedBase = pacedSrv.baseUrl;
     const pacedRoot = await createRoot(pacedBase, "paced");
+
+    // Past the scheduler's 250 ms first pass, so the sweep is provably asleep on the ceiling
+    // before anything detectable exists.
+    await new Promise((r) => setTimeout(r, 1500));
+
     const created = await create(pacedBase, pacedRoot.sid, 29, {
       "m2m:ts": { rn: uniqueRn("ts"), pei: 5000, mdd: true, mdn: 5, mdt: 1000 },
     });
     assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
     const sid = created.body["m2m:ts"].ri;
 
+    // Long enough that any pass the <timeSeries> creation might have triggered is over and the
+    // sweep is back on the ceiling. That leaves the <timeSeriesInstance> as the only thing that can
+    // end the sleep, which is exactly the wake being pinned: a <timeSeries> has no anchor until its
+    // first instance, so nothing before this point is detectable at all.
+    await new Promise((r) => setTimeout(r, 1500));
+
     const t0 = Math.floor(Date.now() / 1000);
     await create(pacedBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
 
-    // The point expected at t0+5s is detectable at t0+6s. Nine seconds is comfortably past that
-    // and far short of the configured interval, so a fixed-cadence sweep reports nothing here.
+    // The point expected at t0+5s is detectable at t0+6s.
     await new Promise((r) => setTimeout(r, 9000));
     const body = (await retrieve(pacedBase, sid)).body["m2m:ts"];
     assert.ok(body.mdc > 0,
-      `a gap detectable at +6s must be reported by +9s without the sweep interval being lowered; ` +
+      `a gap detectable at +6s must be reported by +9s even though the sweep interval is 300s; ` +
       `got mdc=${body.mdc} mdlt=${JSON.stringify(body.mdlt)}`);
     assert.ok(body.mdlt.includes(from_epoch_seconds(t0 + 5)),
       `the expected point at +5s must be listed: ${JSON.stringify(body.mdlt)}`);
   } finally {
     await pacedSrv.stop();
     await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${PACED_DB}`));
+  }
+});
+
+test("switching missingDataDetect on catches up a resource that already has instances", async () => {
+  // The other wake. A <timeSeries> can be created without detection, accumulate instances, and
+  // have detection switched on later -- TS-0001:10.2.4.23 covers exactly that, including clearing
+  // the recorded state on the false-to-true edge. At that moment points can already be overdue,
+  // and the sweep is asleep on the ceiling because nothing was detecting when it booked the sleep.
+  //
+  // Same 300-second interval as the test above, for the same reason: nothing but the wake in
+  // cse/resources/ts.js's update path can produce a detection inside it.
+  //
+  // TS-0018에 해당 TP 없음.
+  const EDGE_DB = "mobius4_test_mdd_edge";
+  await withAdmin(async (c) => {
+    await c.query(`DROP DATABASE IF EXISTS ${EDGE_DB}`);
+    await c.query(`CREATE DATABASE ${EDGE_DB}`);
+  });
+  const edgeSrv = await startServer({
+    dbName: EDGE_DB,
+    cse: { missing_data_sweep_interval_seconds: 300 },
+  });
+  try {
+    const edgeBase = edgeSrv.baseUrl;
+    const edgeRoot = await createRoot(edgeBase, "edge");
+    const created = await create(edgeBase, edgeRoot.sid, 29, {
+      "m2m:ts": { rn: uniqueRn("ts"), pei: 5000, mdd: false, mdn: 5, mdt: 1000 },
+    });
+    assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
+    const sid = created.body["m2m:ts"].ri;
+
+    // Anchored well in the past, so several expected points are already overdue the moment
+    // detection is switched on.
+    const t0 = Math.floor(Date.now() / 1000) - 30;
+    await create(edgeBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: from_epoch_seconds(t0), con: "1" } });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const on = await update(edgeBase, sid, { "m2m:ts": { mdd: true } });
+    assert.equal(on.status, 200, `failed to switch detection on: ${on.raw?.slice(0, 200)}`);
+
+    await new Promise((r) => setTimeout(r, 3000));
+    const body = (await retrieve(edgeBase, sid)).body["m2m:ts"];
+    assert.ok(body.mdc > 0,
+      `points overdue at the moment detection was switched on must be reported without waiting ` +
+      `out the 300s interval; got mdc=${body.mdc} mdlt=${JSON.stringify(body.mdlt)}`);
+  } finally {
+    await edgeSrv.stop();
+    await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${EDGE_DB}`));
   }
 });

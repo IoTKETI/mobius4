@@ -128,6 +128,11 @@ async function create_a_ts(req_prim, resp_prim) {
 
         logger.info({ ri, ts_sid }, 'ts created');
 
+        // No wake here on purpose. A <timeSeries> is created with no children, so it has no
+        // anchor and nothing is expected of it yet -- the sweep would find nothing to schedule
+        // from. The first <timeSeriesInstance> is what makes it detectable, and cse/resources/
+        // tsi.js wakes the sweep there.
+
         const tmp_req = { ri }, tmp_resp = {};
         await retrieve_a_ts(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
@@ -299,6 +304,14 @@ async function update_a_ts(req_prim, resp_prim) {
         }
 
         await db_res.save();
+
+        // Detection may have just been switched on for a resource that already has instances, so
+        // points can be overdue this instant. If nothing was detecting when the sweep booked its
+        // current sleep, it is sleeping the full configured ceiling; ending it here is what makes
+        // detection land at the instant TS-0001:10.2.4.29 names rather than at the ceiling.
+        if (db_res.mdd === true && db_res.pei != null) {
+            require('../missing-data-scheduler').wake();
+        }
 
         if (db_res.loc !== undefined) {
             await Lookup.update({ loc: db_res.loc }, { where: { ri } });

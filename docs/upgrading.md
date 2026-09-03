@@ -1178,3 +1178,12 @@ a `<timeSeries>` with a `periodicInterval` of a few seconds look like detection 
 put it back. Lowering it no longer affects detection latency. What it still bounds is how long a
 newly created or edited `<timeSeries>` can wait before the sweep notices it exists, so a very large
 value delays that.
+
+## v4.24.2
+
+Nothing required. No migration, no configuration change.
+
+If you are on v4.24.1, upgrade: that release fixed missing-data detection only for a
+`<timeSeries>` created within the first quarter-second of the CSE starting. On a CSE that had been
+running, detection was still late by up to `cse.missing_data_sweep_interval_seconds` — the same
+symptom v4.24.1 was meant to fix.

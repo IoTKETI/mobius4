@@ -21,7 +21,10 @@ const tsi_parent_res_types = ['ts'];
 //     to CONFLICT for duplicate resource names.
 const WRITE_TSI_SQL = `
 WITH parent AS (
-    SELECT ri FROM ts WHERE ri = $1
+    -- mdd and md_anchor_dgt come back so the caller can tell whether this instance is the one
+    -- that gives a detecting <timeSeries> its anchor. Until the anchor exists there is no
+    -- expected point, so the missing-data sweep has nothing to compute a wake-up from.
+    SELECT ri, mdd, md_anchor_dgt FROM ts WHERE ri = $1
 ), upd AS (
     UPDATE ts
        SET cni = cni + 1, cbs = cbs + $2
@@ -55,6 +58,8 @@ WITH parent AS (
     RETURNING ri
 )
 SELECT (SELECT count(*) FROM parent)      AS parent_found,
+       (SELECT mdd FROM parent)           AS parent_mdd,
+       (SELECT md_anchor_dgt FROM parent) AS parent_anchor,
        (SELECT count(*) FROM new_lookup)  AS stored,
        (SELECT cni FROM upd)              AS cni,
        (SELECT cbs FROM upd)              AS cbs,
@@ -85,6 +90,8 @@ async function write_a_tsi(tsi_res, originator) {
     const r = rows[0];
     return {
         parent_found: Number(r.parent_found) > 0,
+        parent_detecting: r.parent_mdd === true,
+        parent_anchored: r.parent_anchor != null,
         stored: Number(r.stored) > 0,
         cni: r.cni,
         cbs: r.cbs,
@@ -232,6 +239,15 @@ async function create_a_tsi(req_prim, resp_prim) {
 
     try {
         const written = await write_a_tsi(tsi_res, req_prim.fr);
+
+        // The instance that gives a detecting <timeSeries> its anchor is the one that turns
+        // "nothing is due" into "something is due". Before it there is no expected point for the
+        // sweep to have computed a wake-up from, so it is asleep on the ceiling. Only this one:
+        // once the anchor exists the sweep paces itself correctly, and waking on every instance
+        // would force a pass per instance on a busy time series.
+        if (written.parent_found && written.parent_detecting && !written.parent_anchored) {
+            require('../missing-data-scheduler').wake();
+        }
 
         if (!written.parent_found) {
             resp_prim.rsc = enums.rsc_str['NOT_FOUND'];

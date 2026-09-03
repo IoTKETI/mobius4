@@ -21,6 +21,33 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.2 (2026-09-03)
+
+**Why PATCH**: completes a fix that v4.24.1 got wrong. No capability, no migration.
+
+### Fixed: v4.24.1 still missed detection on a CSE that had been running
+
+v4.24.1 made the missing-data sweep pace itself from the data instead of a fixed cadence. A pass
+that finds nothing detectable has no due time to pace from, though, and falls back to the
+configured ceiling -- so a CSE with no detecting `<timeSeries>` sleeps the full interval, and
+anything created during that sleep is invisible until it ends. Which is every real deployment: the
+CSE is up long before a test creates its resources.
+
+Measured on a warm CSE after v4.24.1, with the conformance tester's shape (`pei` 5000, `mdt` 1000):
+`missingDataCurrentNr` was still 0 at nine seconds, and caught up at twenty. The v4.24.1 test
+passed only because it created the `<timeSeries>` inside the scheduler's first 250 ms pass -- a
+race, not a check. Both tests now use a 300-second interval, so nothing but a wake can produce a
+detection at all.
+
+The sweep is now woken where a resource becomes detectable: the `<timeSeriesInstance>` that gives a
+detecting `<timeSeries>` its first anchor, and an update that switches `missingDataDetect` on for a
+resource that already has instances. Not on every instance -- once the anchor exists the pacing is
+correct, and a busy time series would otherwise force a pass per instance. Not on `<timeSeries>`
+creation either: a new one has no children, so nothing is expected of it yet.
+
+Scheduling moved out of `mobius4.js` into `cse/missing-data-scheduler.js`, which is what made
+`wake()` something the resource handlers can call.
+
 ## v4.24.1 (2026-09-03)
 
 **Why PATCH**: bug fixes. No capability is added and no configuration has to change.

@@ -1,6 +1,6 @@
 {
   "name": "mobius4",
-  "version": "4.24.1",
+  "version": "4.24.2",
   "description": "oneM2M CSE",
   "main": "mobius4.js",
   "engines": {
