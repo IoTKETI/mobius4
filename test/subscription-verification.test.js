@@ -200,3 +200,178 @@ test("a verification request whose creator and Originator both hold NOTIFY is ac
     await srv.stop();
   }
 });
+
+// --- send side: verify_targets, wired into <subscription> creation (cse/resources/sub.js) ---
+
+test("verification is skipped entirely when the setting is off", async () => {
+  // The default. A URL-only deployment must be untouched, and so must a resource-ID one.
+  const { verify_targets } = require("../cse/subscription-verification");
+  assert.equal(await verify_targets(["/CSE1/AE1"], "/CSE1/AE9"), null);
+});
+
+// The four tests below exercise the whole path -- CREATE <subscription> over HTTP, through
+// cse/resources/sub.js's call to verify_targets and cse/noti.js's send_verification -- rather
+// than the module in isolation. A single test server plays both roles: the CSE under test, and
+// (through a local <AE> whose poa points at a sink this file controls) the verification target.
+// That is enough to choose what RSC the target answers, which is what these scenarios turn on;
+// test/helpers/two-cse.js's two full registered CSEs are not needed for that.
+
+// A local sink whose response X-M2M-RSC is fixed by the caller. test/helpers/noti-sink.js
+// always answers 2000 -- it exists to prove notifications *arrive*, not to test the CSE's
+// reaction to a target's refusal -- so it cannot exercise "the target refuses verification" on
+// its own.
+async function startRscSink(rsc) {
+  const http = require("node:http");
+  const received = [];
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => {
+      let parsed = null;
+      try { parsed = raw ? JSON.parse(raw) : null; } catch { parsed = null; }
+      received.push({ headers: req.headers, body: parsed });
+      res.writeHead(200, { "X-M2M-RSC": String(rsc), "Content-Type": "application/json" });
+      res.end("{}");
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  return {
+    url: `http://127.0.0.1:${port}/noti`,
+    received,
+    stop: () => new Promise((resolve) => server.close(resolve)),
+  };
+}
+
+// Registers an <AE> with no From (a fresh AE-ID -- the shared ADMIN originator collides with
+// 4117 on a second registration) and the given poa list (or none), and returns its resource IDs.
+async function aeWithPoa(baseUrl, poa) {
+  const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const rn = uniqueRn("ae");
+  const body = poa
+    ? { "m2m:ae": { rn, api: "Nsv.verif", rr: true, poa } }
+    : { "m2m:ae": { rn, api: "Nsv.verif", rr: false } };
+  const res = await create(baseUrl, CSE_BASE, 2, body, { originator: "" });
+  assert.equal(res.rsc, "2001", `failed to create the target <AE>: ${res.raw.slice(0, 200)}`);
+  return { sid: `${CSE_BASE}/${rn}`, ri: res.body["m2m:ae"].ri };
+}
+
+test("regression: with the setting off, a resource-ID nu subscription is created untouched (2001)", async () => {
+  // TS-0018에 해당 TP 없음 -- every CRE/NTF TP in this group assumes verification is active; this
+  // pins the off default, which is what the plan's Global Constraint ("기존 시험 660건이 계속
+  // 통과해야 한다... nu가 URL인 기존 구독 시험은 동작이 바뀌면 안 된다") extends to a resource-ID nu.
+  const { startServer } = require("./helpers/server");
+  const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer(); // subscription_verification defaults to false
+  try {
+    // No poa: if the off-switch were wired wrong this would fail to verify and prove the point
+    // more sharply than a reachable target would.
+    const target = await aeWithPoa(srv.baseUrl, null);
+    const cntRn = uniqueRn("c");
+    const madeCnt = await create(srv.baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn: cntRn } });
+    assert.equal(madeCnt.rsc, "2001", `failed to create the parent <container>: ${madeCnt.raw.slice(0, 200)}`);
+
+    const subRn = uniqueRn("s");
+    const madeSub = await create(srv.baseUrl, `${CSE_BASE}/${cntRn}`, 23, {
+      "m2m:sub": { rn: subRn, nu: [target.sid], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "2001",
+      `subscription creation must not be blocked when the setting is off: ${madeSub.raw.slice(0, 200)}`);
+  } finally {
+    await srv.stop();
+  }
+});
+
+test("on: the target answers OK, the subscription is created (2001)", async () => {
+  // TS-0018에 해당 TP 없음 -- no CRE/NTF TP describes the plain success path separately from an
+  // ordinary creation; this pins Recv-6.4 step 5(b)'s "OK" branch.
+  const { startServer } = require("./helpers/server");
+  const { startSink } = require("./helpers/noti-sink");
+  const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer({ cse: { subscription_verification: true } });
+  const sink = await startSink();
+  try {
+    const target = await aeWithPoa(srv.baseUrl, [sink.url]);
+    const cntRn = uniqueRn("c");
+    const madeCnt = await create(srv.baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn: cntRn } });
+    assert.equal(madeCnt.rsc, "2001", `failed to create the parent <container>: ${madeCnt.raw.slice(0, 200)}`);
+
+    const subRn = uniqueRn("s");
+    const madeSub = await create(srv.baseUrl, `${CSE_BASE}/${cntRn}`, 23, {
+      "m2m:sub": { rn: subRn, nu: [target.sid], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "2001",
+      `verification succeeded but the creation was refused: ${madeSub.raw.slice(0, 200)}`);
+
+    const verif = sink.received.find((i) => i.body?.["m2m:sgn"]?.vrq === true);
+    assert.ok(verif, "the sink must have received a verification NOTIFY before the create answered");
+    assert.equal(verif.body["m2m:sgn"].cr, "test-admin",
+      "creator is the Originator of the subscription creation request (TS-0004:7.5.1.2.3)");
+    assert.equal(verif.body["m2m:sgn"].sur, undefined,
+      "sur must be absent -- the <subscription> did not exist yet when this was sent");
+  } finally {
+    await sink.stop();
+    await srv.stop();
+  }
+});
+
+test("TP/oneM2M/CSE/SUB/CRE/003 on: the target has no reachable pointOfAccess, the creation is " +
+  "refused 5204 and no <subscription> is created (TC_ONEM2M_SUB_CRE_03)", async () => {
+  const { startServer } = require("./helpers/server");
+  const { create, discover, urils, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer({ cse: { subscription_verification: true } });
+  try {
+    const target = await aeWithPoa(srv.baseUrl, null); // rr:false, no poa -- "cannot be sent"
+    const cntRn = uniqueRn("c");
+    const madeCnt = await create(srv.baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn: cntRn } });
+    assert.equal(madeCnt.rsc, "2001", `failed to create the parent <container>: ${madeCnt.raw.slice(0, 200)}`);
+    const cntSid = `${CSE_BASE}/${cntRn}`;
+
+    const subRn = uniqueRn("s");
+    const madeSub = await create(srv.baseUrl, cntSid, 23, {
+      "m2m:sub": { rn: subRn, nu: [target.sid], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "5204",
+      `expected SUBSCRIPTION_VERIFICATION_INITIATION_FAILED: ${madeSub.raw.slice(0, 200)}`);
+
+    // RSC alone does not prove there was no partial creation. Retrieve the parent -- discover()
+    // is a RETRIEVE of cntSid with the discovery filter usage -- and confirm the <subscription>
+    // is not among its descendants.
+    const found = await discover(srv.baseUrl, cntSid);
+    assert.deepEqual(urils(found), [], "no <subscription> child may exist after a refused verification");
+  } finally {
+    await srv.stop();
+  }
+});
+
+test("on: the target refuses the verification NOTIFY (4103), the creation is refused 5204", async () => {
+  // TS-0018에 해당 TP 없음. TP/oneM2M/CSE/SUB/NTF/001 and /002 look adjacent -- a target's Notify
+  // response carrying SUBSCRIPTION_CREATOR_HAS_NO_PRIVILEGE (4101) / SUBSCRIPTION_HOST_HAS_NO_
+  // PRIVILEGE (5205) -- but both (TS-0018 v4.6.1, Release 1) have the Hosting CSE propagate that
+  // *same* code back to the subscription creator. The current TS-0004:7.4.8.2.1 Recv-6.4 step
+  // 5(b) (v5.2.0, read via spec.get_clause during this task) instead fixes the response to
+  // SUBSCRIPTION_VERIFICATION_INITIATION_FAILED for *any* non-OK Notify response, regardless of
+  // which code it carried. The two disagree, so neither TP is cited here -- the correspondence
+  // is not certain, and this task's implementation follows the current clause.
+  const { startServer } = require("./helpers/server");
+  const { create, CSE_BASE, uniqueRn } = require("./helpers/onem2m");
+  const srv = await startServer({ cse: { subscription_verification: true } });
+  const rscSink = await startRscSink(4103);
+  try {
+    const target = await aeWithPoa(srv.baseUrl, [rscSink.url]);
+    const cntRn = uniqueRn("c");
+    const madeCnt = await create(srv.baseUrl, CSE_BASE, 3, { "m2m:cnt": { rn: cntRn } });
+    assert.equal(madeCnt.rsc, "2001", `failed to create the parent <container>: ${madeCnt.raw.slice(0, 200)}`);
+
+    const subRn = uniqueRn("s");
+    const madeSub = await create(srv.baseUrl, `${CSE_BASE}/${cntRn}`, 23, {
+      "m2m:sub": { rn: subRn, nu: [target.sid], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "5204",
+      `expected SUBSCRIPTION_VERIFICATION_INITIATION_FAILED: ${madeSub.raw.slice(0, 200)}`);
+    assert.equal(rscSink.received.length, 1, "the verification NOTIFY must have reached the target");
+  } finally {
+    await rscSink.stop();
+    await srv.stop();
+  }
+});

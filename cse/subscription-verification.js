@@ -110,9 +110,52 @@ async function handle_verification(req_prim, resp_prim) {
     return true;
 }
 
+// TS-0004:7.5.1.2.3, sender side: set verificationRequest to true and creator to the Originator
+// ID of the subscription creation request, with To set to the notificationURI; the primitive is
+// duplicated per entry. sur is deliberately absent -- the clause does not ask for it and the
+// <subscription> does not exist yet.
+//
+// Recv-6.4 gives two failure paths and one status code for both: if the request cannot be sent,
+// SUBSCRIPTION_VERIFICATION_INITIATION_FAILED; if it was sent and any response is not "OK",
+// the same.
+async function verify_targets(nu_list, originator) {
+    if (!verification_enabled()) return null;
+
+    const targets = verification_targets(nu_list, originator);
+    if (targets.length === 0) return null;
+
+    const enums = require("../config/enums");
+    const logger = require("../logger");
+    const config_mod = require("config");
+    const { send_verification } = require("./noti");
+
+    for (const target of targets) {
+        let rsc;
+        try {
+            rsc = await send_verification(target, originator,
+                config_mod.cse.notification_timeout_seconds * 1000);
+        } catch (err) {
+            logger.info({ target, err: err.message }, "subscription verification could not be sent");
+            return {
+                rsc: enums.rsc_str["SUBSCRIPTION_VERIFICATION_INITIATION_FAILED"],
+                dbg: `the verification request to ${target} could not be sent`,
+            };
+        }
+        if (Number(rsc) !== enums.rsc_str["OK"]) {
+            logger.info({ target, rsc }, "subscription verification refused by the target");
+            return {
+                rsc: enums.rsc_str["SUBSCRIPTION_VERIFICATION_INITIATION_FAILED"],
+                dbg: `the verification request to ${target} was answered ${rsc}`,
+            };
+        }
+    }
+    return null;
+}
+
 module.exports = {
     is_resource_id_target,
     verification_targets,
     verification_enabled,
     handle_verification,
+    verify_targets,
 };

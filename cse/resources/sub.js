@@ -144,6 +144,17 @@ async function create_a_sub(req_prim, resp_prim) {
     return resp_prim;
   }
 
+  // TS-0004:7.4.8.2.1 Recv-6.4. Before the insert, not after: a subscription that failed
+  // verification must not exist, and the clause makes the failure a refusal of the creation
+  // rather than a note on a created resource.
+  const { verify_targets } = require('../subscription-verification');
+  const refusal = await verify_targets(prim_res.nu, req_prim.fr);
+  if (refusal) {
+    resp_prim.rsc = refusal.rsc;
+    resp_prim.pc = { 'm2m:dbg': refusal.dbg };
+    return resp_prim;
+  }
+
   const ri = generate_ri();
   const now = get_cur_time();
   const et = get_default_et();

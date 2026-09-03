@@ -470,6 +470,46 @@ async function mqtt_noti(noti_target, sgn) {
     return true;
 }
 
+// TS-0004:7.5.1.2.3 sender side: the Hosting CSE sends a Subscription Verification request
+// primitive to a resource-ID notificationURI entry before the <subscription> that names it is
+// created. Unlike http_noti (fire-and-forget, returns a boolean once the request is dispatched),
+// the caller here (cse/subscription-verification.js's verify_targets) has to decide whether the
+// creation can proceed, so this awaits the response and hands back the actual X-M2M-RSC.
+//
+// Two distinct failure shapes both matter to the caller and are kept apart on purpose:
+//   - no reachable poa, or the request never got a response at all (network error, timeout) --
+//     "the request cannot be sent" (Recv-6.4) -- this throws.
+//   - the request was sent and answered, whatever the RSC -- this returns that RSC, even when it
+//     is one the HTTP binding maps to a non-2xx status (bindings/http.js maps 4103 to 403, for
+//     example). validateStatus below is what keeps axios from turning that into a thrown error
+//     indistinguishable from "could not be sent".
+async function send_verification(target, creator, timeout_ms) {
+  const { get_to_info } = require('./reqPrim');
+  const { generate_ri } = require('./utils');
+
+  const { shortest_to: res_id } = get_to_info({ to: target });
+  const urls = res_id ? await get_urls_from_poa(res_id) : [];
+  const url = urls.find((u) => u.startsWith('http'));
+  if (!url) throw new Error(`no reachable pointOfAccess for ${target}`);
+
+  const resp = await axios.request({
+    url,
+    method: "post",
+    headers: {
+      "X-M2M-Origin": config.cse.cse_id,
+      "X-M2M-RI": 'verif-noti-' + generate_ri(),
+      "X-M2M-RVI": config.cse.versions[0],
+      "Content-Type": "application/json",
+    },
+    // sur is deliberately absent -- the <subscription> this verification is for does not exist
+    // yet, so there is no structured ID to give it (TS-0004:7.5.1.2.3 does not ask for one here).
+    data: { "m2m:sgn": { vrq: true, cr: creator } },
+    timeout: timeout_ms,
+    validateStatus: () => true,
+  });
+  return resp.headers['x-m2m-rsc'];
+}
+
 async function get_urls_from_poa(res_id) {
     const { get_unstructuredID } = require('./hostingCSE');
     const ri = await get_unstructuredID(res_id);
@@ -562,4 +602,7 @@ module.exports = {
     // resource CRUD event and so cannot go through check_and_send_noti.
     send_a_noti,
     prefetch_ae_poa,
+    // Used by cse/subscription-verification.js's verify_targets, on the subscription creation
+    // path (cse/resources/sub.js).
+    send_verification,
 };
