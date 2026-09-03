@@ -337,3 +337,91 @@ test("a resource-ID nu naming an <AE> with no pointOfAccess drops the notificati
   assert.equal(got.body["m2m:sgn"].nev.rep["m2m:cin"].con, marker,
     "notifications must keep flowing after a target that could not be resolved");
 });
+
+test("an outgoing notification is readable in the debug log", async () => {
+  // The counterpart to cse/reqPrim.js's 'request primitive forwarded'. A forwarded request has
+  // been logged as a primitive since v4.22.1; a notification had only its target and sur, so what
+  // a receiver was actually sent could not be read back at all -- it had to be inferred from the
+  // resource that triggered it, which is exactly the inference that fails when the two disagree.
+  //
+  // The Request Identifier is asserted against the header the receiver saw, not merely present.
+  // An identifier in the log that differs from the one on the wire cannot be matched against the
+  // other side's log, which is most of what it is for.
+  //
+  // Its own server: the shared one runs at logLevel "error" and would drop a debug record.
+  //
+  // TS-0018에 해당 TP 없음.
+  const { startServer } = require("./helpers/server");
+  const { startSink } = require("./helpers/noti-sink");
+  const logSrv = await startServer({ logLevel: "debug" });
+  const logSink = await startSink();
+  try {
+    const logRoot = await createRoot(logSrv.baseUrl, "notilog");
+    const cnt = uniqueRn("c");
+    await create(logSrv.baseUrl, logRoot.sid, 3, { "m2m:cnt": { rn: cnt } });
+    const sub = uniqueRn("s");
+    const madeSub = await create(logSrv.baseUrl, `${logRoot.sid}/${cnt}`, 23, {
+      "m2m:sub": { rn: sub, nu: [logSink.url], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "2001", `setup failed: ${madeSub.raw.slice(0, 200)}`);
+
+    const marker = `logged-${Date.now()}`;
+    await create(logSrv.baseUrl, `${logRoot.sid}/${cnt}`, 4, { "m2m:cin": { con: marker } });
+    const got = await logSink.waitFor((i) => i.body?.["m2m:sgn"]?.nev?.rep?.["m2m:cin"]?.con === marker);
+
+    const diag = logSrv.diagnostics();
+    assert.ok(diag.includes("notification primitive sent"),
+      `the send must be logged: ${diag.slice(-800)}`);
+    assert.ok(diag.includes(marker),
+      "and the log must carry the notification content, not just the target");
+    assert.ok(diag.includes(got.headers["x-m2m-ri"]),
+      `the logged Request Identifier must be the one the receiver saw (${got.headers["x-m2m-ri"]})`);
+  } finally {
+    await logSink.stop();
+    await logSrv.stop();
+  }
+});
+
+test("a notification that cannot be delivered says so", async () => {
+  // A notificationURI naming an <AE> with no pointOfAccess produced no log line at all. The loop
+  // that dials the access points had nothing to iterate, and the send paths that warn on failure
+  // were never reached -- so from the log this was indistinguishable from a notification that was
+  // never generated, which sends whoever is debugging it to look at the subscription's conditions
+  // instead of at the target.
+  //
+  // TS-0018에 해당 TP 없음.
+  const { startServer } = require("./helpers/server");
+  const dropSrv = await startServer({ logLevel: "warn" });
+  try {
+    const dropRoot = await createRoot(dropSrv.baseUrl, "drop");
+
+    // rr:false and no poa: registered, addressable, and unreachable.
+    const aeRn = uniqueRn("ae");
+    const madeAe = await create(dropSrv.baseUrl, CSE_BASE, 2,
+      { "m2m:ae": { rn: aeRn, api: "Ndrop.test", rr: false } }, { originator: "" });
+    assert.equal(madeAe.rsc, "2001", `failed to register the <AE>: ${madeAe.raw.slice(0, 200)}`);
+
+    const cnt = uniqueRn("c");
+    await create(dropSrv.baseUrl, dropRoot.sid, 3, { "m2m:cnt": { rn: cnt } });
+    const sub = uniqueRn("s");
+    const madeSub = await create(dropSrv.baseUrl, `${dropRoot.sid}/${cnt}`, 23, {
+      "m2m:sub": { rn: sub, nu: [`${CSE_BASE}/${aeRn}`], enc: { net: [3] }, nct: 1 },
+    });
+    assert.equal(madeSub.rsc, "2001", `setup failed: ${madeSub.raw.slice(0, 200)}`);
+
+    const made = await create(dropSrv.baseUrl, `${dropRoot.sid}/${cnt}`, 4, { "m2m:cin": { con: "q" } });
+    assert.equal(made.rsc, "2001", "the create still succeeds; only the notification is undeliverable");
+
+    // The notification is sent after the response, so give it a moment to reach the warning.
+    for (let i = 0; i < 40 && !dropSrv.diagnostics().includes("no pointOfAccess"); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const diag = dropSrv.diagnostics();
+    assert.ok(diag.includes("has no pointOfAccess to deliver to"),
+      `an undeliverable notification must be reported: ${diag.slice(-800)}`);
+    assert.ok(diag.includes(`${CSE_BASE}/${aeRn}`),
+      "and the warning must name the target it could not reach");
+  } finally {
+    await dropSrv.stop();
+  }
+});

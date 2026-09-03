@@ -21,6 +21,36 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.5 (2026-09-03)
+
+**Why PATCH**: logging only. No behaviour change, no configuration, no migration.
+
+### Added: an outgoing notification is readable in the log
+
+An incoming request has always been logged as a primitive, and a forwarded request since v4.22.1.
+A notification had only its target and `subscriptionReference`, so what a receiver was actually
+sent could not be read back at all — it had to be inferred from the resource that triggered it,
+which is exactly the inference that fails when the two disagree.
+
+All three senders — HTTP, MQTT, and the subscription verification request — now log the primitive
+at `debug`, in the same shape `cse/reqPrim.js` uses for a forwarded request. `debug` rather than
+`info` because notifications are as frequent as the events that cause them.
+
+The `rqi` in that record is now the same value the receiver sees in `X-M2M-RI`. It used to be
+generated inline in the headers, so a log entry named an identifier that appeared nowhere on the
+wire and could not be matched against the other side's log.
+
+### Fixed: an undeliverable notification produced no log line at all
+
+A `notificationURI` naming an `<AE>` with no `pointOfAccess` had nothing to dial, so the loop that
+dials them never ran and none of the send paths — nor any of their warnings — was reached. From
+the log that is indistinguishable from a notification that was never generated, which sends whoever
+is debugging it to look at the subscription's conditions rather than at the target.
+
+Three cases now warn: a target that is not a resolvable resource ID, a target with no
+`pointOfAccess`, and a target where no access point accepted the notification. These are `warn`, so
+they show at the default level without turning on `debug`.
+
 ## v4.24.4 (2026-09-03)
 
 **Why PATCH**: a bug fix. No capability, no migration.

@@ -342,16 +342,38 @@ async function send_a_noti(sub_res, event_obj, notificationEventType, ae_poa_map
         if (noti_target.startsWith('mqtt'))  { mqtt_noti(noti_target, sgn); continue; }
 
         // AE resource ID — use pre-fetched poa map, fall back to DB query if not found
+        //
+        // Every way this can fail used to fail silently. A notificationURI naming an <AE> with no
+        // pointOfAccess produced no log line at all: the loop below simply had nothing to iterate,
+        // and the send paths that do log warnings were never reached. From outside, and from the
+        // log, that is indistinguishable from a notification that was never generated -- which is
+        // the harder thing to debug, because it sends you looking at the subscription's conditions
+        // instead of at the target.
         const { get_to_info } = require('./reqPrim');
         const { shortest_to: res_id } = get_to_info({ to: noti_target });
-        if (!res_id) continue;
+        if (!res_id) {
+            logger.warn({ target: noti_target, sur: sgn['m2m:sgn']?.sur },
+                'notification target is not a resolvable resource ID; notification dropped');
+            continue;
+        }
 
         const urls = ae_poa_map[res_id] ?? await get_urls_from_poa(res_id);
+        if (urls.length === 0) {
+            logger.warn({ target: noti_target, res_id, sur: sgn['m2m:sgn']?.sur },
+                'notification target has no pointOfAccess to deliver to; notification dropped');
+            continue;
+        }
+
+        let delivered = false;
         for (const url of urls) {
             let result = null;
             if (url.startsWith('http'))  result = await http_noti(url, sgn);
             else if (url.startsWith('mqtt')) result = await mqtt_noti(url, sgn);
-            if (result === true) break;
+            if (result === true) { delivered = true; break; }
+        }
+        if (!delivered) {
+            logger.warn({ target: noti_target, res_id, poa: urls, sur: sgn['m2m:sgn']?.sur },
+                'notification was not delivered on any pointOfAccess');
         }
     }
 }
@@ -396,8 +418,23 @@ async function send_sub_del_noti(sub_res) {
 }
 
 async function http_noti(noti_target, sgn) {
-    logger.debug({ target: noti_target, sur: sgn['m2m:sgn']?.sur }, 'sending http notification');
     const { generate_ri } = require('./utils');
+    const rqi = 'http-noti-' + generate_ri();
+
+    // The record of what actually went out, in the same shape cse/reqPrim.js logs a forwarded
+    // request in. Only the target and sur were logged before, so a notification could not be read
+    // back from the log at all -- what a receiver was sent had to be inferred from the resource
+    // that triggered it. At debug rather than info because notifications are as frequent as the
+    // events that cause them, where a forwarded request is not.
+    //
+    // rqi is generated here rather than inline in the headers so this line and the X-M2M-RI the
+    // receiver sees are the same value. A log entry naming a different identifier than the wire
+    // cannot be matched against the other side's log, which is most of what it is for.
+    logger.debug({
+        prim: { to: noti_target, fr: config.cse.cse_id, rqi, rvi: config.cse.versions[0],
+                op: 5, pc: sgn },
+        method: 'post', url: noti_target,
+    }, 'notification primitive sent');
 
     // axios handles HTTP and HTTPs automatically
     axios
@@ -406,7 +443,7 @@ async function http_noti(noti_target, sgn) {
             method: "post",
             headers: {
                 "X-M2M-Origin": config.cse.cse_id,
-                "X-M2M-RI": 'http-noti-' + generate_ri(),
+                "X-M2M-RI": rqi,
                 // A notification is a request primitive, and TS-0004:6.4.1 gives Release Version
                 // Indicator multiplicity 1 -- it is mandatory on every one. This header was
                 // missing, and a receiver that checks its request parameters rejected the
@@ -457,6 +494,12 @@ async function mqtt_noti(noti_target, sgn) {
         pc: sgn,
     };
 
+    logger.debug({
+        prim: { to: noti_target, fr: req_prim.fr, rqi: req_prim.ri, rvi: config.cse.versions[0],
+                op: 5, pc: sgn },
+        topic,
+    }, 'notification primitive sent');
+
     // Published to the broker the URL names, not to this CSE's own. TS-0010:6.6.2 makes the
     // authority part of the URL meaningful; sending everything to the local broker delivered the
     // right topic to the wrong server, which looks identical in the logs and delivers nothing.
@@ -492,12 +535,19 @@ async function send_verification(target, creator, sub_sid, timeout_ms) {
   const url = urls.find((u) => u.startsWith('http'));
   if (!url) throw new Error(`no reachable pointOfAccess for ${target}`);
 
+  const rqi = 'verif-noti-' + generate_ri();
+  logger.debug({
+      prim: { to: target, fr: config.cse.cse_id, rqi, rvi: config.cse.versions[0], op: 5,
+              pc: { "m2m:sgn": { vrq: true, cr: creator, sur: sub_sid } } },
+      method: 'post', url,
+  }, 'notification primitive sent');
+
   const resp = await axios.request({
     url,
     method: "post",
     headers: {
       "X-M2M-Origin": config.cse.cse_id,
-      "X-M2M-RI": 'verif-noti-' + generate_ri(),
+      "X-M2M-RI": rqi,
       "X-M2M-RVI": config.cse.versions[0],
       "Content-Type": "application/json",
     },

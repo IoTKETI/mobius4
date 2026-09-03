@@ -1204,3 +1204,16 @@ Nothing required. A `<subscription>` that sends `notificationContentType` as a J
 (`"nct": "3"`) is now accepted instead of being refused with a message that named a valid
 combination as invalid. Sending it as a number, which is what oneM2M's JSON serialization calls
 for, behaves exactly as before.
+
+## v4.24.5
+
+Nothing required. Logging only.
+
+To see the notifications this CSE sends, set `logging.level` to `debug` in `config/local.json` and
+look for `notification primitive sent` — it carries the full message, the target, and the same
+Request Identifier the receiver sees in `X-M2M-RI`.
+
+Notifications that could not be delivered now warn, so they appear at the default level. Three
+cases that previously left no trace at all: a `notificationURI` that is not a resolvable resource
+ID, one naming a resource with no `pointOfAccess`, and one where no access point accepted the
+notification. `docs/logging-guide.md` lists the fields.

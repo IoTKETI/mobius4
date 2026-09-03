@@ -278,6 +278,35 @@ const logger = require('../logger').child({ module: 'mqtt', binding: 'mqtt' });
 
 ---
 
+## Outgoing notifications
+
+An incoming request is logged as a primitive by `cse/reqPrim.js`, and a forwarded request has been
+since v4.22.1. A notification had only its target and `subscriptionReference`, so what a receiver
+was actually sent could not be read back from the log — it had to be inferred from the resource
+that triggered it, which is exactly the inference that fails when the two disagree.
+
+| Event | Level | Fields |
+|-------|-------|--------|
+| Notification sent (HTTP, MQTT, or a verification request) | `debug` | `prim` (`to`, `fr`, `rqi`, `rvi`, `op`, `pc`), plus `url`/`topic` |
+| Target answered | `debug` | `target`, `status` |
+| Target rejected it | `warn` | `sur`, `target`, `status`, `data` |
+| Delivery failed | `warn` | `sur`, `target`, `code`, `err` |
+| Target is not a resolvable resource ID | `warn` | `target`, `sur` |
+| Target has no `pointOfAccess` | `warn` | `target`, `res_id`, `sur` |
+| No `pointOfAccess` accepted it | `warn` | `target`, `res_id`, `poa`, `sur` |
+
+The `rqi` in the sent record is the same value the receiver sees in `X-M2M-RI`, so the two sides'
+logs can be matched. Set `logging.level` to `debug` to see the sent record; the failures are `warn`
+and show at the default level.
+
+The last three exist because those cases used to produce no log line at all. A `notificationURI`
+naming an `<AE>` with no `pointOfAccess` had nothing to dial, so none of the send paths — and none
+of their warnings — was ever reached. From the log that is indistinguishable from a notification
+that was never generated, which sends whoever is debugging it to look at the subscription's
+conditions rather than at the target.
+
+---
+
 ## Log Output Examples
 
 ### JSON (production)
