@@ -171,3 +171,26 @@ test("an omitted notificationContentType behaves as All Attributes for net=1", a
   assert.ok("ri" in sgn.nev.rep["m2m:cnt"], "the default is the whole resource");
   assert.equal(sgn.sut, undefined, "and it carries no subscribedTo");
 });
+
+test("an omitted notificationContentType is stored as the default for its event type", async () => {
+  // TS-0004:7.4.8.2.1 Recv-6.5 says the CSE shall *set* it, not merely behave as if it were set.
+  // The default is per event type (TS-0001 table 9.6.8-4), so a net=8 subscription defaults to 5,
+  // not to 1 -- and 1 is a value that table marks n/a for net=8. It was stored as 1 regardless,
+  // which the notification path then papered over by computing the right one at send time.
+  const { retrieve } = require("./helpers/onem2m");
+
+  const plain = await cntWithSub(undefined, { net: [1] });
+  assert.equal(plain.res.rsc, "2001", `setup failed: ${plain.res.raw.slice(0, 160)}`);
+  assert.equal((await retrieve(srv.baseUrl, plain.subSid)).body["m2m:sub"].nct, 1);
+
+  // net=8 needs a <timeSeries> parent, so it gets its own fixture rather than cntWithSub's.
+  const ts = uniqueRn("ts");
+  await create(srv.baseUrl, root.sid, 29, { "m2m:ts": { rn: ts, pei: 2, peid: 0, mdt: 1, mdd: true } });
+  const sub = uniqueRn("s");
+  const made = await create(srv.baseUrl, `${root.sid}/${ts}`, 23, {
+    "m2m:sub": { rn: sub, nu: [sink.url], enc: { net: [8], md: { num: 2, dur: "PT1H" } } },
+  });
+  assert.equal(made.rsc, "2001", `setup failed: ${made.raw.slice(0, 200)}`);
+  assert.equal((await retrieve(srv.baseUrl, `${root.sid}/${ts}/${sub}`)).body["m2m:sub"].nct, 5,
+    "table 9.6.8-4 makes TimeSeries notification the default for net=8");
+});

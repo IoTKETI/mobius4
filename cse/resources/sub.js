@@ -1,5 +1,5 @@
 const { sub_create_schema, sub_update_schema } = require('../validation/res_schema');
-const { undefined_net, unimplemented_net, net_combination_error } = require('../notification-event-types');
+const { undefined_net, unimplemented_net, net_combination_error, effective_nct } = require('../notification-event-types');
 
 const { generate_ri, get_cur_time, get_default_et } = require('../utils');
 const sequelize = require('../../db/sequelize');
@@ -167,7 +167,13 @@ async function create_a_sub(req_prim, resp_prim) {
         enc: prim_res.enc || null,
         exc: prim_res.exc,
         nu: prim_res.nu,
-        nct: prim_res.nct || 1,
+        // TS-0004:7.4.8.2.1 Recv-6.5: "If the Originator does not provide notificationContentType,
+        // the Hosting CSE shall set it according to the default shown in TS-0001 Table 9.6.8-4."
+        // The default is per notificationEventType, not a constant -- 1 for event types A to E,
+        // 5 for "Report on missing data points". Storing 1 unconditionally meant a net=8
+        // subscription reported nct=1 on RETRIEVE, a value the table marks n/a for it. The
+        // notification path already computed the right one, so only the stored value was wrong.
+        nct: effective_nct(prim_res.enc, prim_res.nct),
         cr: creator,
         su: prim_res.su || null,
       }, { transaction: t });
