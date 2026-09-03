@@ -2,7 +2,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { startServer } = require("./helpers/server");
-const { create, update, remove, createRoot, uniqueRn } = require("./helpers/onem2m");
+const { create, update, remove, createRoot, uniqueRn, CSE_BASE } = require("./helpers/onem2m");
 const { startSink, netOf } = require("./helpers/noti-sink");
 
 let srv, root, sink;
@@ -250,4 +250,90 @@ test("net=4 — a client-issued DELETE of a <contentInstance> still notifies", a
   await remove(srv.baseUrl, `${cntSid}/${res.body["m2m:cin"].rn}`);
   const got = await sink.waitFor((i) => netOf(i) === 4 && i.body["m2m:sgn"].sur === subSid);
   assert.equal(got.body["m2m:sgn"].nev.net, 4);
+});
+
+// --- notificationURI as a oneM2M resource-ID -------------------------------------------------
+//
+// TS-0001:9.6.8 gives notificationURI two forms: "a oneM2M compliant Resource-ID as defined in
+// clause 7.2 ... of an <AE> or <CSEBase> resource", or a protocol-binding URL. Everything above
+// this line uses the URL form, and so did every other notification test in this repository, so
+// the resource-ID branch of cse/noti.js -- resolve the ID, read the <AE>'s poa, send there -- had
+// no coverage at all despite being the form the standard leads with.
+//
+// This matters beyond tidiness: TS-0004:7.4.8.2.1 Recv-6.4 makes subscription verification apply
+// to exactly the targets "formatted as oneM2M-compliant resource-IDs", and the same clause says a
+// response is expected "only if" the target is in that format. Work that follows this line is
+// gated on the form these tests cover.
+//
+// TS-0018에 해당 TP 없음 -- the TPs for <subscription> creation do not distinguish the two forms
+// of notificationURI.
+
+// An <AE> whose poa points back at the local sink, so a notification addressed to the AE by
+// resource ID arrives at the same place a URL nu would.
+async function aeAtSink() {
+  const rn = uniqueRn("ae");
+  // Registered with no From so the CSE assigns a fresh AE-ID; the shared admin originator would
+  // derive the same one twice and the second registration would be refused 4117.
+  const res = await create(srv.baseUrl, CSE_BASE, 2, {
+    "m2m:ae": { rn, api: "Nnoti.resid", rr: true, poa: [sink.url] },
+  }, { originator: "" });
+  assert.equal(res.rsc, "2001", `failed to create the <AE>: ${res.raw.slice(0, 200)}`);
+  return { sid: `${CSE_BASE}/${rn}`, ri: res.body["m2m:ae"].ri };
+}
+
+async function cntSubbedTo(nu) {
+  const cnt = uniqueRn("c");
+  await create(srv.baseUrl, root.sid, 3, { "m2m:cnt": { rn: cnt } });
+  const sub = uniqueRn("s");
+  const res = await create(srv.baseUrl, `${root.sid}/${cnt}`, 23, {
+    "m2m:sub": { rn: sub, nu: [nu], enc: { net: [3] }, nct: 1 },
+  });
+  assert.equal(res.rsc, "2001", `failed to create the <subscription>: ${res.raw.slice(0, 200)}`);
+  return { cntSid: `${root.sid}/${cnt}`, subSid: `${root.sid}/${cnt}/${sub}` };
+}
+
+test("nu as a structured resource-ID delivers to the <AE>'s pointOfAccess", async () => {
+  const ae = await aeAtSink();
+  const { cntSid, subSid } = await cntSubbedTo(ae.sid);
+  const marker = `structured-${Date.now()}`;
+  await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: marker } });
+
+  const got = await sink.waitFor((i) => i.body["m2m:sgn"]?.sur === subSid);
+  assert.equal(got.body["m2m:sgn"].nev.rep["m2m:cin"].con, marker,
+    "the resource-ID target receives the same notification a URL target would");
+});
+
+test("nu as an unstructured resource-ID delivers to the <AE>'s pointOfAccess", async () => {
+  // The two spellings take different branches in prefetch_ae_poa -- a structured ID is resolved
+  // through the lookup table first, an unstructured one is used as the ri directly -- so one
+  // passing does not imply the other does.
+  const ae = await aeAtSink();
+  const { cntSid, subSid } = await cntSubbedTo(ae.ri);
+  const marker = `unstructured-${Date.now()}`;
+  await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: marker } });
+
+  const got = await sink.waitFor((i) => i.body["m2m:sgn"]?.sur === subSid);
+  assert.equal(got.body["m2m:sgn"].nev.rep["m2m:cin"].con, marker);
+});
+
+test("a resource-ID nu naming an <AE> with no pointOfAccess drops the notification quietly", async () => {
+  // There is nowhere to send it. What is being pinned is that the event does not take the CSE
+  // down and does not stall the request that triggered it: a create still answers 2001, and a
+  // later notification on an unrelated subscription still arrives. Without the second half this
+  // test would pass even if the notification path threw and was swallowed.
+  const rn = uniqueRn("ae");
+  const made = await create(srv.baseUrl, CSE_BASE, 2,
+    { "m2m:ae": { rn, api: "Nnoti.nopoa", rr: false } }, { originator: "" });
+  assert.equal(made.rsc, "2001", `failed to create the <AE>: ${made.raw.slice(0, 200)}`);
+
+  const { cntSid } = await cntSubbedTo(`${CSE_BASE}/${rn}`);
+  const dead = await create(srv.baseUrl, cntSid, 4, { "m2m:cin": { con: "goes-nowhere" } });
+  assert.equal(dead.rsc, "2001", "the create must still succeed when the target is unreachable");
+
+  const live = await cntSubbedTo(sink.url);
+  const marker = `after-dead-target-${Date.now()}`;
+  await create(srv.baseUrl, live.cntSid, 4, { "m2m:cin": { con: marker } });
+  const got = await sink.waitFor((i) => i.body["m2m:sgn"]?.sur === live.subSid);
+  assert.equal(got.body["m2m:sgn"].nev.rep["m2m:cin"].con, marker,
+    "notifications must keep flowing after a target that could not be resolved");
 });

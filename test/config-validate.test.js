@@ -12,9 +12,20 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const fs = require("node:fs");
+const os = require("node:os");
 const { spawnSync } = require("node:child_process");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
+
+// The guard is read against the configuration this project *ships*, so the child gets a config
+// directory holding only config/default.json. Letting it read config/ directly meant an
+// operator's own config/local.json -- git-ignored, present on any machine that actually runs the
+// CSE -- supplied a cse.admin and the "unset" case could not arise. That failed only on
+// developer machines and never in CI, which is the worst place for a test to disagree with
+// itself: the red is dismissed as local noise.
+const CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "mobius4-config-guard-"));
+fs.copyFileSync(path.join(REPO_ROOT, "config", "default.json"), path.join(CONFIG_DIR, "default.json"));
 
 // Runs the guard with the given NODE_CONFIG and reports how it ended.
 // Console logging is left on so that the message can be asserted, not just the exit code — a
@@ -26,7 +37,7 @@ function runGuard(overrides) {
     ["-e", "require('./config/validate').validate_config(require('./logger'))"],
     {
       cwd: REPO_ROOT,
-      env: { ...process.env, NODE_ENV: "test", NODE_CONFIG: JSON.stringify(merged) },
+      env: { ...process.env, NODE_ENV: "test", NODE_CONFIG_DIR: CONFIG_DIR, NODE_CONFIG: JSON.stringify(merged) },
       encoding: "utf8",
     }
   );
