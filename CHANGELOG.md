@@ -21,6 +21,46 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.22.5 (2026-09-03)
+
+**Why PATCH**: a bug fix in a stored value plus test coverage. No capability is added.
+
+### Fixed: the stored `notificationContentType` default ignored the event type
+
+`TS-0004:7.4.8.2.1` Recv-6.5 requires the Hosting CSE to *set* `notificationContentType`
+when the Originator omits it, using the default in `TS-0001` table 9.6.8-4. That default
+is per `notificationEventType`, not a constant -- `1` for event types A to E, `5` for
+"Report on missing data points". `cse/resources/sub.js` stored `1` unconditionally, so a
+`net=8` subscription retrieved as `nct=1`, a pairing the same table marks n/a.
+
+Only the stored value was affected. Notifications already carried the correct content,
+because the send path computes the effective value at notification time -- which is also
+why no test caught it.
+
+### Added: coverage for `notificationURI` in oneM2M resource-ID form
+
+`TS-0001:9.6.8` gives `notificationURI` two forms: a oneM2M resource-ID of an `<AE>` or
+`<CSEBase>` resource, or a protocol-binding URL. Every notification test in this
+repository used the URL form, so the resource-ID branch -- resolve the ID, read the
+`<AE>`'s `pointOfAccess`, send there -- had no coverage at all, despite being the form
+the standard leads with.
+
+Structured and unstructured IDs take different code paths, so both are covered, along
+with an `<AE>` that has no `pointOfAccess` -- pinning that an unresolvable target neither
+fails the request that triggered it nor stops later notifications. Deleting the
+resource-ID delivery branch fails the first two tests.
+
+This is also the form subscription verification is scoped to: the same clause says a
+response is expected "only if" the target is in resource-ID format.
+
+### Fixed: the startup-guard test could not fail on a machine that runs the CSE
+
+`test/config-validate.test.js` spawned its child against the real `config/` directory, so
+an operator's own `config/local.json` supplied a `cse.admin` and the "unset" case could
+not arise. It failed locally and passed in CI -- the split that trains people to dismiss
+a red suite as local noise. The child now reads a directory holding only the shipped
+`config/default.json`, which is what the guard is a guard on.
+
 ## v4.22.4 (2026-09-03)
 
 **Why PATCH**: a bug fix. A setting that had never taken effect now does.

@@ -1090,3 +1090,19 @@ in [README.md](../README.md) points at.
 A good section states the symptom in the form the user will actually see it (an
 exact error message, a specific failure), then the diagnosis, then the fix, then
 how to confirm it worked.
+
+## v4.22.5
+
+Nothing required. No migration, no configuration change.
+
+One behaviour changes on retrieval. A `<subscription>` created without
+`notificationContentType` on a `<timeSeries>` with `notificationEventType` 8
+("Report on missing data points") now stores and returns `nct: 5`, the default
+`TS-0001` table 9.6.8-4 gives that event type. It previously returned `1`, a
+value the same table marks n/a for it. Notifications were already being sent as
+TimeSeries notifications, so nothing about what arrives at a notification target
+changes — only what a RETRIEVE of the subscription reports.
+
+Subscriptions created before this version keep the value stored at creation
+time. If you have one and want the retrieved value corrected, recreate it, or
+UPDATE it with `nct: 5` explicitly.
