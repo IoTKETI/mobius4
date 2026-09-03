@@ -649,9 +649,13 @@ insert, so there is no partially-created resource to clean up.
 
 The verification NOTIFY is dialled at the target `<AE>`'s `pointOfAccess`, and only `http` entries
 are tried. An `<AE>` reachable only over MQTT therefore cannot be verified, and a subscription
-naming it is refused 5204. It carries `verificationRequest` and `creator`, and no `subscriptionURI`
-— the `<subscription>` it is about does not exist yet. The timeout is
-`cse.notification_timeout_seconds`.
+naming it is refused 5204. It carries `verificationRequest`, `creator`, and
+`subscriptionReference` naming the `<subscription>` about to be created — that last one is
+mandatory on every notification (`TS-0004` table 6.3.5.13-1) even though the verification procedure
+clause does not mention it. It carries no `notificationEvent`, and therefore no
+`notificationEventType`: the same table says `net` "shall only be present if the notificationEvent
+parent element is present, otherwise it shall not", and a verification request reports no event.
+The timeout is `cse.notification_timeout_seconds`.
 
 ### Being a verification target
 

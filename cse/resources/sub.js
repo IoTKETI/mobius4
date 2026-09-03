@@ -148,7 +148,7 @@ async function create_a_sub(req_prim, resp_prim) {
   // verification must not exist, and the clause makes the failure a refusal of the creation
   // rather than a note on a created resource.
   const { verify_targets } = require('../subscription-verification');
-  const refusal = await verify_targets(prim_res.nu, req_prim.fr);
+  const refusal = await verify_targets(prim_res.nu, req_prim.fr, sub_sid);
   if (refusal) {
     resp_prim.rsc = refusal.rsc;
     resp_prim.pc = { 'm2m:dbg': refusal.dbg };

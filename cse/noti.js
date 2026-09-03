@@ -483,7 +483,7 @@ async function mqtt_noti(noti_target, sgn) {
 //     is one the HTTP binding maps to a non-2xx status (bindings/http.js maps 4103 to 403, for
 //     example). validateStatus below is what keeps axios from turning that into a thrown error
 //     indistinguishable from "could not be sent".
-async function send_verification(target, creator, timeout_ms) {
+async function send_verification(target, creator, sub_sid, timeout_ms) {
   const { get_to_info } = require('./reqPrim');
   const { generate_ri } = require('./utils');
 
@@ -501,9 +501,18 @@ async function send_verification(target, creator, timeout_ms) {
       "X-M2M-RVI": config.cse.versions[0],
       "Content-Type": "application/json",
     },
-    // sur is deliberately absent -- the <subscription> this verification is for does not exist
-    // yet, so there is no structured ID to give it (TS-0004:7.5.1.2.3 does not ask for one here).
-    data: { "m2m:sgn": { vrq: true, cr: creator } },
+    // subscriptionReference is multiplicity 1 in TS-0004 table 6.3.5.13-1, and
+    // CDT-notification.xsd declares it with no minOccurs, so it is mandatory on every
+    // notification -- a verification request included. It was left out at first because
+    // TS-0004:7.5.1.2.3 lists only verificationRequest, creator and To; the procedure clause
+    // enumerates what that procedure sets, it does not relieve the primitive of its own required
+    // members, and a receiver validating the data type rejected the notification for its absence.
+    //
+    // The value is the structured ID the <subscription> is about to be given. Verification runs
+    // before the insert, so the resource does not exist yet -- but its name is already fixed
+    // (create_a_sub derives sub_sid from the parent and rn before any of this), and it is the
+    // same value an ordinary notification from that subscription will carry.
+    data: { "m2m:sgn": { vrq: true, cr: creator, sur: sub_sid } },
     timeout: timeout_ms,
     validateStatus: () => true,
   });

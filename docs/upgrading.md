@@ -1187,3 +1187,13 @@ If you are on v4.24.1, upgrade: that release fixed missing-data detection only f
 `<timeSeries>` created within the first quarter-second of the CSE starting. On a CSE that had been
 running, detection was still late by up to `cse.missing_data_sweep_interval_seconds` — the same
 symptom v4.24.1 was meant to fix.
+
+## v4.24.3
+
+Nothing required. No migration, no configuration change. Only deployments running with
+`cse.subscription_verification` set are affected at all.
+
+The Subscription Verification notification now carries `subscriptionReference`, naming the
+`<subscription>` about to be created. `TS-0004` table 6.3.5.13-1 makes it mandatory on every
+notification; without it, a receiver that validates the notification data type rejects the request,
+and the subscription creation is then refused `5204`.

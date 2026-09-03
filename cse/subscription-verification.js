@@ -190,7 +190,7 @@ async function handle_verification(req_prim, resp_prim) {
 // Recv-6.4 gives two failure paths and one status code for both: if the request cannot be sent,
 // SUBSCRIPTION_VERIFICATION_INITIATION_FAILED; if it was sent and any response is not "OK",
 // the same.
-async function verify_targets(nu_list, originator) {
+async function verify_targets(nu_list, originator, sub_sid) {
     if (!verification_enabled()) return null;
 
     const targets = await verification_targets(nu_list, originator);
@@ -204,7 +204,7 @@ async function verify_targets(nu_list, originator) {
     for (const target of targets) {
         let rsc;
         try {
-            rsc = await send_verification(target, originator,
+            rsc = await send_verification(target, originator, sub_sid,
                 config_mod.cse.notification_timeout_seconds * 1000);
         } catch (err) {
             logger.info({ target, err: err.message }, "subscription verification could not be sent");

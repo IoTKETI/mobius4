@@ -21,6 +21,29 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.24.3 (2026-09-03)
+
+**Why PATCH**: a bug fix. No capability, no migration.
+
+### Fixed: the verification notification was missing `subscriptionReference`
+
+A Subscription Verification request went out as `{vrq, cr}` with no `sur`. That was wrong, and the
+reasoning behind it was the interesting part: `TS-0004:7.5.1.2.3` lists only `verificationRequest`,
+`creator` and `To`, and it was read as an exhaustive description of the primitive. It is not. The
+procedure clause says what that procedure sets; the data type says what the primitive must carry.
+`TS-0004` table 6.3.5.13-1 gives `subscriptionReference` multiplicity **1**, and
+`CDT-notification.xsd` declares it with no `minOccurs`. It is mandatory on every notification, a
+verification request included, and a receiver validating the data type rejected ours over it.
+
+The value is the ID the `<subscription>` is about to be given. Verification runs before the insert,
+so the resource does not exist yet, but its name is settled before any of this — and it is the same
+value ordinary notifications from that subscription will carry.
+
+Not added: `notificationEventType`. It is not a member of the notification in its own right but a
+child of `notificationEvent`, which is `0..1`, and the same table says `net` "shall only be present
+if the notificationEvent parent element is present, otherwise it shall not". A verification request
+has no event to report, so carrying one would mean inventing an event that did not happen.
+
 ## v4.24.2 (2026-09-03)
 
 **Why PATCH**: completes a fix that v4.24.1 got wrong. No capability, no migration.

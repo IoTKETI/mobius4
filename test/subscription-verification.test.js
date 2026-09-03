@@ -341,8 +341,17 @@ test("on: the target answers OK, the subscription is created (2001)", async () =
     assert.ok(verif, "the sink must have received a verification NOTIFY before the create answered");
     assert.equal(verif.body["m2m:sgn"].cr, "test-admin",
       "creator is the Originator of the subscription creation request (TS-0004:7.5.1.2.3)");
-    assert.equal(verif.body["m2m:sgn"].sur, undefined,
-      "sur must be absent -- the <subscription> did not exist yet when this was sent");
+    // TS-0004 table 6.3.5.13-1 gives subscriptionReference multiplicity 1, and
+    // CDT-notification.xsd declares it with no minOccurs: it is mandatory on every notification,
+    // a verification request included. It was omitted at first because TS-0004:7.5.1.2.3 names
+    // only verificationRequest, creator and To -- the procedure clause says what that procedure
+    // sets, not what the primitive may leave out, and a receiver validating the data type
+    // rejected the notification over it.
+    //
+    // The value is the ID the <subscription> is about to be given. Verification runs before the
+    // insert, so the resource does not exist yet, but its name is already settled.
+    assert.equal(verif.body["m2m:sgn"].sur, `${CSE_BASE}/${cntRn}/${subRn}`,
+      "sur names the <subscription> this verification is for");
   } finally {
     await sink.stop();
     await srv.stop();
