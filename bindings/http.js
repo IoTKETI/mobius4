@@ -110,7 +110,21 @@ app.use((error, req, res, next) => {
 // http server setup
 http.globalAgent.maxSockets = 100 * 100;
 const server = http.createServer(app).listen(config.http.port);
-server.keep_alive_timeout = config.cse.keep_alive_timeout * 1000;
+// keepAliveTimeout, not keep_alive_timeout. Node's property is camelCase, so the snake_case
+// spelling here only ever added an unused property to the server object -- cse.keep_alive_timeout
+// was read, multiplied, assigned, and then had no effect at all. Every deployment ran on Node's
+// default of 5 seconds regardless of what it configured, and a client holding a session open saw
+// it closed under it with "Keep-Alive: timeout=5" in the responses.
+server.keepAliveTimeout = config.cse.keep_alive_timeout * 1000;
+
+// headersTimeout has to outlast keepAliveTimeout. It bounds how long the request line and headers
+// may take to arrive, and Node's default is 60 seconds -- so a keep-alive above that would let a
+// socket be kept open longer than the server is willing to wait for the next request on it, which
+// closes connections the client believed were good. Kept a margin above rather than equal, because
+// the two timers start from different events and an exact tie is a race.
+if (server.headersTimeout <= server.keepAliveTimeout) {
+  server.headersTimeout = server.keepAliveTimeout + 5000;
+}
 if (server) {
   logger.info({ port: config.http.port }, 'HTTP server listening');
 }
