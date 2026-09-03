@@ -355,6 +355,12 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
   // test cannot pass by the fix simply suppressing everything. The range runs 100s past "now" so
   // ordinary test timing jitter cannot push the sweep into examining a point this fixture does
   // not cover.
+  // In one transaction with the anchor install below, so no sweep tick can observe a state that
+  // never really existed. Writing the rows first and the anchor second narrows that window but
+  // does not close it, and since v4.24.1 the sweep paces itself -- ticks can land 250ms apart
+  // rather than on the fixed interval this test was written against, which is exactly what makes
+  // a narrowed-but-open window start failing. It failed in CI on v4.24.1.
+  await db.query("BEGIN");
   for (let n = 90; n <= 150; n++) {
     if (n === 95) continue;
     await insertRawTsi(sid, from_epoch_seconds(t0 + n * PEI));
@@ -367,6 +373,7 @@ test("TS-0001:10.2.4.25 — instances evicted before the sweep reaches them are 
     `UPDATE ts SET md_anchor_dgt = $1, md_watermark_n = 0 WHERE ri = $2`,
     [from_epoch_seconds(t0), sid]
   );
+  await db.query("COMMIT");
 
   // One tick is enough: with the anchor and watermark already installed, and the whole
   // examinable range (roughly N=1..100, depending on real elapsed time) well under
