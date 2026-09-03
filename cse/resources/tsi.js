@@ -146,6 +146,26 @@ async function evict_if_needed(parent, tsi_pi) {
         'evicted oldest <tsi>(s)');
 }
 
+// Tolerance, not zero: clocks drift by seconds between honest machines and a warning on every
+// instance would be noise. Two minutes is far below the smallest offset a timezone mistake can
+// produce (thirty minutes) and far above ordinary drift.
+const DGT_AHEAD_TOLERANCE_SECONDS = 120;
+
+function warn_if_dgt_is_ahead(dgt, now, sid) {
+    if (!dgt) return;
+    let ahead;
+    try {
+        const { to_epoch_seconds } = require('../missing-data');
+        ahead = to_epoch_seconds(dgt) - to_epoch_seconds(now);
+    } catch {
+        return;   // an unparseable dgt is the schema's problem, not this warning's
+    }
+    if (ahead <= DGT_AHEAD_TOLERANCE_SECONDS) return;
+    logger.warn({ sid, dgt, cse_time: now, ahead_seconds: ahead },
+        'dataGenerationTime is ahead of this CSE clock; missing-data detection measures from it, ' +
+        'so expected points are in the future and missingDataList will stay empty');
+}
+
 async function create_a_tsi(req_prim, resp_prim) {
     const prim_res = req_prim.pc['m2m:tsi'];
 
@@ -196,6 +216,19 @@ async function create_a_tsi(req_prim, resp_prim) {
         dgt: prim_res.dgt,
         snr: prim_res.snr ?? null,
     };
+
+    // A dataGenerationTime ahead of this CSE's clock is legal and is stored as sent, but it is
+    // worth saying out loud. Missing-data detection measures expected points from the first
+    // instance's dgt (TS-0001:10.2.4.29), so an anchor in the future puts every expected point in
+    // the future too and nothing is ever overdue -- missingDataList stays empty forever and the
+    // resource looks like detection is broken.
+    //
+    // m2m:timestamp carries no timezone (CDT-commonTypes.xsd: YYYYMMDDThhmmss and nothing more),
+    // so a sender writing local time where the receiver reads another zone produces exactly this,
+    // silently. Observed against a conformance tester whose dgt ran two hours ahead of the ct this
+    // CSE assigned in the same second. Warned rather than refused: the standard permits a future
+    // dgt and a client may legitimately be backfilling a schedule.
+    warn_if_dgt_is_ahead(tsi_res.dgt, now, tsi_sid);
 
     try {
         const written = await write_a_tsi(tsi_res, req_prim.fr);

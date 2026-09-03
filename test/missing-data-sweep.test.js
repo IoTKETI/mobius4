@@ -506,3 +506,57 @@ test("a late arrival leaves its expected slot missing, but not before the detect
     await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${LATE_DB}`));
   }
 });
+
+test("a dataGenerationTime ahead of the CSE clock is warned about, and detects nothing", async () => {
+  // Both halves matter and they say different things.
+  //
+  // Detects nothing: TS-0001:10.2.4.29 measures expected points from the first instance's dgt, so
+  // an anchor in the future puts every expected point in the future. The CSE is behaving correctly
+  // -- there is nothing overdue -- but from outside it is indistinguishable from broken detection,
+  // and that is what a conformance tester's run looked like: pei 5000, mdt 1000, one instance, a
+  // read nine seconds later, and mdc 0. Its dgt ran two hours ahead of the ct this CSE assigned in
+  // the same second. m2m:timestamp carries no timezone, so nothing in the exchange says so.
+  //
+  // Warned about: which is the only thing that makes it findable. That half needs its own server,
+  // because the shared one runs at logLevel "error" and would drop the record -- and a warning
+  // nobody asserts is a warning that can stop being emitted without anyone noticing.
+  //
+  // TS-0018에 해당 TP 없음.
+  const AHEAD_DB = "mobius4_test_dgt_ahead";
+  await withAdmin(async (c) => {
+    await c.query(`DROP DATABASE IF EXISTS ${AHEAD_DB}`);
+    await c.query(`CREATE DATABASE ${AHEAD_DB}`);
+  });
+  const aheadSrv = await startServer({
+    dbName: AHEAD_DB,
+    logLevel: "warn",
+    cse: { missing_data_sweep_interval_seconds: SWEEP_SECONDS },
+  });
+  try {
+    const aheadBase = aheadSrv.baseUrl;
+    const aheadRoot = await createRoot(aheadBase, "ahead");
+    const created = await create(aheadBase, aheadRoot.sid, 29, {
+      "m2m:ts": { rn: uniqueRn("ts"), ...DETECTING },
+    });
+    assert.equal(created.status, 201, `failed to create <ts>: ${created.raw?.slice(0, 200)}`);
+    const sid = created.body["m2m:ts"].ri;
+
+    const AHEAD_S = 7200;   // the offset actually observed against the tester
+    const future = from_epoch_seconds(Math.floor(Date.now() / 1000) + AHEAD_S);
+    const made = await create(aheadBase, sid, 30, { "m2m:tsi": { rn: uniqueRn("i"), dgt: future, con: "1" } });
+    assert.equal(made.status, 201, "a future dgt is legal and must still be accepted");
+
+    await new Promise((r) => setTimeout(r, SWEEP_SECONDS * 3000));
+    const body = (await retrieve(aheadBase, sid)).body["m2m:ts"];
+    assert.equal(body.mdc, 0, `nothing is overdue when the anchor is in the future: ${JSON.stringify(body.mdlt)}`);
+    assert.equal(body.mdlt, undefined);
+
+    const diag = aheadSrv.diagnostics();
+    assert.ok(diag.includes("dataGenerationTime is ahead of this CSE clock"),
+      `the CSE must say so; without it this state is invisible to whoever is debugging it. Log tail: ${diag.slice(-600)}`);
+    assert.ok(diag.includes(future), "the warning must name the dataGenerationTime it is about");
+  } finally {
+    await aheadSrv.stop();
+    await withAdmin((c) => c.query(`DROP DATABASE IF EXISTS ${AHEAD_DB}`));
+  }
+});
