@@ -1207,7 +1207,23 @@ for, behaves exactly as before.
 
 ## v4.24.5
 
-Nothing required. Logging only.
+**Read this if any `notificationURI` in your deployment names a resource** (`Mobius/ae1`) rather
+than a URL (`http://host/notify`). Nothing else changes.
+
+Such a notification used to be posted to the target `<AE>`'s `pointOfAccess` with no path, so the
+receiver saw a Notify whose `To` was `/`. `TS-0004:7.5.1.2.2` requires `To` to be the
+`notificationURI`, and `TS-0009:6.2.2.1` carries it as the request-URI path — so the notification
+now arrives at `<poa>/Mobius/ae1` instead of `<poa>/`.
+
+A oneM2M receiver expects exactly that and reads its `To` from it. **A non-oneM2M endpoint
+registered as an `<AE>`'s `pointOfAccess` will now see a path it did not see before**, and may
+answer 404. If you have one, either give the `<subscription>` the endpoint's URL as its
+`notificationURI` — a URL target is unchanged by this release — or make the endpoint accept the
+path.
+
+MQTT notifications now carry `to` in the primitive; they carried none before.
+
+The rest is logging only.
 
 To see the notifications this CSE sends, set `logging.level` to `debug` in `config/local.json` and
 look for `notification primitive sent` — it carries the full message, the target, and the same

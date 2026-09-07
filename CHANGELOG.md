@@ -25,6 +25,25 @@ At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 
 **Why PATCH**: logging only. No behaviour change, no configuration, no migration.
 
+### Fixed: a notification to a resource-ID target carried an empty `To`
+
+`TS-0004:7.5.1.2.2` requires the Originator to "fetch the `notificationURI` attribute and set the
+value to the `To` parameter of the Notify request", `TS-0004:7.5.1.2.3` says the same for a
+verification request, and `TS-0004` table 6.4.1-1 gives `To` multiplicity **1** on every request
+primitive.
+
+When the `notificationURI` named a resource rather than a URL, the notification was posted to the
+target `<AE>`'s bare `pointOfAccess`. `TS-0009:6.2.2.1` carries `To` *as* the request-URI path
+component, so the receiver saw a Notify whose `To` was `/`. Measured against a recording endpoint:
+a URL `notificationURI` produced the right path; an `<AE>` resource ID, and every subscription
+verification request, produced `/`.
+
+A `pointOfAccess` is where to send a notification, not what it addresses. The path component is now
+appended using the same `TS-0009` table 6.2.2.1-1 mapping request forwarding uses. A URL
+`notificationURI` is unchanged. MQTT had the same gap elsewhere — its notification primitive
+carried no `To` at all — and now carries it in the primitive, since there the topic is the
+destination.
+
 ### Added: an outgoing notification is readable in the log
 
 An incoming request has always been logged as a primitive, and a forwarded request since v4.22.1.
