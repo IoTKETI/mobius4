@@ -301,6 +301,17 @@ test("nu as a structured resource-ID delivers to the <AE>'s pointOfAccess", asyn
   const got = await sink.waitFor((i) => i.body["m2m:sgn"]?.sur === subSid);
   assert.equal(got.body["m2m:sgn"].nev.rep["m2m:cin"].con, marker,
     "the resource-ID target receives the same notification a URL target would");
+
+  // TS-0004:7.5.1.2.2: "The Originator shall fetch the notificationURI attribute and set the value
+  // to the To parameter of the Notify request", and To is multiplicity 1 on every request
+  // primitive (TS-0004 table 6.4.1-1). TS-0009:6.2.2.1 carries it as the request-URI path
+  // component, so the path the receiver sees is the To.
+  //
+  // A pointOfAccess is where to send the notification, not what it addresses. Posting to the bare
+  // poa left the path as "/" -- a Notify with an empty To. A URL notificationURI never showed this
+  // because there the URL is both the destination and the To.
+  assert.ok(got.url.endsWith(`/${ae.sid}`),
+    `To must be the notificationURI: expected a path ending in /${ae.sid}, got ${JSON.stringify(got.url)}`);
 });
 
 test("nu as an unstructured resource-ID delivers to the <AE>'s pointOfAccess", async () => {

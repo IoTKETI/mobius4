@@ -352,6 +352,13 @@ test("on: the target answers OK, the subscription is created (2001)", async () =
     // insert, so the resource does not exist yet, but its name is already settled.
     assert.equal(verif.body["m2m:sgn"].sur, `${CSE_BASE}/${cntRn}/${subRn}`,
       "sur names the <subscription> this verification is for");
+
+    // TS-0004:7.5.1.2.3 step 1: "Set the To parameter as the notificationURI in the primitive."
+    // TS-0009:6.2.2.1 carries To as the request-URI path component, so the path the target sees is
+    // the To. It used to be "/" -- the request went to the bare pointOfAccess, which is where to
+    // send it and not what it addresses.
+    assert.ok(verif.url.endsWith(`/${target.sid}`),
+      `To must be the notificationURI: expected a path ending in /${target.sid}, got ${JSON.stringify(verif.url)}`);
   } finally {
     await sink.stop();
     await srv.stop();

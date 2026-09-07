@@ -364,11 +364,26 @@ async function send_a_noti(sub_res, event_obj, notificationEventType, ae_poa_map
             continue;
         }
 
+        // TS-0004:7.5.1.2.2: "The Originator shall fetch the notificationURI attribute and set the
+        // value to the To parameter of the Notify request." To is multiplicity 1 on every request
+        // primitive (TS-0004 table 6.4.1-1), and a Notify is one.
+        //
+        // A pointOfAccess is where to send it, not what to address. Posting to the bare poa left
+        // the request-URI as "/" -- and TS-0009:6.2.2.1 carries To *as* the request-URI path
+        // component, so the receiver saw a Notify with an empty To. A notificationURI written as a
+        // URL never had this problem: the URL is both the destination and the To.
+        //
+        // MQTT does not put To in the path -- the topic is the destination -- so there the value
+        // travels in the primitive itself.
         let delivered = false;
         for (const url of urls) {
             let result = null;
-            if (url.startsWith('http'))  result = await http_noti(url, sgn);
-            else if (url.startsWith('mqtt')) result = await mqtt_noti(url, sgn);
+            if (url.startsWith('http')) {
+                const { to_path_component } = require('./reqPrim');
+                result = await http_noti(url.replace(/\/+$/, '') + to_path_component(noti_target), sgn);
+            } else if (url.startsWith('mqtt')) {
+                result = await mqtt_noti(url, sgn, noti_target);
+            }
             if (result === true) { delivered = true; break; }
         }
         if (!delivered) {
@@ -471,7 +486,10 @@ async function http_noti(noti_target, sgn) {
     return true;
 }
 
-async function mqtt_noti(noti_target, sgn) {
+// to_override is the notificationURI when it named a resource rather than this broker URL --
+// see the comment in send_a_noti. Without it To would be the mqtt:// URL, which is the destination
+// and not what the notification is addressed to.
+async function mqtt_noti(noti_target, sgn, to_override) {
     // oneM2M defined MQTT URL convention: mqtt://<IP>:<PORT>/<topic>
     const url_without_protocol = noti_target.split("//")[1];
     const topic_index = url_without_protocol.indexOf("/");
@@ -488,6 +506,7 @@ async function mqtt_noti(noti_target, sgn) {
 
     const { generate_ri } = require('./utils');
     const req_prim = {
+        to: to_override || noti_target,
         fr: config.cse.cse_id,
         ri: 'mqtt-noti-' + generate_ri(),
         op: 5, // 5: notify
@@ -495,7 +514,7 @@ async function mqtt_noti(noti_target, sgn) {
     };
 
     logger.debug({
-        prim: { to: noti_target, fr: req_prim.fr, rqi: req_prim.ri, rvi: config.cse.versions[0],
+        prim: { to: req_prim.to, fr: req_prim.fr, rqi: req_prim.ri, rvi: config.cse.versions[0],
                 op: 5, pc: sgn },
         topic,
     }, 'notification primitive sent');
@@ -532,8 +551,14 @@ async function send_verification(target, creator, sub_sid, timeout_ms) {
 
   const { shortest_to: res_id } = get_to_info({ to: target });
   const urls = res_id ? await get_urls_from_poa(res_id) : [];
-  const url = urls.find((u) => u.startsWith('http'));
-  if (!url) throw new Error(`no reachable pointOfAccess for ${target}`);
+  const poa = urls.find((u) => u.startsWith('http'));
+  if (!poa) throw new Error(`no reachable pointOfAccess for ${target}`);
+
+  // TS-0004:7.5.1.2.3 step 1: "Set the To parameter as the notificationURI in the primitive."
+  // Carried as the request-URI path component (TS-0009:6.2.2.1) -- posting to the bare
+  // pointOfAccess sent a verification request with an empty To.
+  const { to_path_component } = require('./reqPrim');
+  const url = poa.replace(/\/+$/, '') + to_path_component(target);
 
   const rqi = 'verif-noti-' + generate_ri();
   logger.debug({
