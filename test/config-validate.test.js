@@ -79,3 +79,35 @@ test("starts silently when cse.admin is unique to the deployment", () => {
   assert.doesNotMatch(output, /placeholder|shipped as the default/i,
     "a properly configured deployment should get no admin warning at all");
 });
+
+// cse.admin is set in every case below so the admin guard (which runs first) never fires --
+// these are only exercising validate_poa().
+
+test("refuses to start when a cse.poa entry has no scheme", () => {
+  // new URL() reads everything before the first ":" as the scheme, so "localhost:7599" parses
+  // "cleanly" with scheme "localhost" rather than failing outright -- this is DEC-136's
+  // motivating case (CSE_POA set without "http://").
+  const { status, output } = runGuard({ cse: { admin: "an-identity-only-we-know", poa: ["localhost:7599"] } });
+  assert.equal(status, 1, "a scheme-less poa must stop startup");
+  assert.match(output, /localhost:7599/);
+  assert.match(output, /missing scheme/i, "the message must point at the likely mistake");
+});
+
+test("refuses to start when a cse.poa entry uses a scheme this CSE does not bind", () => {
+  const { status, output } = runGuard({ cse: { admin: "an-identity-only-we-know", poa: ["ftp://x"] } });
+  assert.equal(status, 1, "ftp is not one of this CSE's protocol bindings");
+  assert.match(output, /ftp/);
+});
+
+test("refuses to start when cse.poa is empty", () => {
+  const { status, output } = runGuard({ cse: { admin: "an-identity-only-we-know", poa: [] } });
+  assert.equal(status, 1, "a CSE with no advertised access point cannot be reached by anyone");
+  assert.match(output, /not set or empty/i);
+});
+
+test("starts when every cse.poa entry has an allowed scheme", () => {
+  const { status } = runGuard({
+    cse: { admin: "an-identity-only-we-know", poa: ["http://127.0.0.1:7599", "mqtt://broker:1883"] },
+  });
+  assert.equal(status, 0, "http and mqtt are both bindings this CSE implements");
+});

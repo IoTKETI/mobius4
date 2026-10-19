@@ -68,6 +68,7 @@ exports.init_db = async function () {
         } else {
             cb_ri = cbResult.rows[0].ri;
             logger.info({ ri: cb_ri }, 'cb resource already exists');
+            await sync_cb_with_config(client, cb_ri);
         }
 
         // create default <acp> resource
@@ -633,6 +634,72 @@ async function create_tables(client) {
         await client.query('ROLLBACK');
         logger.error({ err }, 'create tables failed');
         throw err;
+    }
+}
+
+// Order-sensitive array comparison. csz is ordered by preference -- TS-0001:9.6.4 says "the
+// most preferred format comes first" -- and poa's dial order matters too (cse/forwarding.js
+// tries poa[0] first before falling back), so a reorder is a real change, not noise that a
+// set-equality check would hide.
+function arrays_equal(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return a === b;
+    if (a.length !== b.length) return false;
+    return a.every((v, i) => v === b[i]);
+}
+
+// Brings an existing <CSEBase>'s poa, srv and csz in step with the current configuration.
+//
+// Until now, once a <CSEBase> row existed, the branch above did nothing but log it. A
+// deployment that changed cse.poa (or cse.versions / cse.serializations) in its config and
+// restarted kept whatever create_cb() wrote the first time it ever came up -- remote CSEs and
+// AEs that read this CSE's pointOfAccess from the <CSEBase> kept dialling the stale address.
+//
+// csi, rn and cst are deliberately left alone: registered <remoteCSE>s and <AE>s find this CSE
+// by csi/rn, so changing either here would break every existing registration rather than just
+// correct this CSE's own advertised address. srt sync is deferred to BACKLOG-137.
+async function sync_cb_with_config(client, cb_ri) {
+    const result = await client.query('SELECT poa, srv, csz FROM cb WHERE ri = $1', [cb_ri]);
+    if (result.rows.length === 0) return;
+    const current = result.rows[0];
+
+    const desired = {
+        poa: config.cse.poa,
+        srv: config.cse.versions,
+        csz: config.cse.serializations,
+    };
+
+    const changes = {};
+    for (const [attr, next] of Object.entries(desired)) {
+        // config/validate.js's validate_poa() already refuses an empty/malformed cse.poa
+        // before init_db ever runs, but a config that simply omits one of these keys -- rather
+        // than setting it to an empty array -- should be left as it was, not overwritten with
+        // null.
+        if (next === undefined) continue;
+        if (!arrays_equal(current[attr], next)) {
+            changes[attr] = { previous: current[attr], next };
+        }
+    }
+
+    const changedAttrs = Object.keys(changes);
+    if (changedAttrs.length === 0) return;
+
+    const now = moment().utc().format(timestamp_format);
+    const values = changedAttrs.map((attr) => changes[attr].next);
+    const setClauses = changedAttrs.map((attr, i) => `${attr} = $${i + 1}`);
+    setClauses.push(`lt = $${values.length + 1}`);
+    values.push(now);
+    values.push(cb_ri);
+
+    await client.query(
+        `UPDATE cb SET ${setClauses.join(', ')} WHERE ri = $${values.length}`,
+        values
+    );
+
+    for (const attr of changedAttrs) {
+        logger.info(
+            { ri: cb_ri, attr, previous: changes[attr].previous, next: changes[attr].next },
+            'cb resource attribute updated from configuration'
+        );
     }
 }
 

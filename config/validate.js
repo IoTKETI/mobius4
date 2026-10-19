@@ -70,8 +70,81 @@ function validate_admin_identity(logger) {
     }
 }
 
-function validate_config(logger) {
-    validate_admin_identity(logger);
+// The protocol bindings this CSE implements (bindings/http.js, bindings/mqtt.js,
+// bindings/coap.js, bindings/ws.js, each with and without TLS). This list is not a oneM2M
+// clause requirement -- the spec does not constrain pointOfAccess to a fixed scheme set -- it
+// is mobius4's own misconfiguration guard: a poa entry outside it is an address this CSE could
+// never actually be reached on.
+const ALLOWED_POA_SCHEMES = ['http', 'https', 'mqtt', 'mqtts', 'coap', 'coaps', 'ws', 'wss'];
+
+const POA_EXAMPLE = 'http://192.0.2.10:7599';
+
+/**
+ * Verifies that cse.poa lists at least one well-formed access point.
+ *
+ * pointOfAccess is what other CSEs and AEs use to reach this CSE (TS-0001:9.6.3), and
+ * db/init.js's sync_cb_with_config() writes it into the <CSEBase> on every boot. Letting a
+ * malformed entry through here means it gets written silently and is only discovered later,
+ * when some remote request built from it fails -- a different process, on a different machine,
+ * a deploy away from this check.
+ */
+function validate_poa(logger) {
+    const poa = config.has('cse.poa') ? config.get('cse.poa') : undefined;
+
+    if (!Array.isArray(poa) || poa.length === 0) {
+        fail(logger,
+            `cse.poa is not set or empty. It is the address other CSEs and AEs use to reach ` +
+            `this one; set it to an array with at least one address, e.g. ["${POA_EXAMPLE}"].`,
+            { poa });
+        return;
+    }
+
+    for (const value of poa) {
+        let url;
+        try {
+            url = new URL(value);
+        } catch (err) {
+            fail(logger,
+                `cse.poa contains "${value}", which is not a valid URL. Example: "${POA_EXAMPLE}".`,
+                { value });
+            return;
+        }
+
+        const scheme = url.protocol.slice(0, -1); // URL.protocol keeps the trailing ':'
+
+        if (!ALLOWED_POA_SCHEMES.includes(scheme)) {
+            // new URL() treats anything before the first ":" as the scheme, so a value missing
+            // one entirely -- "localhost:7599" -- parses "cleanly" with scheme "localhost"
+            // instead of failing outright. Worth saying explicitly, since the actual mistake
+            // ("I forgot http://") looks nothing like the error ("localhost" is not a scheme).
+            const missingSchemeHint = value.includes('://')
+                ? ''
+                : ` (no "://" in "${value}" -- this looks like a missing scheme rather than an unsupported one)`;
+            fail(logger,
+                `cse.poa contains "${value}", whose scheme "${scheme}" is none of this CSE's ` +
+                `protocol bindings (${ALLOWED_POA_SCHEMES.join(', ')}).${missingSchemeHint} ` +
+                `Example: "${POA_EXAMPLE}".`,
+                { value, scheme });
+            return;
+        }
+
+        if (!url.hostname) {
+            fail(logger,
+                `cse.poa contains "${value}", which has no host. Example: "${POA_EXAMPLE}".`,
+                { value });
+            return;
+        }
+    }
 }
 
-module.exports = { validate_config, PUBLISHED_ADMIN_IDENTITIES, EXAMPLE_ADMIN_IDENTITY };
+function validate_config(logger) {
+    validate_admin_identity(logger);
+    validate_poa(logger);
+}
+
+module.exports = {
+    validate_config,
+    PUBLISHED_ADMIN_IDENTITIES,
+    EXAMPLE_ADMIN_IDENTITY,
+    ALLOWED_POA_SCHEMES,
+};
