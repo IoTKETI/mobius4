@@ -667,10 +667,29 @@ async function request_forwarding(req_prim, shortest_to) {
   // and a request from below shows a descendant's. The IN-CSE has no registrar and keeps the
   // NOT_FOUND below.
   if (!csr_res && descendants.is_registree()) {
-    const below = await descendants.compute_descendants();
-    if (descendants.is_from_below(req_prim.fr, below)) {
+    // The From rule alone loops when the registrar's descendantCSEs for us is stale (a report
+    // that failed, or a leftover <remoteCSE> from an earlier registration): we send the request
+    // up, the registrar matches the target in our old dcse and sends it straight back down with
+    // From and Request Identifier unchanged, and From still says "from below". TS-0004:7.3.2.6
+    // has a CSE that "receives the request from its registrar CSE" answer NOT_FOUND, and the
+    // preserved Request Identifier is what tells us this is our own request coming back.
+    if (descendants.was_sent_up(req_prim.rqi)) {
+      logger.warn({ targetCseId: target_cse_id, rqi: req_prim.rqi },
+        'request sent up to the registrar came back down; the registrar holds stale descendantCSEs for this CSE');
+      resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
+      resp_prim.pc = { 'm2m:dbg': 'CSR resource not found' };
+      return resp_prim;
+    }
+
+    // Our own AEs need no database read; only a From that is not ours is checked against the
+    // descendant list.
+    const fr_is_ours = descendants.is_from_below(req_prim.fr, []);
+    const from_below = fr_is_ours ||
+      descendants.is_from_below(req_prim.fr, await descendants.compute_descendants());
+    if (from_below) {
       csr_res = await CSR.findOne({ where: { csi: config.cse.registrar.cse_id } });
       if (csr_res) {
+        descendants.mark_sent_up(req_prim.rqi);
         logger.debug({ targetCseId: target_cse_id, registrar: csr_res.csi },
           'no <remoteCSE> matches the target; retargeting to the registrar');
       }

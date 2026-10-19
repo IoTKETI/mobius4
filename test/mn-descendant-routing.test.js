@@ -22,11 +22,16 @@
 // The fixture is test/helpers/two-cse.js: A is the IN-CSE (/reg-a), B an MN-CSE (/reg-b)
 // registered with A. F and G are fake CSEs -- plain HTTP servers that record what reaches them --
 // registered as <remoteCSE> with B and with A respectively.
+//
+// Not retargeted upward, by design of the From rule (not tested here): an S-prefixed AE-ID keeps
+// its CSE-relative form for an SP-relative To (request_forwarding only prefixes C-prefixed
+// AE-IDs with the CSE-ID), so it carries no CSE-ID to recognise as ours; and a From in another
+// SP's Absolute form is neither our AE nor one of our descendants.
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const http = require("node:http");
-const { CSE_BASE, ADMIN, create, retrieve, remove, uniqueRn } = require("./helpers/onem2m");
+const { CSE_BASE, ADMIN, create, retrieve, update, remove, uniqueRn } = require("./helpers/onem2m");
 const { startTwoCSEs } = require("./helpers/two-cse");
 
 // Copied from test/forwarding.test.js: records what it received and answers with the status it
@@ -185,6 +190,30 @@ test("a request that came down from the registrar is not sent back up: 4004", as
   // And a target known nowhere, as the plain case.
   const nowhere = await retrieve(env.b.baseUrl, `~/nowhere-${uid("n")}/x`, { originator: `${env.a.cseId}/Cx` });
   assert.equal(nowhere.rsc, "4004", nowhere.raw.slice(0, 300));
+});
+
+test("a stale descendantCSEs at the registrar does not bounce a request between MN and IN: 4004", async () => {
+  // Make A believe B has a descendant that does not exist anywhere -- the state a failed report
+  // or a leftover registration leaves behind.
+  const ghost = `/ghost-${uid("gh")}`;
+  const upd = await update(env.a.baseUrl, env.remoteCseSid, { "m2m:csr": { dcse: [ghost] } },
+    { originator: env.b.cseId });
+  assert.equal(upd.rsc, "2004", upd.raw.slice(0, 300));
+
+  const ae = await create(env.b.baseUrl, CSE_BASE, 2,
+    { "m2m:ae": { rn: uniqueRn("ae"), api: "Nmn.test", rr: true, srv: ["3"] } },
+    { originator: "" });
+  assert.equal(ae.rsc, "2001", ae.raw.slice(0, 300));
+
+  // B sends it up, A sends it back down to B (ghost is in B's dcse at A), and B must answer
+  // 4004 instead of sending it up again. A loop would only end when the outermost hop's
+  // forwarding timeout (10 s by default) fired, with 5103 rather than 4004.
+  const started = Date.now();
+  const res = await retrieve(env.b.baseUrl, `~${ghost}/x`, { originator: ae.body["m2m:ae"].aei });
+  const elapsed = Date.now() - started;
+
+  assert.equal(res.rsc, "4004", res.raw.slice(0, 300));
+  assert.ok(elapsed < 5000, `answered in ${elapsed}ms; a bounce loop would run until a timeout`);
 });
 
 test("collect_descendants: registrar left out, dcse flattened, duplicates dropped, empty is null", () => {

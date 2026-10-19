@@ -140,7 +140,31 @@ function is_from_below(fr, descendants) {
     return false;
 }
 
+// Request Identifiers of requests this CSE has retargeted to its registrar, so that one coming
+// back down (stale descendantCSEs at the registrar) is recognised -- see request_forwarding.
+// Kept for twice the forwarding timeout: long enough to cover the round trip to the registrar
+// and back, short enough that an Originator reusing an identifier later is not refused.
+const sent_up = new Map();
+
+function mark_sent_up(rqi) {
+    if (rqi === undefined || rqi === null || rqi === '') return;
+    const ttl_ms = 2 * config.cse.forwarding_timeout_seconds * 1000;
+    const now = Date.now();
+    for (const [k, exp] of sent_up) if (exp <= now) sent_up.delete(k);
+    sent_up.set(rqi, now + ttl_ms);
+}
+
+function was_sent_up(rqi) {
+    if (rqi === undefined || rqi === null || rqi === '') return false;
+    const exp = sent_up.get(rqi);
+    if (exp === undefined) return false;
+    if (exp <= Date.now()) { sent_up.delete(rqi); return false; }
+    return true;
+}
+
 module.exports = {
+    mark_sent_up,
+    was_sent_up,
     is_registree,
     set_own_csr_ri,
     get_own_csr_ri,
