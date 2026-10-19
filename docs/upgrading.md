@@ -1233,3 +1233,36 @@ Notifications that could not be delivered now warn, so they appear at the defaul
 cases that previously left no trace at all: a `notificationURI` that is not a resolvable resource
 ID, one naming a resource with no `pointOfAccess`, and one where no access point accepted the
 notification. `docs/logging-guide.md` lists the fields.
+
+## v4.25.0
+
+**Run `db/migrations/v4.25.0.sql` before starting v4.25.0.**
+
+```
+psql -U <user> -d <database> -f db/migrations/v4.25.0.sql
+```
+
+It adds the `dcse` (`descendantCSEs`) column to the `csr` table. **Skip it and every request that
+touches a `<remoteCSE>` fails** — creating, retrieving and updating one, and forwarding to another
+CSE — because the code now reads that column. Existing rows get no value, which is what they
+behaved as. The statement uses `IF NOT EXISTS`, so running it twice is harmless.
+
+**Check `cse.poa` (Docker: `CSE_POA`) before upgrading.** Every entry must now be a URL with a
+scheme and a host — `http://192.0.2.10:7599`, not `192.0.2.10:7599`. A deployment carrying a value
+without a scheme, or an empty list, **will not start**; the log says which value and why. The
+accepted schemes are `http`, `https`, `mqtt`, `mqtts`, `coap`, `coaps`, `ws`, `wss`.
+
+**Expect the `<CSEBase>` to change on first start.** Its `pointOfAccess`,
+`supportedReleaseVersions` and `contentSerialization` are now set from `cse.poa`, `cse.versions`
+and `cse.serializations` at every start. A deployment whose configuration changed since the
+`<CSEBase>` was created sees the new values — that is the point. Changes are logged at info with
+the previous value. If you edited those attributes in the database by hand, the configuration
+overwrites them.
+
+### What changes for clients
+
+- A CSE registering with `descendantCSEs` (`dcse`) is accepted; it used to be refused `4000`.
+- `contentSerialization` sent as a media type (`application/json` and so on) is stored and
+  returned in the short form (`json`). An unknown value is refused `4000` with a message naming it.
+- Requests addressed to a CSE that is a descendant of a registered CSE are forwarded instead of
+  answered `4004`.

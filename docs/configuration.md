@@ -67,7 +67,7 @@ cp config/local.json.example config/local.json
 | `cse.sp_id` | M2M Service Provider ID — must start with `//` |
 | `cse.cse_id` | CSE ID — must start with `/` |
 | `cse.csebase_rn` | Resource name of the CSEBase resource |
-| `cse.poa` | Point of access of this CSE |
+| `cse.poa` | Point of access of this CSE — a non-empty list of URLs, each with a host and one of the schemes `http`, `https`, `mqtt`, `mqtts`, `coap`, `coaps`, `ws`, `wss`. Startup refuses anything else (`192.0.2.10:7599` without `http://` included). Copied into the `<CSEBase>` at every start, so a change takes effect on restart |
 | `cse.registrar.cse_type` | CSE type of the Registrar (registration target) |
 | `cse.registrar.cse_id` | CSE ID of the Registrar |
 | `cse.registrar.csebase_rn` | CSEBase resource name of the Registrar |

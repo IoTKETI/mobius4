@@ -21,6 +21,88 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## v4.25.0 (2026-10-19)
+
+**Why MINOR**: a oneM2M attribute is added (`descendantCSEs` on `<remoteCSE>`) and request
+forwarding uses it, with a backward-compatible DB migration. **The migration is required** — see
+[docs/upgrading.md](docs/upgrading.md#v4250). Startup also refuses a malformed `cse.poa` now.
+
+Found while reproducing an interoperability report from a team registering an ACME CSE (as an
+MN-CSE) with Mobius4 (as the IN-CSE). Each item below was reproduced against ACME 2026.05.3 before
+it was changed.
+
+### Added: `descendantCSEs` on `<remoteCSE>`, and forwarding to descendant CSEs (`TS-0004:7.3.2.6`)
+
+`TS-0001:9.6.4` gives `<remoteCSE>` a `descendantCSEs` (`dcse`) attribute — the CSEs registered
+below the registree — and `TS-0004:7.4.4.1` makes it optional on both Create and Update. Mobius4
+had no such attribute, so a registration carrying it was refused `4000 "dcse is not allowed"`.
+
+- Create, Update and Retrieve of `<remoteCSE>` now carry `dcse`. An Update replaces the whole list;
+  `null` or an empty list removes it. An empty list on Create is accepted and stored as "no
+  descendants" — ACME sends `"dcse": []` when it has none, and refusing that would refuse its
+  default registration (strictly, `m2m:listOfM2MID` has minLength 1).
+- Forwarding now does what `TS-0004:7.3.2.6` says: the target CSE-ID in `To` is matched against
+  each `<remoteCSE>`'s CSE-ID **or** its `descendantCSEs`. A request from this CSE to a CSE that is
+  registered with one of its registrees — not with this CSE — used to end in
+  `4004 "CSR resource not found"`; it now goes to that registree's `pointOfAccess`. A `dcse` entry
+  written in Absolute form with this CSE's own SP-ID matches too.
+- Direct registrations are matched first, as before. When more than one `<remoteCSE>` lists the
+  same descendant, the first is used and a warning is logged — the standard sets no precedence.
+- Unchanged: a target nobody claims still answers `4004`.
+
+What this release does **not** do: behave as an MN-CSE towards its own registrar. An MN-CSE should
+send an unmatched request up to its registrar and report its own descendants upward
+(`TS-0004:7.3.2.6`, `TS-0004:7.4.4.2.1`/`.3`/`.4`). Mobius4 running with `cse_type` 2 or 3 still
+answers `4004` and sends no `dcse`.
+
+### Fixed: `contentSerialization` given as media types was refused with a database error
+
+`TS-0004:6.3.3` enumerates `xml`, `json` and `cbor`. ACME sends media types instead —
+`application/json`, `application/vnd.onem2m-res+json`, `application/cbor`,
+`application/vnd.onem2m-res+cbor`. Mobius4 did not check the value, the column holds ten
+characters, and the client got `4000 "value too long for type character varying(10)"`.
+
+On `<remoteCSE>` and `<AE>`, Create and Update, the six media types `TS-0004:6.7` names for those
+serializations are now folded to the short form — case-insensitively, ignoring parameters after
+`;`, dropping duplicates and keeping the order (the first is the preferred one, `TS-0001:9.6.4`).
+ACME's list is stored and returned as `["json","cbor"]`. Any other value is refused before it
+reaches the database: `4000 "csz => '<value>' is not a serialization this CSE recognises (xml,
+json, cbor)"`.
+
+`<remoteCSE>` Update now accepts `csz` at all — it was refused `"csz is not allowed"`, although
+`TS-0004:7.4.4.1` marks it optional on Update.
+
+### Fixed: database error text in responses
+
+A resource Create that the database refused answered `4000` with the database's own message in
+`m2m:dbg`. It now says `an attribute value does not fit what this CSE can store` for a data
+exception (SQLSTATE class 22) and `the request could not be stored` for any other database
+refusal. The original error is still logged. Errors that do not come from the database still
+report their own message, and the `4105` and `5000` cases are unchanged.
+
+### Changed: startup refuses a malformed `cse.poa`
+
+Each `cse.poa` entry must be a URL with a host and one of the schemes `http`, `https`, `mqtt`,
+`mqtts`, `coap`, `coaps`, `ws`, `wss`; an empty or missing list is refused too. Otherwise the CSE
+logs why and exits, the same way it does for a missing `cse.admin`. A value without a scheme —
+`localhost:7599`, `192.0.2.10:7599` — is the case this catches; the message points at the
+missing scheme. The scheme list is the set of oneM2M protocol bindings, used as a guard against
+misconfiguration; it is not a format a clause prescribes.
+
+### Changed: the `<CSEBase>` follows the configuration on restart
+
+The `<CSEBase>` is created once. Until now its `pointOfAccess`, `supportedReleaseVersions` and
+`contentSerialization` stayed whatever they were at that moment: changing `cse.poa` (or
+`CSE_POA`) and restarting changed nothing a client could see. At startup these three are now
+compared with `cse.poa`, `cse.versions` and `cse.serializations`, updated if they differ, and each
+change is logged at info with the previous value.
+
+`CSE-ID`, `resourceName` and `cseType` are never touched — registered CSEs and AEs find this CSE
+by them. `supportedResourceType` is not synchronised either, yet.
+
+If you edited one of the three attributes in the database by hand, the configuration now
+overwrites it on the next start.
+
 ## v4.24.5 (2026-09-03)
 
 **Why PATCH**: logging only. No behaviour change, no configuration, no migration.

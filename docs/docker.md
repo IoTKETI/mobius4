@@ -56,7 +56,9 @@ calling out here, and one thing is configured outside `.env` entirely.
 **`CSE_POA`** — the address this CSE advertises about itself, used by other CSEs and
 by notification delivery. The default (`http://localhost:7599`) means "localhost" as
 seen by whoever reads it, which from another host is not this CSE at all. Set it to
-an address that resolves from outside the container.
+an address that resolves from outside the container. Include the scheme — `http://192.0.2.10:7599`, not
+`192.0.2.10:7599`: the CSE refuses to start on a value without one. A changed value takes effect
+on the next restart; the `<CSEBase>` is updated from it at every start.
 
 **`HELMET_ENABLED` and `RATELIMIT_ENABLED`** default to `true` here and to `false` in
 `config/default.json`. The defaults there suit a developer running from source. Turn

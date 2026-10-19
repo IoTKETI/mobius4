@@ -1,9 +1,9 @@
 {
   "formatVersion": 1,
-  "probed_at": "2026-09-03",
+  "probed_at": "2026-10-19",
   "probed_against": {
-    "commit": "f9007dc",
-    "version": "4.24.0"
+    "commit": "7342c13",
+    "version": "4.25.0"
   },
   "entries": [
     {
