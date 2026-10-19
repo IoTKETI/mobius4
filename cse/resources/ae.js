@@ -4,6 +4,7 @@ const randomstring = require('randomstring');
 
 const { get_cur_time, get_default_et, convert_loc_to_geoJson, get_loc_attribute } = require('../utils');
 const sequelize = require('../../db/sequelize');
+const { normalize_serializations } = require('../serializations');
 
 const enums = require('../../config/enums');
 const AE = require('../../models/ae-model');
@@ -24,6 +25,20 @@ async function create_an_ae(req_prim, resp_prim) {
         resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
         return;
     }
+
+    // contentSerialization arrives as either the TS-0004:6.3.3 short form or a TS-0004:6.7
+    // MIME spelling. Fold it here, before csz reaches the VARCHAR(10)[] column below, rather
+    // than letting an unrecognised value reach the database as a 4000 with Postgres's own
+    // error text in it.
+    const normalized_csz = normalize_serializations(prim_res.csz);
+    if (normalized_csz.error) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = {
+            'm2m:dbg': `csz => '${normalized_csz.error}' is not a serialization this CSE recognises (xml, json, cbor)`,
+        };
+        return;
+    }
+    prim_res.csz = normalized_csz.value;
 
     const ae_pi = req_prim.ri;
     const ae_sid = req_prim.sid + '/' + prim_res.rn;
@@ -196,6 +211,17 @@ async function update_an_ae(req_prim, resp_prim) {
         resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
         return;
     }
+
+    // Same normalization as create_an_ae -- an UPDATE can carry a MIME spelling of csz too.
+    const normalized_csz = normalize_serializations(prim_res.csz);
+    if (normalized_csz.error) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = {
+            'm2m:dbg': `csz => '${normalized_csz.error}' is not a serialization this CSE recognises (xml, json, cbor)`,
+        };
+        return;
+    }
+    prim_res.csz = normalized_csz.value;
 
     try {
         const db_res = await AE.findByPk(ri);

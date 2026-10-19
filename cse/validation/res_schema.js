@@ -185,6 +185,10 @@ const csr_update_schema = Joi.object().keys({
     srv: Joi.array().optional().items(Joi.string()),
     csi: Joi.forbidden(),
     cst: Joi.forbidden(),
+    // TS-0004:7.4.4.1 table 7.4.4.1-1 marks contentSerialization O on Update, same as Create
+    // just above. Without this the schema (which rejects unknown keys by default) answered
+    // 4000 "csz is not allowed" to any <remoteCSE> UPDATE that touched csz at all.
+    csz: Joi.array().optional().items(Joi.string()).allow(null),
     poa: Joi.array().optional().items(Joi.string()),
     nl: Joi.string().optional(),
 });

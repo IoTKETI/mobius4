@@ -4,6 +4,7 @@ const { generate_ri, get_cur_time, get_default_et, convert_loc_to_geoJson, get_l
 const sequelize = require('../../db/sequelize');
 const enums = require('../../config/enums');
 const { classify_create_error } = require('../create-error');
+const { normalize_serializations } = require('../serializations');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
 
@@ -38,6 +39,20 @@ async function create_a_csr(req_prim, resp_prim) {
         resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
         return;
     }
+
+    // contentSerialization arrives as either the TS-0004:6.3.3 short form or a TS-0004:6.7
+    // MIME spelling (ACME, registering as an MN-CSE, sends the latter). Fold it here, before
+    // csz reaches the VARCHAR(10)[] column below, rather than letting an unrecognised value
+    // reach the database as a 4000 with Postgres's own error text in it.
+    const normalized_csz = normalize_serializations(prim_res.csz);
+    if (normalized_csz.error) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = {
+            'm2m:dbg': `csz => '${normalized_csz.error}' is not a serialization this CSE recognises (xml, json, cbor)`,
+        };
+        return;
+    }
+    prim_res.csz = normalized_csz.value;
 
     // process 'loc' attribute (after validation)
     if (prim_res.loc) {
@@ -164,6 +179,17 @@ async function update_a_csr(req_prim, resp_prim) {
         resp_prim.pc = { 'm2m:dbg': path[0] + ' => ' + message.replace(/"/g, '') };
         return;
     }
+
+    // Same normalization as create_a_csr -- an UPDATE can carry a MIME spelling of csz too.
+    const normalized_csz = normalize_serializations(prim_res.csz);
+    if (normalized_csz.error) {
+        resp_prim.rsc = enums.rsc_str['BAD_REQUEST'];
+        resp_prim.pc = {
+            'm2m:dbg': `csz => '${normalized_csz.error}' is not a serialization this CSE recognises (xml, json, cbor)`,
+        };
+        return;
+    }
+    prim_res.csz = normalized_csz.value;
 
     try {
         const db_res = await CSR.findByPk(ri);

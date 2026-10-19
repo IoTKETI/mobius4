@@ -31,6 +31,7 @@ const { Client } = require("pg");
 const config = require("config");
 const { request, CSE_BASE } = require("./helpers/onem2m");
 const { startServer } = require("./helpers/server");
+const { classify_create_error } = require("../cse/create-error");
 
 const BROKEN_DB = "mobius4_test_db_failure";
 
@@ -149,4 +150,46 @@ test("the CSEBase retrieve does not report a database failure as access denied",
 
   assert.notEqual(res.rsc, "4103", "a connection fault is not a privileges problem");
   assert.equal(res.rsc, "5000");
+});
+
+// classify_create_error unit tests -- no server needed, so these do not touch srv/admin above.
+// This is the ACME scenario (M2): csz sent as MIME types overflowed the VARCHAR(10) column and
+// Postgres's own wording came back in m2m:dbg. Now that cse/resources/csr.js and ae.js normalize
+// csz before it reaches the database, this SQLSTATE should not occur in practice for csz -- but
+// classify_create_error has to stop leaking it regardless of which column or value produced it.
+test("classify_create_error maps a class-22 SQLSTATE to a fixed message, not the database's own text", () => {
+  const err = {
+    name: "SequelizeDatabaseError",
+    original: {
+      code: "22001",
+      message: "value too long for type character varying(10)",
+    },
+  };
+
+  const { rsc, dbg } = classify_create_error(err);
+
+  assert.equal(rsc, 4000);
+  assert.equal(dbg, "an attribute value does not fit what this CSE can store");
+  assert.doesNotMatch(dbg, /value too long|character varying/, "the database's own wording must not reach the client");
+});
+
+test("classify_create_error maps a non-class-22 database error to the generic storage message", () => {
+  const err = {
+    name: "SequelizeDatabaseError",
+    original: { code: "42601", message: "syntax error at or near \"x\"" },
+  };
+
+  const { rsc, dbg } = classify_create_error(err);
+
+  assert.equal(rsc, 4000);
+  assert.equal(dbg, "the request could not be stored");
+});
+
+test("classify_create_error leaves a non-database error's message untouched", () => {
+  const err = new TypeError("Cannot read properties of undefined (reading 'foo')");
+
+  const { rsc, dbg } = classify_create_error(err);
+
+  assert.equal(rsc, 4000);
+  assert.equal(dbg, err.message, "a bug, not a database rejection, still reports its own message");
 });

@@ -37,6 +37,25 @@ function is_db_failure(err) {
     return message.startsWith('Connection terminated');
 }
 
+// A SQLSTATE is always exactly 5 characters (the PostgreSQL manual, appendix A). Used below to
+// tell a database rejection from an ordinary validation failure when the error is neither a
+// unique violation nor one of the DB_FAILURE_NAMES/_PG_CLASSES above.
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+function get_sqlstate(err) {
+    const code = err?.code ?? err?.original?.code ?? err?.parent?.code;
+    return typeof code === 'string' && SQLSTATE_PATTERN.test(code) ? code : null;
+}
+
+// Whether an error came from the database at all, as opposed to a bug or an assertion elsewhere
+// in the request path. Sequelize's own error classes (SequelizeDatabaseError and friends) all
+// start with "Sequelize"; a raw node-postgres error carries no such name but does carry a
+// SQLSTATE, which nothing outside a database connection produces.
+function is_db_error(err) {
+    const name = err?.name ?? '';
+    return name.startsWith('Sequelize') || get_sqlstate(err) !== null;
+}
+
 /**
  * Classifies an error thrown while creating a resource.
  *
@@ -70,6 +89,24 @@ function classify_create_error(err) {
         return {
             rsc: enums.rsc_str['INTERNAL_SERVER_ERROR'],
             dbg: err?.message,
+        };
+    }
+
+    // Everything else that reaches here used to answer 4000 with err.message verbatim, which is
+    // how a database's own wording -- "value too long for type character varying(10)", when
+    // ACME's MIME-spelled csz slipped past validation -- ended up in a client-facing m2m:dbg.
+    // TS-0004:6.6.2 reserves 4xxx for a fault in the request as the Originator could describe
+    // it; a column's storage width is an implementation detail the Originator never sent and
+    // cannot act on, so it is not shown. A non-database error (a thrown assertion, a bug) still
+    // gets its own message -- there is no schema leak to guard against there, and swallowing it
+    // would make the bug harder to find.
+    if (is_db_error(err)) {
+        const sqlstate = get_sqlstate(err);
+        return {
+            rsc: enums.rsc_str['BAD_REQUEST'],
+            dbg: sqlstate?.slice(0, 2) === '22'
+                ? 'an attribute value does not fit what this CSE can store'
+                : 'the request could not be stored',
         };
     }
 
