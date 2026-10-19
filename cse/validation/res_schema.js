@@ -171,6 +171,11 @@ const csr_create_schema = Joi.object().keys({
     cst: Joi.number().integer().min(1).max(3).optional(),
     poa: Joi.array().optional().items(Joi.string()),
     nl: Joi.string().optional(),
+    // TS-0004:7.4.4.1 table 7.4.4.1-1 marks descendantCSEs O on Create. ACME, registering as an
+    // MN-CSE with no descendants yet, sends "dcse": [] on its own registration -- an empty array
+    // is accepted here and turned into null in cse/resources/csr.js, not rejected, even though
+    // the XSD type (m2m:listOfM2MID) has minLength 1. See the create_a_csr comment for why.
+    dcse: Joi.array().optional().items(Joi.string()),
 });
 
 const csr_update_schema = Joi.object().keys({
@@ -191,6 +196,10 @@ const csr_update_schema = Joi.object().keys({
     csz: Joi.array().optional().items(Joi.string()).allow(null),
     poa: Joi.array().optional().items(Joi.string()),
     nl: Joi.string().optional(),
+    // TS-0001:9.6.4 has the registree update descendantCSEs whenever one of its own descendants
+    // registers or de-registers, which can shrink the list to empty or clear it entirely -- so
+    // UPDATE has to accept both an array and null, unlike CREATE's array-only shape above.
+    dcse: Joi.array().optional().items(Joi.string()).allow(null),
 });
 
 const cnt_create_schema = Joi.object().keys({

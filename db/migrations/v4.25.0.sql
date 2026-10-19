@@ -1,0 +1,28 @@
+-- Mobius4 v4.25.0 Migration
+-- Description: Add <remoteCSE>.descendantCSEs (dcse) and route through it
+--
+-- Why this is needed
+-- -------------------
+-- TS-0004:7.3.2.6 has the receiving CSE check "whether the CSE-ID in the To parameter of the
+-- primitive matches either the CSE-ID attribute or one of the CSE-IDs in the descendantCSEs
+-- attribute of the <remoteCSE>" before giving up and answering NOT_FOUND. Mobius4 had no column
+-- for descendantCSEs at all, so a registree sending it (TS-0001:9.6.4, TS-0004:7.4.4.1 mark it O
+-- on Create and Update) was rejected outright with 4000 "dcse is not allowed", and even once that
+-- is fixed a request aimed at a grandchild CSE registered only with the registree -- not with
+-- this CSE -- has nowhere to be matched without this column.
+--
+-- Without this migration, v4.25.0 cannot even read back a <remoteCSE>: models/csr-model.js now
+-- declares a `dcse` field, and every RETRIEVE/UPDATE of an existing csr row selects it. On a
+-- database that has not run this migration, the column does not exist and every request that
+-- touches a <remoteCSE> fails.
+--
+-- ALTER TABLE ... ADD COLUMN with no default is fast and does not rewrite existing rows: every
+-- <remoteCSE> that already exists gets dcse = NULL, meaning "no known descendants", which is
+-- what it already behaved as (routing only ever matched csi before this release). Nothing
+-- currently running changes behaviour because of this migration by itself.
+--
+-- IF NOT EXISTS makes this safe to run more than once: a second run is a no-op.
+--
+-- A fresh install does not need this file: db/init.js creates the column directly.
+
+ALTER TABLE csr ADD COLUMN IF NOT EXISTS dcse VARCHAR(255)[];

@@ -585,7 +585,8 @@ async function create_tables(client) {
                 rr BOOLEAN NOT NULL,
                 csz VARCHAR(10)[],
                 srv VARCHAR(10)[],
-                loc GEOMETRY(GEOMETRY, 4326)
+                loc GEOMETRY(GEOMETRY, 4326),
+                dcse VARCHAR(${len.entity_id})[]
             );
         `);
 

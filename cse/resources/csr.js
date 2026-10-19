@@ -86,6 +86,14 @@ async function create_a_csr(req_prim, resp_prim) {
         cst: prim_res.cst || null,
         nl: prim_res.nl || null,
         csz: prim_res.csz || null,
+        // TS-0004:7.4.4.1 marks descendantCSEs O on Create; TS-0001:9.6.4 is the normative
+        // definition (set by the registree, listing the CSE-IDs of its own descendant CSEs).
+        // ACME sends "dcse": [] when it has no descendants yet (observed on every one of its
+        // registrations) -- the XSD type m2m:listOfM2MID has minLength 1, but refusing an empty
+        // list would re-block the exact registration this feature exists to accept (the same
+        // tolerant-receiver principle as dev-tool DEC-135), so an empty or absent list is stored
+        // as null rather than rejected.
+        dcse: (Array.isArray(prim_res.dcse) && prim_res.dcse.length > 0) ? prim_res.dcse : null,
     };
 
     try {
@@ -156,6 +164,7 @@ async function retrieve_a_csr(req_prim, resp_prim) {
         if (db_res.poa) csr_obj['m2m:csr'].poa = db_res.poa;
         if (db_res.nl) csr_obj['m2m:csr'].nl = db_res.nl;
         if (db_res.csz) csr_obj['m2m:csr'].csz = db_res.csz;
+        if (db_res.dcse) csr_obj['m2m:csr'].dcse = db_res.dcse;
         if (db_res.loc) csr_obj['m2m:csr'].loc = get_loc_attribute(db_res.loc);
     } catch (err) {
         logger.error({ err }, 'retrieve_a_csr failed');
@@ -214,6 +223,14 @@ async function update_a_csr(req_prim, resp_prim) {
         if (prim_res.rr) db_res.rr = prim_res.rr;
         if (prim_res.csz) db_res.csz = prim_res.csz;
         if (prim_res.srv) db_res.srv = prim_res.srv;
+        // TS-0001:9.6.4 has the registree update descendantCSEs "whenever a Remote CSE registers
+        // or de-registers" -- the new list replaces the old one wholesale rather than merging,
+        // since that is the one place the registree's own bookkeeping is authoritative. An empty
+        // array or an explicit null both mean "no known descendants any more" and are stored as
+        // null, same as on Create.
+        if (prim_res.dcse !== undefined) {
+            db_res.dcse = (Array.isArray(prim_res.dcse) && prim_res.dcse.length > 0) ? prim_res.dcse : null;
+        }
 
         // delete optional attributes if they are null in the request
         // universal/common attributes

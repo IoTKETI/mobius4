@@ -1,5 +1,6 @@
 const config = require("config");
 const axios = require('axios');
+const { Op } = require('sequelize');
 const { JSONPath } = require("jsonpath-plus");
 const logger = require("../logger").forFile(__filename);
 
@@ -623,8 +624,41 @@ async function request_forwarding(req_prim, shortest_to) {
 
 
   // step2: find the nextCSE among <csr> resources
+  //
+  // TS-0004:7.3.2.6: the receiver "checks each of its <remoteCSE> resources to find whether the
+  // CSE-ID in the To parameter of the primitive matches either the CSE-ID attribute or one of
+  // the CSE-IDs in the descendantCSEs attribute of the <remoteCSE> resource. If a match is
+  // found, the CSE shall retarget the request to the pointOfAccess of the matching <remoteCSE>
+  // resource." So a direct csi match is tried first (the common case -- the target registered
+  // directly with this CSE), and only once that fails do we look for a <remoteCSE> that knows
+  // the target as one of its own descendants (e.g. a grandchild registered with an MN-CSE that
+  // is itself registered here). target_cse_id is SP-relative (leading '/'); a descendantCSEs
+  // entry may instead be written in Absolute form (sp_id + CSE-ID), so both spellings are tried.
+  let csr_res = await CSR.findOne({ where: { csi: target_cse_id } });
 
-  const csr_res = await CSR.findOne({ where: { csi: target_cse_id } });
+  if (!csr_res) {
+    const absolute_target_cse_id = config.cse.sp_id + target_cse_id;
+    const candidates = await CSR.findAll({
+      where: {
+        [Op.or]: [
+          { dcse: { [Op.contains]: [target_cse_id] } },
+          { dcse: { [Op.contains]: [absolute_target_cse_id] } },
+        ],
+      },
+    });
+
+    if (candidates.length > 1) {
+      // The standard sets no precedence between <remoteCSE> resources that both claim the same
+      // descendant, so this is a real ambiguity rather than a bug -- logged so it is visible,
+      // not silently resolved.
+      logger.warn(
+        { targetCseId: target_cse_id, candidates: candidates.map((c) => c.csi) },
+        'more than one <remoteCSE> lists this target in descendantCSEs; using the first (TS-0004:7.3.2.6 sets no precedence)'
+      );
+    }
+    csr_res = candidates[0];
+  }
+
   if (!csr_res) {
     resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
     resp_prim.pc = { 'm2m:dbg': 'CSR resource not found' };

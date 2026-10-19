@@ -10,6 +10,7 @@ const CSR = sequelize.define('csr', {
   cst: DataTypes.INTEGER,
   csz: DataTypes.ARRAY(DataTypes.STRING),
   ct: DataTypes.STRING(20),
+  dcse: DataTypes.ARRAY(DataTypes.STRING),
   et: DataTypes.STRING(20),
   int_cr: DataTypes.STRING,
   lbl: DataTypes.ARRAY(DataTypes.STRING),
