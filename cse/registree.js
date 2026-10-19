@@ -7,6 +7,7 @@ const registrar = config.cse.registrar;
 
 const hostingCSE = require('./hostingCSE');
 const reqPrim = require('./reqPrim');
+const descendants = require('./descendants');
 
 
 exports.registree = async function () {
@@ -29,6 +30,17 @@ exports.registree = async function () {
             srv: registree.versions
         }
     };
+    // CSEs that registered with us before a restart are still below us; TS-0001:9.6.4 has the
+    // registree set descendantCSEs when it registers. Left out when there are none -- the list
+    // type has minLength 1.
+    // A failure to read them must not cost the registration itself; the next report sends the
+    // list anyway.
+    try {
+        const dcse = await descendants.compute_descendants();
+        if (dcse) body['m2m:csr'].dcse = dcse;
+    } catch (err) {
+        logger.warn({ err }, 'could not read local <remoteCSE> resources; registering without descendantCSEs');
+    }
     // Registration is an outbound request like any other. Without a timeout an unreachable
     // registrar held this call open, and it runs at startup.
     const response = await axios.post(url, body, { headers,
@@ -36,6 +48,13 @@ exports.registree = async function () {
 
     if (response.status === 201) {
         logger.info({ registrarUrl: url }, 'remoteCSE resource created on registrar');
+        // The registrar names our <remoteCSE> (no rn is sent), so its resource ID from the
+        // response is the only address we have for the descendantCSEs updates that follow
+        // (TS-0004:7.4.4.2.1 Recv-6.5). Sent as a CSE-relative unstructured ID, which the
+        // registrar resolves on its own.
+        const ri = response.data?.['m2m:csr']?.ri;
+        if (ri) descendants.set_own_csr_ri(ri);
+        else logger.warn({ registrarUrl: url }, 'registrar answered 201 without a resource ID; descendantCSEs will not be reported');
     }
     else {
         logger.warn({ registrarUrl: url, status: response.status }, 'remoteCSE creation on registrar failed');

@@ -15,6 +15,7 @@ const { req_prim_schema } = require("./validation/prim_schema");
 const Lookup = require('../models/lookup-model');
 const CSR = require('../models/csr-model');
 const pendingCreates = require('./pending-creates');
+const descendants = require('./descendants');
 
 const hostingCSE = require("./hostingCSE");
 const cnt = require("./resources/cnt");
@@ -657,6 +658,23 @@ async function request_forwarding(req_prim, shortest_to) {
       );
     }
     csr_res = candidates[0];
+  }
+
+  // TS-0004:7.3.2.6, the two cases for a CSE that is not the IN-CSE: no match and "the CSE
+  // received the request from an AE or a descendant CSE" -> retarget to the registrar; no match
+  // and the request came from the registrar -> NOT_FOUND, never sent back up. From was turned
+  // into SP-relative or Absolute form above, so an AE of ours shows our CSE-ID as its prefix
+  // and a request from below shows a descendant's. The IN-CSE has no registrar and keeps the
+  // NOT_FOUND below.
+  if (!csr_res && descendants.is_registree()) {
+    const below = await descendants.compute_descendants();
+    if (descendants.is_from_below(req_prim.fr, below)) {
+      csr_res = await CSR.findOne({ where: { csi: config.cse.registrar.cse_id } });
+      if (csr_res) {
+        logger.debug({ targetCseId: target_cse_id, registrar: csr_res.csi },
+          'no <remoteCSE> matches the target; retargeting to the registrar');
+      }
+    }
   }
 
   if (!csr_res) {

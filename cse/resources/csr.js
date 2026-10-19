@@ -7,6 +7,7 @@ const { classify_create_error } = require('../create-error');
 const { normalize_serializations } = require('../serializations');
 const CSR = require('../../models/csr-model');
 const Lookup = require('../../models/lookup-model');
+const descendants = require('../descendants');
 
 const logger = require('../../logger').forFile(__filename);
 
@@ -116,6 +117,10 @@ async function create_a_csr(req_prim, resp_prim) {
         const tmp_req = { ri }, tmp_resp = {};
         await retrieve_a_csr(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
+
+        // A CSE registered with us. If we are registered in turn, our registrar has to learn of
+        // it (TS-0004:7.4.4.2.1 Recv-6.5). Does nothing on an IN-CSE; never waited on.
+        descendants.on_local_csr_change(csr_res.csi);
     } catch (err) {
         logger.error({ err }, 'create_a_csr failed');
         // A name lost to a concurrent create is a conflict, not a bad request.
@@ -254,6 +259,10 @@ async function update_a_csr(req_prim, resp_prim) {
         const tmp_req = { ri }, tmp_resp = {};
         await retrieve_a_csr(tmp_req, tmp_resp);
         resp_prim.pc = tmp_resp.pc;
+
+        // A child's descendants changed, so ours did (TS-0004:7.4.4.2.3 Recv-6.5). Only when
+        // the UPDATE touched dcse -- a poa or label change leaves the list as it was.
+        if (prim_res.dcse !== undefined) descendants.on_local_csr_change(db_res.csi);
     } catch (err) {
         resp_prim.rsc = enums.rsc_str['NOT_FOUND'];
         resp_prim.pc = { 'm2m:dbg': 'CSR resource not found' };

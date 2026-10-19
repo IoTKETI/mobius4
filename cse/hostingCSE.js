@@ -899,6 +899,13 @@ async function delete_a_res(req_prim, resp_prim) {
 	noti.check_and_send_noti(req_prim, tmp_resp, "delete")
 		.catch(err => logger.error({ err }, 'check_and_send_noti failed'));
 
+	// A CSE de-registered from us. If we are registered in turn, our registrar has to drop it
+	// from our descendantCSEs (TS-0004:7.4.4.2.4 Recv-6.5). Does nothing on an IN-CSE; the
+	// report is never waited on, so the DELETE answers the same whether or not it gets through.
+	if (req_prim.to_ty === 16 && tmp_resp.pc) {
+		require('./descendants').on_local_csr_change(tmp_resp.pc['m2m:csr']?.csi);
+	}
+
 	// Deleting a <cin> shrinks the parent <cnt>'s currentByteSize by that instance's contentSize.
 	// (TS-0004:7.4.7.2.4 — the counters track the instances that are actually there.)
 	if (req_prim.to_ty === 4 && req_prim.int_cr_req !== true) {
@@ -2130,6 +2137,13 @@ async function expired_resource_cleanup() {
 			await delete_resources([child_res]);
 		}));
 	}));
+
+	// An expired <remoteCSE> is a de-registration as far as our registrar is concerned
+	// (TS-0004:7.4.4.2.4 Recv-6.5). One report covers every one that went in this sweep, since
+	// each report sends the whole list as it now stands.
+	if (expired_res_list.some((res) => res.ty === 16)) {
+		require('./descendants').on_local_csr_change();
+	}
 
 	return expired_res_list;
 }
