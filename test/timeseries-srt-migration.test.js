@@ -3,12 +3,20 @@
 // against an isolated database, not the shared test one, the same way test/db-failure.test.js
 // keeps its schema-breaking work off the database every other test file shares.
 //
-// db/init.js's create_cb only runs when no <CSEBase> row exists yet, so config/default.json's
-// cse.supported_resource_types (which now lists 29 and 30) only reaches an upgraded deployment's
-// <CSEBase> through this migration file, not through the application code every other test in
-// this repo exercises. Simulating "a deployment that predates ty 29/30" means writing the row
-// directly, then running the actual migration file against it -- not a hand-copied restatement of
-// its UPDATE, so this cannot silently drift from what operators actually run.
+// db/init.js's create_cb only runs when no <CSEBase> row exists yet, so at the time this
+// migration shipped, config/default.json's cse.supported_resource_types (which already listed
+// 29 and 30) only reached an upgraded deployment's <CSEBase> through this migration file, not
+// through the application code every other test in this repo exercises. Simulating "a
+// deployment that predates ty 29/30" means writing the row directly, then running the actual
+// migration file against it -- not a hand-copied restatement of its UPDATE, so this cannot
+// silently drift from what operators actually run.
+//
+// DEC-137 (mobius4-dev-tool) later made db/init.js's sync_cb_with_config() re-sync srt from
+// cse/resource-types.js's SUPPORTED_STANDARD_TYPES on every boot, which is a stronger fix for
+// the same upgrade problem this migration patched by hand -- but it would also overwrite this
+// test's hand-planted operator addition (999) wholesale rather than just adding what is
+// missing, so this file keeps applying the migration SQL directly against an isolated database
+// instead of restarting the app to exercise it.
 
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");

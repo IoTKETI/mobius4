@@ -24,8 +24,9 @@ const { create, retrieve, update, remove, createRoot, uniqueRn, CSE_BASE } = req
 // configuration that only exists inside a spawned server, and doing so passed locally while
 // failing in CI with 'Configuration property "cse.admin" is not defined'.
 const { NORM_RES_WITHOUT_ACPI } = require("../cse/parent-governed-types");
+const { SUPPORTED_STANDARD_TYPES } = require("../cse/resource-types");
 
-const SRT = config.get("cse.supported_resource_types");
+const SRT = SUPPORTED_STANDARD_TYPES;
 const TY_SMD = 24; // <semanticDescriptor>
 const TY_DAC = 34; // <dynamicAuthorizationConsultation>
 
@@ -45,8 +46,8 @@ after(async () => {
 
 test("the two unimplemented resource types are absent from the CSE's own srt", async () => {
   // The premise the answer is derived from, asserted rather than assumed. If either type is ever
-  // implemented it goes into supported_resource_types, and this test failing is the reminder that
-  // the ones below need rewriting rather than deleting.
+  // implemented it goes into SUPPORTED_STANDARD_TYPES (cse/resource-types.js), and this test
+  // failing is the reminder that the ones below need rewriting rather than deleting.
   assert.ok(!SRT.includes(TY_SMD), "24 must not be advertised while cse/resources/smd.js is absent");
   assert.ok(!SRT.includes(TY_DAC), "34 must not be advertised while cse/resources/dac.js is absent");
 });
@@ -67,7 +68,7 @@ for (const [ty, name] of [[TY_SMD, "<semanticDescriptor>"], [TY_DAC, "<dynamicAu
 
 test("the TR-0071 AI/ML types still create, though they are absent from srt too", async () => {
   // The regression the first attempt at this fix caused, and the reason the guard names types
-  // explicitly instead of deriving them from cse.supported_resource_types. srt is limited to
+  // explicitly instead of deriving them from srt. srt is limited to
   // oneM2M-standard types on purpose, so 101-107 are not in it -- while being implemented and
   // client-creatable. Deriving "unimplemented" from srt refused every one of them with 5001.
   assert.ok(!SRT.includes(101), "the premise: <modelRepo> is not advertised in srt either");

@@ -523,15 +523,19 @@ const sub_parent_res_types = [
 
 ---
 
-### 9. `config/default.json` — Add to supportedResourceType list (conditional)
+### 9. `cse/resource-types.js` — Add to SUPPORTED_STANDARD_TYPES (conditional)
 
-Only needed for standard resources that should be advertised in the CSEBase `srt` attribute:
+Only needed for standard resources that should be advertised in the CSEBase `srt` attribute
+(TS-0001:9.6.3). This is a code constant, not configuration (DEC-137, mobius4-dev-tool) — `srt`
+is implementation fact, and db/init.js writes it into every `<CSEBase>` (new or existing) on the
+next boot, so adding the line here is the whole upgrade step:
 
-```json
-"supported_resource_types": [1, 2, 3, 4, 5, 9, 16, 23, 108]
+```javascript
+const SUPPORTED_STANDARD_TYPES = Object.freeze([1, 2, 3, 4, 5, 9, 16, 23, 28, 29, 30, 108]);
 ```
 
-Non-standard (proprietary extension) resources are generally not added here.
+Non-standard (proprietary extension) and TR-0071 draft resources are generally not added here —
+see the comment above `UNIMPLEMENTED_TYPES` in `cse/hostingCSE.js` for the boundary.
 
 ---
 

@@ -11,6 +11,7 @@ const metrics = require('../metrics');
 const { Op, Sequelize } = require('sequelize');
 const { not_obsolete_where } = require('./utils');
 const { COMPARISON_TAGS } = require('./enc-conditions');
+const resource_types = require('./resource-types');
 const Lookup = require('../models/lookup-model');
 // oneM2M standard resources
 const ACP = require('../models/acp-model');
@@ -1695,17 +1696,20 @@ function get_mem_size(obj) {
 // is absent. 5001 NOT_IMPLEMENTED is the code for the latter, and the two call for opposite
 // responses from a client: stop asking, or retry later.
 //
-// The list is written out rather than derived from cse.supported_resource_types, which was the
-// first attempt and is wrong. srt answers "which oneM2M-standard types does this CSE support" and
-// is published as the <CSEBase>'s srt attribute; the TR-0071 AI/ML types (101-107) are absent from
-// it by design, because they are R5 draft rather than standard -- while being fully implemented
-// and, for most of them, client-creatable. Deriving from srt therefore refused every <modelRepo>
-// and <mlModel> create with 5001. The test suite caught it, which is the argument for the two
-// tests in test/unimplemented-and-clearing.test.js that pin the boundary in both directions.
+// The list is written out rather than derived from srt (cse/resource-types.js's
+// SUPPORTED_STANDARD_TYPES), which was the first attempt and is wrong. srt answers "which
+// oneM2M-standard types does this CSE support"; the TR-0071 AI/ML types (101-107) are absent
+// from it by design, because they are R5 draft rather than standard -- while being fully
+// implemented and, for most of them, client-creatable. Deriving "unimplemented" from srt
+// therefore refused every <modelRepo> and <mlModel> create with 5001. The test suite caught it,
+// which is the argument for the two tests in test/unimplemented-and-clearing.test.js that pin
+// the boundary in both directions.
 //
-// So this names exactly the types whose implementation is missing. Adding one is a line here;
-// implementing one is deleting a line here and adding a dispatch arm.
-const UNIMPLEMENTED_TYPES = new Set([24, 34]);
+// So this names exactly the types whose implementation is missing. Adding one is a line here
+// (cse/resource-types.js's UNIMPLEMENTED_TYPES -- kept there rather than here so a test can
+// check it against SUPPORTED_STANDARD_TYPES without requiring this file, see that module's
+// comment); implementing one is deleting the line there and adding a dispatch arm.
+const UNIMPLEMENTED_TYPES = new Set(resource_types.UNIMPLEMENTED_TYPES);
 
 function unsupported_resource_type(ty) {
 	return UNIMPLEMENTED_TYPES.has(Number(ty));
@@ -2174,4 +2178,5 @@ module.exports = {
 	expired_resource_cleanup,
 	virtual_res_names,
 	invalidateLookupCache,
+	UNIMPLEMENTED_TYPES,
 }

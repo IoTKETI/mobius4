@@ -1,6 +1,7 @@
 const config = require('config');
 const moment = require('moment');
 const { generate_ri } = require('../cse/utils');
+const { SUPPORTED_STANDARD_TYPES } = require('../cse/resource-types');
 const logger = require('../logger').forFile(__filename);
 const timestamp_format = config.get('cse.timestamp_format');
 const len = config.get('length');
@@ -647,18 +648,33 @@ function arrays_equal(a, b) {
     return a.every((v, i) => v === b[i]);
 }
 
-// Brings an existing <CSEBase>'s poa, srv and csz in step with the current configuration.
+// Resource types are a set, not an ordered preference list the way csz and poa are, so what
+// matters for srt is membership, not position -- a deployment's existing srt and the constant
+// are compared as sorted-ascending number arrays rather than position-by-position.
+function sorted_numeric(arr) {
+    return [...arr].map(Number).sort((a, b) => a - b);
+}
+
+// Brings an existing <CSEBase>'s poa, srv, csz and srt in step with the current configuration
+// (srt in step with SUPPORTED_STANDARD_TYPES, which is code, not configuration -- see
+// cse/resource-types.js).
 //
 // Until now, once a <CSEBase> row existed, the branch above did nothing but log it. A
 // deployment that changed cse.poa (or cse.versions / cse.serializations) in its config and
 // restarted kept whatever create_cb() wrote the first time it ever came up -- remote CSEs and
 // AEs that read this CSE's pointOfAccess from the <CSEBase> kept dialling the stale address.
+// srt had the same problem for a different reason: it used to come from
+// cse.supported_resource_types and was only ever written at create_cb time, so an upgrade that
+// implemented a new resource type never advertised it without a hand-written SQL UPDATE
+// (db/migrations/v4.16.0.sql for ty 29/30) -- and v4.5.0 added ty 28 with no migration at all,
+// so deployments that predate it still answer an srt without 28 (BACKLOG-137). Now srt is kept
+// in step here on every boot, the same as poa/srv/csz.
 //
 // csi, rn and cst are deliberately left alone: registered <remoteCSE>s and <AE>s find this CSE
 // by csi/rn, so changing either here would break every existing registration rather than just
-// correct this CSE's own advertised address. srt sync is deferred to BACKLOG-137.
+// correct this CSE's own advertised address.
 async function sync_cb_with_config(client, cb_ri) {
-    const result = await client.query('SELECT poa, srv, csz FROM cb WHERE ri = $1', [cb_ri]);
+    const result = await client.query('SELECT poa, srv, csz, srt FROM cb WHERE ri = $1', [cb_ri]);
     if (result.rows.length === 0) return;
     const current = result.rows[0];
 
@@ -666,6 +682,7 @@ async function sync_cb_with_config(client, cb_ri) {
         poa: config.cse.poa,
         srv: config.cse.versions,
         csz: config.cse.serializations,
+        srt: sorted_numeric(SUPPORTED_STANDARD_TYPES),
     };
 
     const changes = {};
@@ -675,7 +692,8 @@ async function sync_cb_with_config(client, cb_ri) {
         // than setting it to an empty array -- should be left as it was, not overwritten with
         // null.
         if (next === undefined) continue;
-        if (!arrays_equal(current[attr], next)) {
+        const currentValue = attr === 'srt' ? sorted_numeric(current[attr] || []) : current[attr];
+        if (!arrays_equal(currentValue, next)) {
             changes[attr] = { previous: current[attr], next };
         }
     }
@@ -721,7 +739,7 @@ async function create_cb(client) {
         lbl: ['Mobius4'],
         cst: config.cse.cse_type,
         csi: config.cse.cse_id,
-        srt: config.cse.supported_resource_types,
+        srt: sorted_numeric(SUPPORTED_STANDARD_TYPES),
         srv: config.cse.versions,
         nl: 'Mobius/nl', // this resource does not exist
         poa: config.cse.poa,

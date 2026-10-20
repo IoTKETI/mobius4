@@ -111,3 +111,24 @@ test("starts when every cse.poa entry has an allowed scheme", () => {
   });
   assert.equal(status, 0, "http and mqtt are both bindings this CSE implements");
 });
+
+// DEC-137 (mobius4-dev-tool): cse.supported_resource_types used to control srt; it no longer
+// does, since an operator must not be able to make the CSE advertise a type it does not
+// implement, or hide one it does, by editing config. A deployment that still sets it (carried
+// over from before v4.25.0) must keep starting -- it just stops doing anything.
+
+test("starts, but warns, when cse.supported_resource_types is still set", () => {
+  const { status, output } = runGuard({
+    cse: { admin: "an-identity-only-we-know", supported_resource_types: [1, 2, 3] },
+  });
+  assert.equal(status, 0, "a leftover config value must not block startup");
+  assert.match(output, /supported_resource_types/);
+  assert.match(output, /ignored since v4\.25\.0/i);
+});
+
+test("starts silently when cse.supported_resource_types is unset", () => {
+  const { status, output } = runGuard({ cse: { admin: "an-identity-only-we-know" } });
+  assert.equal(status, 0);
+  assert.doesNotMatch(output, /supported_resource_types/,
+    "a deployment that never set the key should get no warning about it");
+});

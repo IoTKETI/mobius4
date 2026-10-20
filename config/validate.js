@@ -137,9 +137,30 @@ function validate_poa(logger) {
     }
 }
 
+/**
+ * Warns when a deployment still sets cse.supported_resource_types.
+ *
+ * DEC-137 (mobius4-dev-tool): srt (TS-0001:9.6.3) now comes from the fixed list of
+ * oneM2M-standard types this CSE actually implements (cse/resource-types.js), written at
+ * create and kept in step on every boot (db/init.js's sync_cb_with_config), not from
+ * configuration -- an operator cannot make the CSE advertise a type it does not implement, or
+ * hide one it does, by editing a config value. A deployment whose config/local.json still sets
+ * this key (from before v4.25.0) is not refused -- the key simply no longer does anything.
+ */
+function validate_supported_resource_types(logger) {
+    if (!config.has('cse.supported_resource_types')) return;
+
+    logger.warn(
+        'cse.supported_resource_types is set but ignored since v4.25.0: the <CSEBase>\'s srt ' +
+        'now comes from the resource types this CSE actually implements ' +
+        '(cse/resource-types.js), not from configuration. This key can be removed.'
+    );
+}
+
 function validate_config(logger) {
     validate_admin_identity(logger);
     validate_poa(logger);
+    validate_supported_resource_types(logger);
 }
 
 module.exports = {

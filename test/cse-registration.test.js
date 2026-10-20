@@ -104,11 +104,12 @@ test("TP/oneM2M/CSE/REG/RET/008 — the <CSEBase> carries supportedResourceType 
 
   assert.ok(Array.isArray(cb.srt) && cb.srt.length > 0, `srt missing or empty: ${JSON.stringify(cb.srt)}`);
   assert.ok(Array.isArray(cb.poa) && cb.poa.length > 0, `poa missing or empty: ${JSON.stringify(cb.poa)}`);
-  // config/default.json's cse.supported_resource_types must actually include <timeSeries> (29)
+  // cse/resource-types.js's SUPPORTED_STANDARD_TYPES must actually include <timeSeries> (29)
   // and <timeSeriesInstance> (30), or a deployment advertises support it does not have (finding 1,
   // db/init.js's create_cb path -- see db/migrations/v4.16.0.sql for the matching upgrade path on
-  // a <CSEBase> that already existed before ty 29/30 shipped). A fresh test database always goes
-  // through create_cb, so this only exercises that path, not the migration's UPDATE.
+  // a <CSEBase> that already existed before ty 29/30 shipped, back when srt came from
+  // configuration rather than this constant). A fresh test database always goes through
+  // create_cb, so this only exercises that path, not the migration's UPDATE.
   assert.ok(cb.srt.includes(29), `srt must include 29 (<timeSeries>): ${JSON.stringify(cb.srt)}`);
   assert.ok(cb.srt.includes(30), `srt must include 30 (<timeSeriesInstance>): ${JSON.stringify(cb.srt)}`);
 });
