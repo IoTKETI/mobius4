@@ -1254,7 +1254,10 @@ accepted schemes are `http`, `https`, `mqtt`, `mqtts`, `coap`, `coaps`, `ws`, `w
 
 **Expect the `<CSEBase>` to change on first start.** Its `pointOfAccess`,
 `supportedReleaseVersions` and `contentSerialization` are now set from `cse.poa`, `cse.versions`
-and `cse.serializations` at every start. A deployment whose configuration changed since the
+and `cse.serializations` at every start, and its `supportedResourceType` from the types this
+version implements — a `<CSEBase>` created before v4.5.0 gains `28` (`<flexContainer>`).
+`cse.supported_resource_types` is no longer read; if your `config/local.json` sets it, delete it
+(the CSE starts anyway and warns). A deployment whose configuration changed since the
 `<CSEBase>` was created sees the new values — that is the point. Changes are logged at info with
 the previous value. If you edited those attributes in the database by hand, the configuration
 overwrites them.
@@ -1266,3 +1269,7 @@ overwrites them.
   returned in the short form (`json`). An unknown value is refused `4000` with a message naming it.
 - Requests addressed to a CSE that is a descendant of a registered CSE are forwarded instead of
   answered `4004`.
+- **MN-CSE and ASN-CSE deployments** (`cse_type` 2 or 3) now send their registrar an UPDATE of their
+  own `<remoteCSE>` whenever a CSE registers with them or goes away, and send requests for CSEs they
+  do not know up to the registrar. A registrar that refuses the UPDATE only produces a warning in
+  this CSE's log.

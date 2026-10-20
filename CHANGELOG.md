@@ -50,10 +50,29 @@ had no such attribute, so a registration carrying it was refused `4000 "dcse is 
   same descendant, the first is used and a warning is logged — the standard sets no precedence.
 - Unchanged: a target nobody claims still answers `4004`.
 
-What this release does **not** do: behave as an MN-CSE towards its own registrar. An MN-CSE should
-send an unmatched request up to its registrar and report its own descendants upward
-(`TS-0004:7.3.2.6`, `TS-0004:7.4.4.2.1`/`.3`/`.4`). Mobius4 running with `cse_type` 2 or 3 still
-answers `4004` and sends no `dcse`.
+### Added: behaving as an MN-CSE towards the registrar (`TS-0004:7.3.2.6`, `TS-0004:7.4.4.2.x`)
+
+With `cse_type` 2 or 3, Mobius4 now does the registree's half of the same procedure. Until now it
+registered once at startup and did nothing else towards its registrar.
+
+- **Reports its descendants.** When a CSE registers with it, updates its `descendantCSEs`, is
+  deleted, or expires, Mobius4 sends its registrar an UPDATE of its own `<remoteCSE>` carrying the
+  full list — every registree's CSE-ID plus their own descendants, the `<remoteCSE>` representing
+  the registrar excluded (`TS-0001:9.6.4`). The first registration carries the list too. The
+  standard leaves the shape of "the corresponding updates" open; the whole list is sent each time,
+  which matches how an Update of `dcse` is applied on the receiving side.
+- **Sends unmatched requests up.** A request for a CSE it does not know goes to its registrar when
+  it came from one of its own AEs or from a descendant, and is answered `4004` when it came from
+  above. Where a request came from is judged from `From` — each hop rewrites it into SP-relative
+  form, so it names the side the request started on.
+- **Does not bounce a request.** If the registrar still lists a descendant that has gone (a report
+  that failed, say), the registrar sends the request back down. Mobius4 recognises its own Request
+  Identifier coming back and answers `4004` instead of sending it up again.
+
+Known limits: an AE-ID starting with `S` and a `From` from another SP are not sent up. A client that
+re-sends a request with the same Request Identifier within twice the forwarding timeout of the
+first being sent up gets `4004`. Re-registering after a restart creates a second `<remoteCSE>` on a
+Mobius4 registrar, which keeps the old one's list until it expires.
 
 ### Fixed: `contentSerialization` given as media types was refused with a database error
 
@@ -98,9 +117,25 @@ compared with `cse.poa`, `cse.versions` and `cse.serializations`, updated if the
 change is logged at info with the previous value.
 
 `CSE-ID`, `resourceName` and `cseType` are never touched — registered CSEs and AEs find this CSE
-by them. `supportedResourceType` is not synchronised either, yet.
+by them.
 
-If you edited one of the three attributes in the database by hand, the configuration now
+### Changed: `supportedResourceType` lists what this CSE implements, and stays current
+
+`TS-0001:9.6.3` defines `srt` as "the resource types which are supported in the CSE". It came from
+the `cse.supported_resource_types` setting and was written only when the `<CSEBase>` was created, so
+an upgrade that implemented a type never advertised it: v4.16.0 needed a hand-run SQL to add
+`<timeSeries>` (29, 30), and v4.5.0 added `<flexContainer>` (28) with none — a `<CSEBase>` created
+before v4.5.0 still does not list 28.
+
+`srt` is now the list of standard types this CSE implements, kept in code
+(`cse/resource-types.js`) and checked by a test against the measured `features/capabilities.json`.
+It is written at creation and brought up to date at every start, like the three attributes above.
+The TR-0071 AI/ML types (101–107) stay out, as before: they are not standard resource types.
+
+**`cse.supported_resource_types` is removed.** A configuration that still sets it starts normally
+with a warning that the key is ignored.
+
+If you edited one of these attributes in the database by hand, the configuration now
 overwrites it on the next start.
 
 ## v4.24.5 (2026-09-03)
