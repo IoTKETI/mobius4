@@ -21,6 +21,23 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
+## [Unreleased]
+
+### Fixed: the creator of a resource with no `acpi` can give it one
+
+An Update carrying `accessControlPolicyIDs` on a resource that had none answered `5000`. The check
+for that Update looks for UPDATE in the `selfPrivileges` of the policies the resource currently
+references (`TS-0001:9.6.1.3.2`), and it iterated a list that was not there. With no current policy,
+the default access policy of the same clause now decides: the creator may set it, anyone else gets
+`4103`.
+
+### Fixed: a deleted policy in `acpi` no longer vetoes the others
+
+If one entry in a resource's `accessControlPolicyIDs` pointed at an `<accessControlPolicy>` that had
+been deleted, every request was refused, even when another listed policy granted it. Access is
+granted when at least one policy permits (`TS-0003:7.1.1`). A missing policy now simply permits
+nothing.
+
 ## v4.25.0 (2026-10-19)
 
 **Why MINOR**: a oneM2M attribute is added (`descendantCSEs` on `<remoteCSE>`) and request

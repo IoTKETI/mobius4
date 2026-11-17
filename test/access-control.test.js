@@ -498,3 +498,49 @@ test("a <timeSeriesInstance>'s creator loses access when the parent's policy sto
   const third = await retrieve(srv.baseUrl, tsiSid, { originator: THIRD_AE });
   assert.equal(third.rsc, "2000", "the new policy decides for the child, in both directions");
 });
+
+// ── Setting acpi on a resource that has none, and acpi entries that no longer resolve ──────────
+//
+// TS-0018 has no TP for either case. SEC/ACP/013_UPD comes closest — the creator updates its own
+// <AE> that has no acpi — but its request does not carry acpi, so it never reaches the path below.
+// Both tests are derived from the core spec instead.
+
+test("the creator of a resource with no acpi can give it one (default access policy)", async () => {
+  // TS-0001:9.6.1.3.2 asks for Update in a *current* selfPrivileges of the policies acpi
+  // references, and a resource with no acpi references none. The same clause says that, for such
+  // a resource, "the default policy shall provide unrestricted access only to the Originator of
+  // the successful resource creation request", and nothing else could ever attach a policy to it.
+  // This used to answer 5000: the acpi-update check iterated an acpi that was not there.
+  const cnt = await containerOwnedByOther(undefined);
+  const acp = await policyGranting(THIRD_AE, 2);
+
+  const byOther = await update(srv.baseUrl, cnt, { "m2m:cnt": { acpi: [acp] } },
+    { originator: THIRD_AE });
+  assert.equal(byOther.rsc, "4103", "someone who is not the creator must still be refused");
+
+  const byCreator = await update(srv.baseUrl, cnt, { "m2m:cnt": { acpi: [acp] } },
+    { originator: OTHER_AE });
+  assert.equal(byCreator.rsc, "2004", `the creator must be able to attach a policy: ${byCreator.raw.slice(0, 200)}`);
+
+  // and the policy now decides: THIRD_AE is named in it, the creator no longer is
+  assert.equal((await retrieve(srv.baseUrl, cnt, { originator: THIRD_AE })).rsc, "2000");
+  assert.equal((await retrieve(srv.baseUrl, cnt, { originator: OTHER_AE })).rsc, "4103");
+});
+
+test("an acpi entry whose policy was deleted does not veto the policies that remain", async () => {
+  // TS-0003:7.1.1: "authorization is granted if the request is evaluated to "Permit" for at least
+  // one privileges attribute". A policy that no longer exists permits nothing, but it cannot
+  // deny on behalf of the others either. This used to return false at the first missing policy.
+  const gone = await policyGranting(OTHER_AE, 2);
+  const kept = await policyGranting(THIRD_AE, 2);
+  const cnt = await containerOwnedByOther([gone, kept]);
+
+  const del = await remove(srv.baseUrl, gone);
+  assert.equal(del.rsc, "2002", `policy deletion failed: ${del.raw.slice(0, 200)}`);
+  acpsToClean.splice(acpsToClean.indexOf(gone), 1);
+
+  assert.equal((await retrieve(srv.baseUrl, cnt, { originator: THIRD_AE })).rsc, "2000",
+    "the remaining policy names THIRD_AE and must still grant");
+  assert.equal((await retrieve(srv.baseUrl, cnt, { originator: OTHER_AE })).rsc, "4103",
+    "the deleted policy was the only one naming OTHER_AE");
+});
