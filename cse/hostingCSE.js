@@ -1801,6 +1801,15 @@ async function access_decision(req_prim, resp_prim) {
 	if (req_prim.acpi_update === true) {
 		// using req_prim, get the 'acpi' attribute from the target resource
 		const acpi = JSONPath("$..acpi", temp_resp)[0];
+
+		// No current policy means no selfPrivileges to consult, and the default access policy
+		// governs instead (TS-0001:9.6.1.3.2): unrestricted access for the creator only. Without
+		// this, the creator could never attach a first policy to its own resource.
+		if (!acpi || acpi.length === 0) {
+			const int_cr = JSONPath("$..int_cr", temp_resp)[0];
+			return req_prim.fr == int_cr;
+		}
+
 		// using acpi, retrieve the ACP resource and get the 'pvs' attribute from the target resource
 		for (const acp_id of acpi) {
 			const ACP = require('../models/acp-model');
@@ -1985,8 +1994,11 @@ async function access_decision_acpi(originator, operation, acp_id_list) {
 				where: { ri: acp_ri },
 				attributes: ['pv']
 			});
+			// A policy that no longer exists permits nothing, but it must not deny on behalf of
+			// the others: access is granted if at least one privileges attribute permits
+			// (TS-0003:7.1.1).
 			if (!acp_model) {
-				return false;
+				continue;
 			}
 
 			const pv = acp_model.pv;
