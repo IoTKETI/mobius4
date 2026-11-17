@@ -1273,3 +1273,13 @@ overwrites them.
   own `<remoteCSE>` whenever a CSE registers with them or goes away, and send requests for CSEs they
   do not know up to the registrar. A registrar that refuses the UPDATE only produces a warning in
   this CSE's log.
+
+## v4.25.1
+
+Nothing required. Two access-control decisions change:
+
+- An Update that sets `accessControlPolicyIDs` on a resource that had none now succeeds for the
+  resource's creator (`2004`) and is refused for anyone else (`4103`). It used to fail with `5000`
+  for everyone but the administrator.
+- If `accessControlPolicyIDs` lists an `<accessControlPolicy>` that has since been deleted, the
+  remaining policies still decide. A request one of them grants used to be refused `4103`.

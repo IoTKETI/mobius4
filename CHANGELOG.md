@@ -21,7 +21,9 @@ SemVer, made concrete for this project:
 At release time, close off `[Unreleased]` as `## vX.Y.Z (YYYY-MM-DD)` and bump
 `package.json` along with it.
 
-## [Unreleased]
+## v4.25.1 (2026-11-17)
+
+**Why PATCH**: two access-control fixes; nothing is added and nothing needs to be done to upgrade.
 
 ### Fixed: the creator of a resource with no `acpi` can give it one
 
